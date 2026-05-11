@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-kubernetes-bootstrap-wiring
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-kubernetes-bootstrap-wiring
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-p
+data:
+  profile: |
+    M1-INSTANCE-P
+    Kubernetes provider bootstrap wiring
+  environment: |
+    WORKLOAD_PROVIDER=local
+    WORKLOAD_PROVIDER=kubernetes_rest
+    WORKLOAD_PROVIDER_APPLY_ENABLED=false
+    KUBERNETES_API_HOST=https://kubernetes.default.svc
+    KUBERNETES_BEARER_TOKEN=<service-account-token>
+    KUBERNETES_PROVIDER_FIELD_MANAGER=ani-workload-runtime
+  provider-binding: |
+    local provider remains default
+    kubernetes_rest wires KubernetesRESTClient through KubernetesProviderAdapter
+    WorkloadProviderDryRun
+    WorkloadProviderApply
+    WorkloadProviderStatusReader
+  safety: |
+    apply disabled by default
+    unsupported provider names must fail bootstrap

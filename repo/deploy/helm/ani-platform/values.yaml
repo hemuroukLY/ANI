@@ -1,0 +1,261 @@
+global:
+  namespace: ani-system
+  imageRegistry: harbor.ani.internal/ani
+  imagePullPolicy: IfNotPresent
+  profile: dev
+  networkPolicy:
+    enabled: true
+    defaultDeny: true
+
+infrastructure:
+  profiles:
+    dev:
+      description: Local developer profile using docker-compose or externally reachable dependencies.
+      installDependencies: false
+      requireExistingStorageClass: false
+    attachK8s:
+      description: Attach to an existing Kubernetes cluster and install ANI platform components only.
+      installDependencies: true
+      requireExistingStorageClass: true
+    offline:
+      description: Offline customer-site install using pre-mirrored images and packaged charts.
+      installDependencies: true
+      requireExistingStorageClass: true
+      requireImageMirror: true
+    clusterValidation:
+      description: Run cluster-side preflight checks before installing or upgrading ANI.
+      installDependencies: false
+      requireExistingStorageClass: true
+      requireImageMirror: false
+    gpuScheduling:
+      description: Enable GPU scheduling contracts for GPU Operator, HAMi, Volcano, and DCGM.
+      installDependencies: true
+      requireExistingStorageClass: true
+      requireGPUNodeLabels: true
+    gpuSchedulingE2E:
+      description: Run GPU scheduling preflight/e2e checks after GPU dependencies are installed.
+      installDependencies: false
+      requireExistingStorageClass: true
+      requireGPUNodeLabels: true
+    runtimeFoundation:
+      description: Enable workload runtime contracts for VM, container, GPU container, inference, notebook, sandbox, and batch instances.
+      installDependencies: false
+      requireExistingStorageClass: true
+    instanceFoundation:
+      description: Enable first-class instance object, lifecycle, network plane, and storage attachment contracts.
+      installDependencies: false
+      requireExistingStorageClass: true
+  kubernetes:
+    minVersion: "1.28.0"
+    targetVersion: "1.36.x"
+  cni:
+    preferred: kubeovn
+  postgresql:
+    mode: external
+    component: cloudnative-pg
+    chartVersion: "0.23.x"
+    rlsRequired: true
+    secretName: ani-bootstrap-placeholders
+    secretKey: database-url
+    migrationJob:
+      enabled: false
+      secretName: ani-bootstrap-placeholders
+      secretKey: database-url
+  nats:
+    mode: external
+    component: nats
+    chartVersion: "1.2.x"
+    jetstreamRequired: true
+    secretName: ani-bootstrap-placeholders
+    secretKey: nats-url
+  redis:
+    mode: external
+    component: redis
+    chartVersion: "19.x"
+    secretName: ani-bootstrap-placeholders
+    secretKey: redis-url
+  minio:
+    mode: external
+    component: minio
+    chartVersion: "5.x"
+    buckets:
+      models: ani-models
+      datasets: ani-datasets
+      kbDocs: ani-kb-docs
+  milvus:
+    mode: external
+    component: milvus
+    chartVersion: "4.x"
+  harbor:
+    mode: external
+    component: harbor
+    chartVersion: "1.15.x"
+    requiredForRuntime: false
+  validation:
+    enabled: false
+    preflightJob:
+      enabled: false
+      image: bitnami/kubectl:1.30
+      serviceAccountName: ani-cluster-preflight
+      requiredCRDs:
+        - vpcs.kubeovn.io
+        - subnets.kubeovn.io
+      requiredNamespaces:
+        - ani-system
+      requiredSecrets:
+        - namespace: ani-system
+          name: ani-bootstrap-placeholders
+      requiredStorageClasses: []
+  gpu:
+    enabled: false
+    nodeSelector:
+      ani.kubercloud.io/gpu-node: "true"
+    operator:
+      provider: nvidia-gpu-operator
+      mode: external
+      chartVersion: latest
+    virtualization:
+      provider: hami
+      mode: external
+      chartVersion: "2.4.x"
+      migRequired: false
+      vgpuRequired: true
+    scheduler:
+      provider: volcano
+      mode: external
+      chartVersion: "1.10.x"
+      queues:
+        inference:
+          name: ani-inference
+          weight: 10
+        training:
+          name: ani-training
+          weight: 5
+    telemetry:
+      provider: dcgm-exporter
+      mode: external
+      chartVersion: latest
+      scrapeRequired: true
+    e2ePreflight:
+      enabled: false
+      image: bitnami/kubectl:1.30
+      serviceAccountName: ani-gpu-e2e-preflight
+      requireHAMIAllocatable: false
+      requireDCGMService: false
+    inventory:
+      enabled: false
+      provider: kubernetes-labels
+      supportedVendors:
+        - nvidia
+        - huawei
+        - hygon
+      requiredLabels:
+        - ani.kubercloud.io/gpu-node
+        - ani.kubercloud.io/gpu-vendor
+        - ani.kubercloud.io/gpu-model
+        - ani.kubercloud.io/gpu-pool
+        - ani.kubercloud.io/gpu-kernel-compatible
+  runtime:
+    enabled: false
+    providers:
+      vm:
+        enabled: false
+        provider: kubevirt
+        mode: external
+      container:
+        enabled: true
+        provider: kubernetes
+      gpuContainer:
+        enabled: true
+        provider: kubernetes-volcano-hami
+      inference:
+        enabled: false
+        provider: ani-inference-operator
+      notebook:
+        enabled: false
+        provider: kubernetes
+      agentSandbox:
+        enabled: true
+        provider: kubernetes-networkpolicy
+      batchJob:
+        enabled: true
+        provider: kubernetes-job
+    defaultIsolation:
+      tenantNetworkPolicy: true
+      ingressViaGateway: true
+      egressInternet: false
+  instances:
+    enabled: false
+    providerExecution:
+      provider: local
+      applyEnabled: false
+      lifecycleProvider: local
+      lifecycleApplyEnabled: false
+      opsProvider: local
+      opsEnabled: false
+      kubernetes:
+        apiHost: https://kubernetes.default.svc
+        bearerTokenSecret: ani-workload-runtime-token
+        fieldManager: ani-workload-runtime
+    lifecycle:
+      supportedActions:
+        - create
+        - start
+        - stop
+        - restart
+        - resize
+        - delete
+    networkPlanes:
+      tenantVPC:
+        enabled: true
+        provider: kubeovn
+      foundationMesh:
+        enabled: true
+        provider: networkpolicy
+      storage:
+        enabled: true
+        provider: networkpolicy
+      management:
+        enabled: true
+        provider: ani-gateway
+      publicIngress:
+        enabled: true
+        provider: ani-gateway
+        defaultEnabled: false
+    storageAttachments:
+      rootDisk:
+        defaultStorageClass: ani-block
+      dataDisk:
+        defaultStorageClass: ani-block
+      sharedPVC:
+        defaultStorageClass: ani-shared
+      objectFuse:
+        enabled: true
+      ephemeral:
+        enabled: true
+
+services:
+  gateway:
+    enabled: true
+    image:
+      repository: ani-gateway
+      tag: v0.1.0-dev
+    port: 8080
+  auth:
+    enabled: true
+    image:
+      repository: auth-service
+      tag: v0.1.0-dev
+    grpcPort: 9101
+  model:
+    enabled: true
+    image:
+      repository: model-service
+      tag: v0.1.0-dev
+    grpcPort: 9102
+  task:
+    enabled: true
+    image:
+      repository: task-service
+      tag: v0.1.0-dev
+    grpcPort: 9104

@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ani-cluster-preflight
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-cluster-preflight
+    app.kubernetes.io/part-of: ani-platform
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ani-cluster-preflight
+        app.kubernetes.io/part-of: ani-platform
+    spec:
+      restartPolicy: Never
+      serviceAccountName: ani-cluster-preflight
+      containers:
+        - name: preflight
+          image: bitnami/kubectl:1.30
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/config/preflight.sh"]
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: ani-cluster-preflight
+            defaultMode: 0755

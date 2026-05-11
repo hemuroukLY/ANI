@@ -1,0 +1,330 @@
+package runtime
+
+import (
+	"context"
+	"encoding/json"
+	"strconv"
+	"strings"
+
+	"github.com/kubercloud/ani/pkg/ports"
+)
+
+type KubernetesDryRunRenderer struct {
+	planner *PlanningRuntime
+}
+
+func NewKubernetesDryRunRenderer(planner *PlanningRuntime) *KubernetesDryRunRenderer {
+	if planner == nil {
+		planner = NewPlanningRuntime()
+	}
+	return &KubernetesDryRunRenderer{planner: planner}
+}
+
+func (r *KubernetesDryRunRenderer) Render(ctx context.Context, spec ports.WorkloadSpec) ([]ports.WorkloadManifest, error) {
+	planned, err := r.planner.plan(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+
+	switch planned.Kind {
+	case ports.WorkloadKindVM:
+		return []ports.WorkloadManifest{renderVM(planned)}, nil
+	case ports.WorkloadKindBatchJob:
+		return []ports.WorkloadManifest{renderJob(planned)}, nil
+	default:
+		return []ports.WorkloadManifest{renderDeployment(planned)}, nil
+	}
+}
+
+func renderVM(spec ports.WorkloadSpec) ports.WorkloadManifest {
+	content := manifest(map[string]any{
+		"apiVersion": "kubevirt.io/v1",
+		"kind":       "VirtualMachine",
+		"metadata":   metadata(spec, "vm"),
+		"spec": map[string]any{
+			"running": spec.Lifecycle.AutoStart,
+			"template": map[string]any{
+				"metadata": map[string]any{
+					"labels":      labels(spec),
+					"annotations": annotationsWithInstancePlan(spec),
+				},
+				"spec": map[string]any{
+					"domain": map[string]any{
+						"machine": map[string]any{"type": firstNonEmpty(spec.VM.MachineType, "q35")},
+						"resources": map[string]any{
+							"requests": resourceRequests(spec),
+						},
+					},
+					"volumes":  vmVolumes(spec),
+					"networks": networkRefs(spec),
+				},
+			},
+		},
+	})
+	return ports.WorkloadManifest{Name: spec.Name, Kind: "VirtualMachine", Provider: "kubevirt", Content: content}
+}
+
+func renderDeployment(spec ports.WorkloadSpec) ports.WorkloadManifest {
+	content := manifest(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   metadata(spec, "workload"),
+		"spec": map[string]any{
+			"replicas": 1,
+			"selector": map[string]any{"matchLabels": selectorLabels(spec)},
+			"template": podTemplate(spec),
+		},
+	})
+	return ports.WorkloadManifest{Name: spec.Name, Kind: "Deployment", Provider: "kubernetes", Content: content}
+}
+
+func renderJob(spec ports.WorkloadSpec) ports.WorkloadManifest {
+	content := manifest(map[string]any{
+		"apiVersion": "batch/v1",
+		"kind":       "Job",
+		"metadata":   metadata(spec, "batch-job"),
+		"spec": map[string]any{
+			"backoffLimit": 0,
+			"template":     podTemplate(spec),
+		},
+	})
+	return ports.WorkloadManifest{Name: spec.Name, Kind: "Job", Provider: "kubernetes", Content: content}
+}
+
+func podTemplate(spec ports.WorkloadSpec) map[string]any {
+	podSpec := map[string]any{
+		"restartPolicy": "Always",
+		"containers": []any{
+			map[string]any{
+				"name":         spec.Name,
+				"image":        spec.Image,
+				"command":      omitEmptySlice(spec.Command),
+				"args":         omitEmptySlice(spec.Args),
+				"resources":    containerResources(spec),
+				"ports":        containerPorts(spec),
+				"volumeMounts": volumeMounts(spec.Storage),
+			},
+		},
+		"volumes": volumes(spec.Storage),
+	}
+	if spec.Kind == ports.WorkloadKindBatchJob {
+		podSpec["restartPolicy"] = "Never"
+	}
+	if spec.RuntimeClassName != "" {
+		podSpec["runtimeClassName"] = spec.RuntimeClassName
+	}
+	if spec.SchedulerName != "" {
+		podSpec["schedulerName"] = spec.SchedulerName
+	}
+	if spec.ServiceAccountName != "" {
+		podSpec["serviceAccountName"] = spec.ServiceAccountName
+	}
+
+	return map[string]any{
+		"metadata": map[string]any{
+			"labels":      selectorLabels(spec),
+			"annotations": annotationsWithInstancePlan(spec),
+		},
+		"spec": podSpec,
+	}
+}
+
+func metadata(spec ports.WorkloadSpec, component string) map[string]any {
+	return map[string]any{
+		"name":      spec.Name,
+		"namespace": tenantNamespace(spec.TenantID),
+		"labels": mergeStringMap(labels(spec), map[string]string{
+			"app.kubernetes.io/component": component,
+		}),
+		"annotations": annotationsWithInstancePlan(spec),
+	}
+}
+
+func labels(spec ports.WorkloadSpec) map[string]string {
+	return mergeStringMap(map[string]string{
+		"app.kubernetes.io/part-of":       "ani-platform",
+		"ani.kubercloud.io/tenant-id":     spec.TenantID,
+		"ani.kubercloud.io/instance":      spec.Name,
+		"ani.kubercloud.io/instance-kind": string(spec.Kind),
+	}, spec.Labels)
+}
+
+func selectorLabels(spec ports.WorkloadSpec) map[string]string {
+	return map[string]string{
+		"ani.kubercloud.io/tenant-id": spec.TenantID,
+		"ani.kubercloud.io/instance":  spec.Name,
+	}
+}
+
+func annotationsWithInstancePlan(spec ports.WorkloadSpec) map[string]string {
+	annotations := mergeStringMap(map[string]string{
+		"ani.kubercloud.io/network-planes":  networkPlanes(spec.Network.Attachments),
+		"ani.kubercloud.io/storage-kinds":   storageKinds(spec.Storage),
+		"ani.kubercloud.io/render-mode":     "dry-run",
+		"ani.kubercloud.io/runtime-adapter": "planning",
+	}, spec.Annotations)
+	return annotations
+}
+
+func containerResources(spec ports.WorkloadSpec) map[string]any {
+	limits := map[string]string{}
+	requests := map[string]string{}
+	if spec.Resources.CPU != "" {
+		requests["cpu"] = spec.Resources.CPU
+	}
+	if spec.Resources.Memory != "" {
+		requests["memory"] = spec.Resources.Memory
+	}
+	if requiresGPU(spec.Kind) {
+		resourceName := firstNonEmpty(spec.Annotations["ani.kubercloud.io/gpu-resource-name"], "nvidia.com/gpu")
+		quantity := firstNonEmpty(spec.Annotations["ani.kubercloud.io/gpu-resource-quantity"], strconv.Itoa(spec.Resources.GPU.RequiredCount))
+		limits[resourceName] = quantity
+	}
+	return map[string]any{
+		"requests": requests,
+		"limits":   limits,
+	}
+}
+
+func resourceRequests(spec ports.WorkloadSpec) map[string]string {
+	requests := map[string]string{}
+	if spec.Resources.CPU != "" {
+		requests["cpu"] = spec.Resources.CPU
+	}
+	if spec.Resources.Memory != "" {
+		requests["memory"] = spec.Resources.Memory
+	}
+	return requests
+}
+
+func containerPorts(spec ports.WorkloadSpec) []any {
+	if spec.Container == nil {
+		return nil
+	}
+	ports := make([]any, 0, len(spec.Container.Ports))
+	for _, port := range spec.Container.Ports {
+		ports = append(ports, map[string]any{"containerPort": port})
+	}
+	return ports
+}
+
+func volumeMounts(storage []ports.WorkloadStorageAttachment) []any {
+	mounts := make([]any, 0, len(storage))
+	for _, attachment := range storage {
+		if attachment.MountPath == "" {
+			continue
+		}
+		mounts = append(mounts, map[string]any{
+			"name":      attachment.Name,
+			"mountPath": attachment.MountPath,
+			"readOnly":  attachment.ReadOnly,
+		})
+	}
+	return mounts
+}
+
+func volumes(storage []ports.WorkloadStorageAttachment) []any {
+	result := make([]any, 0, len(storage))
+	for _, attachment := range storage {
+		volume := map[string]any{"name": attachment.Name}
+		switch attachment.Kind {
+		case ports.StorageAttachmentSharedPVC:
+			volume["persistentVolumeClaim"] = map[string]any{"claimName": firstNonEmpty(attachment.SourceRef, attachment.Name)}
+		case ports.StorageAttachmentObjectFuse:
+			volume["emptyDir"] = map[string]any{}
+			volume["aniObjectFuseSourceRef"] = attachment.SourceRef
+		default:
+			volume["emptyDir"] = map[string]any{"sizeLimit": sizeGi(attachment.SizeGiB)}
+		}
+		result = append(result, volume)
+	}
+	return result
+}
+
+func vmVolumes(spec ports.WorkloadSpec) []any {
+	volumes := []any{
+		map[string]any{
+			"name": "containerdisk",
+			"containerDisk": map[string]any{
+				"image": spec.VM.BootImage,
+			},
+		},
+	}
+	for _, attachment := range spec.Storage {
+		volumes = append(volumes, map[string]any{
+			"name": attachment.Name,
+			"persistentVolumeClaim": map[string]any{
+				"claimName": firstNonEmpty(attachment.SourceRef, spec.Name+"-"+attachment.Name),
+			},
+		})
+	}
+	return volumes
+}
+
+func networkRefs(spec ports.WorkloadSpec) []any {
+	networks := make([]any, 0, len(spec.Network.Attachments))
+	for _, attachment := range spec.Network.Attachments {
+		networks = append(networks, map[string]any{
+			"name": string(attachment.Plane),
+			"multus": map[string]any{
+				"networkName": attachment.NetworkID,
+			},
+		})
+	}
+	return networks
+}
+
+func manifest(value map[string]any) string {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return "{}"
+	}
+	return string(data) + "\n"
+}
+
+func tenantNamespace(tenantID string) string {
+	return "ani-tenant-" + strings.ReplaceAll(tenantID, "_", "-")
+}
+
+func mergeStringMap(base map[string]string, overlay map[string]string) map[string]string {
+	result := map[string]string{}
+	for key, value := range base {
+		result[key] = value
+	}
+	for key, value := range overlay {
+		result[key] = value
+	}
+	return result
+}
+
+func networkPlanes(attachments []ports.WorkloadNetworkAttachment) string {
+	values := make([]string, 0, len(attachments))
+	for _, attachment := range attachments {
+		values = append(values, string(attachment.Plane))
+	}
+	return strings.Join(values, ",")
+}
+
+func storageKinds(storage []ports.WorkloadStorageAttachment) string {
+	values := make([]string, 0, len(storage))
+	for _, attachment := range storage {
+		values = append(values, string(attachment.Kind))
+	}
+	return strings.Join(values, ",")
+}
+
+func sizeGi(size int64) string {
+	if size <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(size, 10) + "Gi"
+}
+
+func omitEmptySlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
+var _ ports.WorkloadRenderer = (*KubernetesDryRunRenderer)(nil)

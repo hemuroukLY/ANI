@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-m1-real-provider-profile
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-m1-real-provider-profile
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-e2e-b
+data:
+  profile: |
+    M1-E2E-B
+    M1 real provider integration regression profile
+  provider-chain: |
+    WorkloadInstanceService
+    KubernetesRESTClient
+    KubernetesProviderAdapter
+    KubernetesLifecycleExecutor
+    KubernetesInstanceOps
+  provider-operations: |
+    server-side dry-run
+    server-side apply
+    lifecycle scale
+    pod log subresource
+    pod exec subresource
+  safety: |
+    default local remains safe
+    execution switches required

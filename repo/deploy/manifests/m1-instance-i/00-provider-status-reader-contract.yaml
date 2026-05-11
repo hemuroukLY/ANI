@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-provider-status-reader-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-provider-status-reader-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-i
+data:
+  port: |
+    WorkloadProviderStatusReader
+  adapter: |
+    pkg/adapters/runtime.LocalProviderStatusReader
+  purpose: |
+    Read provider-specific resource status and normalize it into
+    WorkloadProviderObservation for WorkloadStatusReconciler.
+  required-evidence: |
+    tenant id
+    instance id
+    workload kind
+    provider apply must be applied
+    apply provider
+    apply resource refs
+  provider-boundary: |
+    Kubernetes Deployment status, Kubernetes Job status, and KubeVirt
+    VirtualMachine status readers must live inside adapters.
+    Business services must not import provider SDKs.
+    Business services must not poll provider status APIs directly.

@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-m1-instance-e2e-guardrails
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-m1-instance-e2e-guardrails
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-e2e
+data:
+  required-evidence: |
+    tenant id
+    user id
+    permission proof
+    audit id
+    admission result
+    dry-run result
+    apply result
+    provider observation
+    persisted final status
+  gpu-evidence: |
+    GPU container must pass GPUInventory planning and preserve RuntimeClass,
+    scheduler, queue, resourceName, and resourceQuantity decisions.
+  vm-evidence: |
+    VM must render KubeVirt VirtualMachine and support lifecycle/query path.
+  container-evidence: |
+    Container must render Kubernetes Deployment and support lifecycle/query/ops.
+  provider-policy: |
+    This profile is offline/local by default. Production e2e may replace local
+    provider gates with KubernetesProviderAdapter and KubernetesProviderClient.

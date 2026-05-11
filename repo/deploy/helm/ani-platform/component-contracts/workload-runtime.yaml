@@ -1,0 +1,27 @@
+component: workload-runtime
+purpose: VM, container, GPU container, inference, notebook, sandbox, and batch instance lifecycle
+defaultProvider: kubernetes
+couplingLevel: bounded_direct
+requiredPorts:
+  - WorkloadRuntime
+supportedKinds:
+  - vm
+  - container
+  - gpu_container
+  - inference
+  - notebook
+  - agent_sandbox
+  - batch_job
+providers:
+  vm:
+    default: kubevirt
+    alternatives:
+      - customer-cloud-provider
+  container:
+    default: kubernetes
+  gpu_container:
+    default: kubernetes-volcano-hami
+  sandbox:
+    default: kubernetes-networkpolicy
+    alternatives:
+      - kata-runtimeclass

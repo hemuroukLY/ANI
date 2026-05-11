@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-service-api-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-service-api-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-l
+data:
+  port: |
+    WorkloadInstanceService
+  adapter: |
+    pkg/adapters/runtime.LocalInstanceService
+  api-surface: |
+    Create
+    Get
+    List
+  supported-create-kinds: |
+    vm
+    container
+    gpu_container
+  required-create-evidence: |
+    tenant id
+    user id
+    permission proof
+  dependency-policy: |
+    Create must call WorkloadInstanceOrchestrator.
+    Get and List must call WorkloadInstanceStore.
+    Instance Service API must not expose provider manifests or provider SDKs.

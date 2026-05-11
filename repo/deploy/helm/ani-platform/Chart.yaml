@@ -1,0 +1,15 @@
+apiVersion: v2
+name: ani-platform
+description: KuberCloud ANI platform umbrella chart
+type: application
+version: 0.1.0
+appVersion: v0.1.0-dev
+keywords:
+  - ani
+  - ai-private-cloud
+  - kubercloud
+maintainers:
+  - name: KuberCloud ANI
+annotations:
+  ani.kubercloud.io/component-profile-contract: "true"
+  ani.kubercloud.io/dependencies: "postgresql,nats,redis,minio,milvus,harbor"

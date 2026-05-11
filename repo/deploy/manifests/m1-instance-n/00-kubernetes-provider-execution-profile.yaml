@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-kubernetes-provider-execution-profile
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-kubernetes-provider-execution-profile
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-n
+data:
+  profile: |
+    M1-INSTANCE-N
+    Kubernetes provider execution profile
+  execution-chain: |
+    WorkloadInstanceOrchestrator
+    WorkloadPlanAuditStore
+    WorkloadAdmission
+    WorkloadProviderDryRun
+    KubernetesProviderAdapter
+    KubernetesProviderClient
+    KubernetesProviderClient.ServerSideDryRun
+    dryRun=All
+    WorkloadProviderApply
+    KubernetesProviderClient.Apply
+    WorkloadProviderStatusReader
+    KubernetesProviderClient.Observe
+    WorkloadStatusReconciler
+    WorkloadInstanceStore
+  gate-policy: |
+    apply disabled by default
+    audit id
+    permission proof
+    resource refs
+  sdk-policy: |
+    Real client-go, dynamic client, controller-runtime, and KubeVirt client code
+    must stay inside an adapter-owned package.
+    Business services must not import client-go, KubeVirt client, or provider
+    SDK objects.

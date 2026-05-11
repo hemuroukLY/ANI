@@ -1,0 +1,20 @@
+global:
+  profile: gpu-scheduling-e2e
+
+infrastructure:
+  gpu:
+    enabled: true
+    e2ePreflight:
+      enabled: true
+      image: bitnami/kubectl:1.30
+      serviceAccountName: ani-gpu-e2e-preflight
+      requireHAMIAllocatable: false
+      requireDCGMService: false
+      nodeSelector:
+        ani.kubercloud.io/gpu-node: "true"
+      requiredQueues:
+        - ani-inference
+        - ani-training
+      requiredNamespaces:
+        - ani-gpu-system
+        - volcano-system

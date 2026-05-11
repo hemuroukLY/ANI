@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-audit-flow-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-audit-flow-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-e
+data:
+  required-flow: |
+    PlanningRuntime validates and normalizes instance spec.
+    WorkloadRenderer renders provider dry-run manifests.
+    WorkloadAdmission reviews local guardrails.
+    WorkloadPlanAuditStore persists plan/render/admission result.
+    Future provider adapter performs server-side dry-run.
+    Future provider adapter records server-side dry-run result before create/apply.
+  audit-policy: |
+    A denied admission must still be auditable.
+    Rendered manifests must be stored as JSONB.
+    Admission warnings must be stored as JSONB.
+    Tenant RLS must protect all audit rows.
+    Real provider apply/create must not run without an audit row.

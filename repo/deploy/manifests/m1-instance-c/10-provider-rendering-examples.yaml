@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-provider-rendering-examples
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-provider-rendering-examples
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-c
+data:
+  vm-render-kind: |
+    apiVersion: kubevirt.io/v1
+    kind: VirtualMachine
+  container-render-kind: |
+    apiVersion: apps/v1
+    kind: Deployment
+  batch-render-kind: |
+    apiVersion: batch/v1
+    kind: Job
+  gpu-render-requirements: |
+    runtimeClassName
+    schedulerName
+    nvidia.com/gpu or vendor resourceName from GPUInventory
+    ani.kubercloud.io/network-planes
+    ani.kubercloud.io/storage-kinds

@@ -1,0 +1,38 @@
+global:
+  profile: attach-k8s
+
+infrastructure:
+  profiles:
+    selected: attach-k8s
+  kubernetes:
+    requireExistingCluster: true
+  postgresql:
+    mode: managed
+    component: cloudnative-pg
+    storageClassName: REPLACE_WITH_STORAGE_CLASS
+    instances: 3
+  nats:
+    mode: managed
+    component: nats
+    replicas: 3
+    jetstream:
+      enabled: true
+      fileStore:
+        storageClassName: REPLACE_WITH_STORAGE_CLASS
+  redis:
+    mode: managed
+    component: redis
+    architecture: standalone
+  minio:
+    mode: managed
+    component: minio
+    replicas: 4
+    storageClassName: REPLACE_WITH_STORAGE_CLASS
+  milvus:
+    mode: managed
+    component: milvus
+    modeName: standalone
+    storageClassName: REPLACE_WITH_STORAGE_CLASS
+  harbor:
+    mode: external
+    requiredForRuntime: false

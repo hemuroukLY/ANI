@@ -1,0 +1,23 @@
+global:
+  profile: dev
+  imageRegistry: localhost:5000/ani
+
+infrastructure:
+  profiles:
+    selected: dev
+  postgresql:
+    mode: external
+    secretName: ani-bootstrap-placeholders
+  nats:
+    mode: external
+    secretName: ani-bootstrap-placeholders
+  redis:
+    mode: external
+    secretName: ani-bootstrap-placeholders
+  minio:
+    mode: external
+  milvus:
+    mode: external
+  harbor:
+    mode: external
+    requiredForRuntime: false

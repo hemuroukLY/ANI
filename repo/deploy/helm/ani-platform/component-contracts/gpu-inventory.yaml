@@ -1,0 +1,27 @@
+component: gpu-inventory
+purpose: heterogeneous GPU discovery, classification, and scheduling intent mapping
+defaultProvider: kubernetes-labels-with-vendor-device-plugins
+couplingLevel: adapter_with_extensions
+requiredPorts:
+  - GPUInventory
+supportedVendors:
+  - nvidia
+  - huawei
+  - hygon
+providerExtensions:
+  nvidia:
+    - gpu-operator
+    - gpu-feature-discovery
+    - dcgm-exporter
+  huawei:
+    - ascend-device-plugin
+    - npu-exporter
+  hygon:
+    - dcu-device-plugin
+    - dcu-exporter
+requiredLabels:
+  - ani.kubercloud.io/gpu-node
+  - ani.kubercloud.io/gpu-vendor
+  - ani.kubercloud.io/gpu-model
+  - ani.kubercloud.io/gpu-pool
+  - ani.kubercloud.io/gpu-kernel-compatible

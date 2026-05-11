@@ -6,10 +6,11 @@ import "github.com/cloudwego/hertz/pkg/app/server"
 
 // Register wires all middleware onto the Hertz server in the correct order.
 func Register(h *server.Hertz) {
+	authClient := NewAuthClientFromEnv()
 	h.Use(
 		RequestID(),
-		Auth(),
-		RBAC(),
+		AuthWithClient(authClient),
+		RBACWithClient(authClient),
 		RateLimit(),
 		Audit(),
 	)

@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-object-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-object-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-a
+data:
+  core-instance-kinds: |
+    vm
+    container
+    gpu_container
+    inference
+    notebook
+    agent_sandbox
+    batch_job
+  lifecycle-actions: |
+    create
+    start
+    stop
+    restart
+    resize
+    delete
+  lifecycle-states: |
+    pending
+    provisioning
+    starting
+    running
+    stopping
+    stopped
+    failed
+    deleting
+    deleted
+  required-instance-fields: |
+    tenantID
+    instanceID
+    kind
+    providerID
+    state
+    lifecyclePolicy
+    networkAttachments
+    storageAttachments
+  object-policy: |
+    Every VM, traditional container, GPU container, inference, notebook, agent
+    sandbox, and batch workload is a first-class ANI instance. Runtime adapters
+    may translate these instances to KubeVirt VM, Pod, Deployment, Job, Volcano
+    Job, or future providers, but business services must preserve the ANI
+    instance model.

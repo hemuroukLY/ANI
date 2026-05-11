@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-kubernetes-rest-client-profile
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-kubernetes-rest-client-profile
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-o
+data:
+  profile: |
+    M1-INSTANCE-O
+    adapter-owned KubernetesProviderClient implementation
+    KubernetesRESTClient
+  client-contract: |
+    KubernetesProviderClient
+    server-side dry-run
+    dryRun=All
+    server-side apply
+    fieldManager
+    force=true
+    WorkloadProviderObservation
+    resource refs
+  supported-resources: |
+    Kubernetes Deployment
+    Kubernetes Job
+    KubeVirt VirtualMachine
+  dependency-policy: |
+    This implementation uses standard library HTTP and no business-service SDK
+    imports.
+    no business-service SDK imports
+    Future client-go or KubeVirt client replacements must stay inside
+    adapter-owned packages.

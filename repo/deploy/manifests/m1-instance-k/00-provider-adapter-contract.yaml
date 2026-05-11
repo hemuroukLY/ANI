@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-provider-adapter-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-provider-adapter-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-k
+data:
+  adapter: |
+    pkg/adapters/runtime.KubernetesProviderAdapter
+  internal-client: |
+    KubernetesProviderClient
+  implemented-ports: |
+    WorkloadProviderDryRun
+    WorkloadProviderApply
+    WorkloadProviderStatusReader
+  provider-scope: |
+    Kubernetes Deployment
+    Kubernetes Job
+    KubeVirt VirtualMachine
+  hard-rules: |
+    server-side dry-run must use dryRun=All
+    apply is disabled by default
+    admission must be allowed before dry-run
+    provider dry-run must be accepted before apply
+    audit id and permission proof are required before apply
+    provider status observations must include resource refs
+  boundary-policy: |
+    Kubernetes and KubeVirt SDK usage must stay inside the provider adapter or
+    its internal KubernetesProviderClient. Business services must use ANI ports.

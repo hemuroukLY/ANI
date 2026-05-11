@@ -1,0 +1,35 @@
+component: instance-fabric
+purpose: first-class ANI instance object, lifecycle, network plane, and storage attachment contract
+couplingLevel: port_required
+requiredPorts:
+  - WorkloadRuntime
+instanceKinds:
+  - vm
+  - container
+  - gpu_container
+  - inference
+  - notebook
+  - agent_sandbox
+  - batch_job
+networkPlanes:
+  tenant_vpc:
+    purpose: tenant business traffic and VM/container mutual access
+    provider: kubeovn
+  foundation_mesh:
+    purpose: platform-controlled east-west connectivity outside tenant VPC
+    provider: networkpolicy-or-service-mesh
+  storage:
+    purpose: MinIO, PVC provisioners, model cache, dataset access
+    provider: networkpolicy
+  management:
+    purpose: control plane, health checks, logs, metrics, SSH/VNC proxy
+    provider: gateway-and-networkpolicy
+  public_ingress:
+    purpose: explicit gateway or ingress exposure
+    provider: ani-gateway
+storageAttachments:
+  - root_disk
+  - data_disk
+  - shared_pvc
+  - object_fuse
+  - ephemeral

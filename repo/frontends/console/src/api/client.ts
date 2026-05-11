@@ -25,9 +25,9 @@ export function setAuthToken(token: string) {
   // openapi-fetch supports per-request headers; for a global default,
   // we wrap the middleware approach.
   api.use({
-    onRequest(req) {
-      req.headers.set('Authorization', `Bearer ${token}`)
-      return req
+    onRequest({ request }) {
+      request.headers.set('Authorization', `Bearer ${token}`)
+      return request
     },
   })
 }

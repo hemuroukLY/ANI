@@ -45,14 +45,18 @@ message CancelTaskRequest {
 }
 
 message UpdateTaskProgressRequest {
-  string task_id    = 1;
-  int32  progress   = 2;   // 0-100
-  string message    = 3;   // optional human-readable status
+  string task_id     = 1;
+  int32  progress    = 2;   // 0-100
+  string message     = 3;   // optional human-readable status
+  string tenant_id   = 4;
+  string worker_id   = 5;
 }
 
 message AcquireTaskLeaseRequest {
   string task_id         = 1;
   int32  lease_seconds   = 2;   // how long the worker expects to hold the lease
+  string tenant_id       = 3;
+  string worker_id       = 4;
 }
 
 message AcquireTaskLeaseResponse {
@@ -61,18 +65,25 @@ message AcquireTaskLeaseResponse {
 }
 
 message HeartbeatTaskLeaseRequest {
-  string task_id = 1;
+  string task_id         = 1;
+  string tenant_id       = 2;
+  string worker_id       = 3;
+  int32  lease_seconds   = 4;   // renewed lease duration
 }
 
 message FailTaskRequest {
   string task_id             = 1;
   string error_message       = 2;
   string compensating_action = 3;   // description of what the caller will do to compensate
+  string tenant_id           = 4;
+  string worker_id           = 5;
 }
 
 message CompleteTaskRequest {
-  string task_id = 1;
-  bytes  result  = 2;   // JSON-encoded result payload
+  string task_id   = 1;
+  bytes  result    = 2;   // JSON-encoded result payload
+  string tenant_id = 3;
+  string worker_id = 4;
 }
 
 // ── Domain message ────────────────────────────────────────────────────────────
@@ -97,4 +108,5 @@ message AsyncTask {
   google.protobuf.Timestamp started_at        = 17;
   google.protobuf.Timestamp completed_at      = 18;
   string webhook_url      = 19;
+  string lease_owner      = 20;
 }

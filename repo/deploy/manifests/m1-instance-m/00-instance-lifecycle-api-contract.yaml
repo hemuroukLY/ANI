@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-lifecycle-api-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-lifecycle-api-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-m
+data:
+  port: |
+    WorkloadInstanceService
+  lifecycle-api: |
+    Start
+    Stop
+    Restart
+    Resize
+    Delete
+  supported-instance-kinds: |
+    VM
+    container
+    GPU container
+  required-evidence: |
+    tenant id
+    instance id
+    user id
+    permission proof
+  persistence-policy: |
+    Lifecycle actions must update WorkloadInstanceStore so Get/List recover the
+    latest ANI workload state after process restart.
+  provider-policy: |
+    Production implementations must route real provider lifecycle operations
+    through provider adapters and preserve audit, permission, and resource refs.

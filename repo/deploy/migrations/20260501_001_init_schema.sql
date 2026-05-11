@@ -105,6 +105,20 @@ CREATE TABLE jwt_blocklist (
 );
 CREATE INDEX idx_jwt_blocklist_expires ON jwt_blocklist(expires_at);
 
+CREATE TABLE refresh_tokens (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash      TEXT NOT NULL UNIQUE,            -- SHA256(refresh token)，不存明文
+    roles           TEXT[] NOT NULL DEFAULT '{}',
+    expires_at      TIMESTAMPTZ NOT NULL,
+    last_used_at    TIMESTAMPTZ,
+    revoked_at      TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_refresh_tokens_tenant_id ON refresh_tokens(tenant_id);
+CREATE INDEX idx_refresh_tokens_expires ON refresh_tokens(expires_at);
+
 -- ===========================================================================
 -- SECTION 4: MODELS, MODEL_VERSIONS, MODEL_IMPORT_TASKS
 -- ===========================================================================
@@ -192,6 +206,50 @@ CREATE TABLE inference_services (
 );
 CREATE INDEX idx_inference_services_tenant ON inference_services(tenant_id);
 CREATE INDEX idx_inference_services_status ON inference_services(tenant_id, status);
+
+CREATE TABLE instance_plan_audits (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id             UUID,
+    instance_id         TEXT,
+    instance_name       TEXT NOT NULL,
+    workload_kind       TEXT NOT NULL
+        CHECK (workload_kind IN ('vm','container','gpu_container','inference','notebook','agent_sandbox','batch_job')),
+    provider            TEXT,
+    manifest_count      INT NOT NULL DEFAULT 0,
+    rendered_manifests  JSONB NOT NULL DEFAULT '[]',
+    admission_allowed   BOOLEAN NOT NULL DEFAULT FALSE,
+    admission_reason    TEXT,
+    admission_warnings  JSONB NOT NULL DEFAULT '[]',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_instance_plan_audits_tenant ON instance_plan_audits(tenant_id, created_at DESC);
+CREATE INDEX idx_instance_plan_audits_instance ON instance_plan_audits(tenant_id, instance_name, created_at DESC);
+
+CREATE TABLE workload_instances (
+    tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    instance_id         TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    workload_kind       TEXT NOT NULL
+        CHECK (workload_kind IN ('vm','container','gpu_container','inference','notebook','agent_sandbox','batch_job')),
+    provider            TEXT,
+    audit_id            UUID REFERENCES instance_plan_audits(id),
+    provider_id         TEXT,
+    resource_refs       JSONB NOT NULL DEFAULT '[]',
+    state               TEXT NOT NULL
+        CHECK (state IN ('pending','provisioning','running','starting','stopping','stopped','failed','deleting','deleted')),
+    endpoint            TEXT,
+    node_name           TEXT,
+    reason              TEXT,
+    networks            JSONB NOT NULL DEFAULT '[]',
+    storage             JSONB NOT NULL DEFAULT '[]',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, instance_id)
+);
+CREATE INDEX idx_workload_instances_tenant ON workload_instances(tenant_id, updated_at DESC);
+CREATE INDEX idx_workload_instances_kind ON workload_instances(tenant_id, workload_kind, state);
+CREATE INDEX idx_workload_instances_audit ON workload_instances(tenant_id, audit_id);
 
 -- 推理调用审计日志（高写入量，按月分区）
 -- NOTE: 可转为 TimescaleDB hypertable，见文件末尾注释
@@ -306,6 +364,7 @@ CREATE TABLE async_tasks (
     attempt_count       INT NOT NULL DEFAULT 0,
     max_attempts        INT NOT NULL DEFAULT 3,
     -- 租约：worker 持有任务的截止时间，过期后其他 worker 可抢占（防僵尸任务）
+    lease_owner         TEXT,                   -- 当前持有租约的 worker 身份
     lease_until         TIMESTAMPTZ,
     last_heartbeat_at   TIMESTAMPTZ,            -- worker 每 30s 更新，用于 reconciler 检测失活
     progress_pct        INT NOT NULL DEFAULT 0 CHECK (progress_pct BETWEEN 0 AND 100),
@@ -323,6 +382,7 @@ CREATE TABLE async_tasks (
 );
 CREATE INDEX idx_async_tasks_tenant ON async_tasks(tenant_id, status);
 CREATE INDEX idx_async_tasks_type ON async_tasks(task_type, status);
+CREATE INDEX idx_async_tasks_lease_owner ON async_tasks(tenant_id, lease_owner) WHERE status = 'running';
 -- 对账器查询：查找租约过期但仍在 running 的任务（用于重新分配）
 CREATE INDEX idx_async_tasks_lease ON async_tasks(lease_until) WHERE status = 'running';
 -- 死信队列监控
@@ -507,6 +567,20 @@ CREATE POLICY tenant_isolation ON inference_services
     AS RESTRICTIVE
     USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 
+-- instance_plan_audits
+ALTER TABLE instance_plan_audits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE instance_plan_audits FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON instance_plan_audits
+    AS RESTRICTIVE
+    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
+
+-- workload_instances
+ALTER TABLE workload_instances ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workload_instances FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON workload_instances
+    AS RESTRICTIVE
+    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
+
 -- async_tasks
 ALTER TABLE async_tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE async_tasks FORCE ROW LEVEL SECURITY;
@@ -518,6 +592,13 @@ CREATE POLICY tenant_isolation ON async_tasks
 ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
 ALTER TABLE api_keys FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON api_keys
+    AS RESTRICTIVE
+    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
+
+-- refresh_tokens
+ALTER TABLE refresh_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE refresh_tokens FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON refresh_tokens
     AS RESTRICTIVE
     USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 

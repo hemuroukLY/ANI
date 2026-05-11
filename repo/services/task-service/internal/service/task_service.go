@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	taskv1 "github.com/kubercloud/ani/pkg/generated/pb/task/v1"
 	sharedrepo "github.com/kubercloud/ani/pkg/repo"
@@ -48,23 +51,103 @@ func (s *TaskService) CancelTask(ctx context.Context, req *taskv1.CancelTaskRequ
 }
 
 func (s *TaskService) UpdateTaskProgress(ctx context.Context, req *taskv1.UpdateTaskProgressRequest) (*emptypb.Empty, error) {
-	return nil, status.Error(codes.Unimplemented, "worker task updates require tenant-aware internal auth context")
+	tenantID, taskID, workerID, err := parseWorkerMutation(req.GetTenantId(), req.GetTaskId(), req.GetWorkerId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	ctx = types.WithTenant(ctx, &types.TenantContext{TenantID: tenantID})
+	if err := s.repo.UpdateProgress(ctx, s.db, taskID, workerID, int(req.GetProgress())); err != nil {
+		return nil, toStatus(err)
+	}
+	return &emptypb.Empty{}, nil
 }
 
 func (s *TaskService) AcquireTaskLease(ctx context.Context, req *taskv1.AcquireTaskLeaseRequest) (*taskv1.AcquireTaskLeaseResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "worker lease acquisition requires tenant-aware internal auth context")
+	tenantID, taskID, workerID, err := parseWorkerMutation(req.GetTenantId(), req.GetTaskId(), req.GetWorkerId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	duration, err := parseLeaseDuration(req.GetLeaseSeconds())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	ctx = types.WithTenant(ctx, &types.TenantContext{TenantID: tenantID})
+	acquired, leaseUntil, err := s.repo.AcquireLease(ctx, s.db, taskID, workerID, duration)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	if !acquired {
+		return nil, status.Error(codes.AlreadyExists, "task lease already held")
+	}
+	return &taskv1.AcquireTaskLeaseResponse{
+		Acquired:   true,
+		LeaseUntil: timestamppb.New(leaseUntil),
+	}, nil
 }
 
 func (s *TaskService) HeartbeatTaskLease(ctx context.Context, req *taskv1.HeartbeatTaskLeaseRequest) (*emptypb.Empty, error) {
-	return nil, status.Error(codes.Unimplemented, "worker heartbeat requires tenant-aware internal auth context")
+	tenantID, taskID, workerID, err := parseWorkerMutation(req.GetTenantId(), req.GetTaskId(), req.GetWorkerId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	duration, err := parseLeaseDuration(req.GetLeaseSeconds())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	ctx = types.WithTenant(ctx, &types.TenantContext{TenantID: tenantID})
+	if err := s.repo.Heartbeat(ctx, s.db, taskID, workerID, duration); err != nil {
+		return nil, toStatus(err)
+	}
+	return &emptypb.Empty{}, nil
 }
 
 func (s *TaskService) FailTask(ctx context.Context, req *taskv1.FailTaskRequest) (*emptypb.Empty, error) {
-	return nil, status.Error(codes.Unimplemented, "worker failure reporting requires tenant-aware internal auth context")
+	tenantID, taskID, workerID, err := parseWorkerMutation(req.GetTenantId(), req.GetTaskId(), req.GetWorkerId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	if req.GetErrorMessage() == "" {
+		return nil, toStatus(types.Wrapf(types.ErrBadRequest, "error_message required"))
+	}
+	ctx = types.WithTenant(ctx, &types.TenantContext{TenantID: tenantID})
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+	defer rollback(ctx, tx)
+	if err := s.repo.Fail(ctx, tx, taskID, workerID, req.GetErrorMessage(), req.GetCompensatingAction()); err != nil {
+		return nil, toStatus(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+	return &emptypb.Empty{}, nil
 }
 
 func (s *TaskService) CompleteTask(ctx context.Context, req *taskv1.CompleteTaskRequest) (*emptypb.Empty, error) {
-	return nil, status.Error(codes.Unimplemented, "worker completion reporting requires tenant-aware internal auth context")
+	tenantID, taskID, workerID, err := parseWorkerMutation(req.GetTenantId(), req.GetTaskId(), req.GetWorkerId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	var result any = map[string]any{}
+	if len(req.GetResult()) > 0 {
+		if err := json.Unmarshal(req.GetResult(), &result); err != nil {
+			return nil, toStatus(types.Wrapf(types.ErrBadRequest, "result must be valid JSON"))
+		}
+	}
+	ctx = types.WithTenant(ctx, &types.TenantContext{TenantID: tenantID})
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+	defer rollback(ctx, tx)
+	if err := s.repo.Complete(ctx, tx, taskID, workerID, result); err != nil {
+		return nil, toStatus(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+	return &emptypb.Empty{}, nil
 }
 
 func parseTenantAndID(tenantID, id string) (uuid.UUID, uuid.UUID, error) {
@@ -79,6 +162,28 @@ func parseTenantAndID(tenantID, id string) (uuid.UUID, uuid.UUID, error) {
 	return tid, parsedID, nil
 }
 
+func parseWorkerMutation(tenantID, taskID, workerID string) (uuid.UUID, uuid.UUID, string, error) {
+	tid, parsedTaskID, err := parseTenantAndID(tenantID, taskID)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, "", err
+	}
+	if workerID == "" {
+		return uuid.Nil, uuid.Nil, "", types.Wrapf(types.ErrBadRequest, "worker_id required")
+	}
+	return tid, parsedTaskID, workerID, nil
+}
+
+func parseLeaseDuration(seconds int32) (time.Duration, error) {
+	if seconds <= 0 || seconds > 3600 {
+		return 0, types.Wrapf(types.ErrBadRequest, "lease_seconds must be between 1 and 3600")
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
+
+func rollback(ctx context.Context, tx pgx.Tx) {
+	_ = tx.Rollback(ctx)
+}
+
 func taskToPB(task *sharedrepo.AsyncTask) *taskv1.AsyncTask {
 	out := &taskv1.AsyncTask{
 		TenantId:           task.TenantID.String(),
@@ -91,6 +196,7 @@ func taskToPB(task *sharedrepo.AsyncTask) *taskv1.AsyncTask {
 		AttemptCount:       int32(task.AttemptCount),
 		MaxAttempts:        int32(task.MaxAttempts),
 		ProgressPct:        int32(task.ProgressPct),
+		LeaseOwner:         task.LeaseOwner,
 		ErrorMessage:       task.ErrorMessage,
 		CompensatingAction: task.CompensatingAction,
 		WebhookUrl:         task.WebhookURL,
@@ -120,6 +226,8 @@ func toStatus(err error) error {
 		return status.Error(codes.NotFound, "task not found")
 	case errors.Is(err, types.ErrBadRequest), errors.Is(err, types.ErrInvalidState):
 		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, types.ErrLeaseTaken):
+		return status.Error(codes.AlreadyExists, "task lease is not held by this worker")
 	case errors.Is(err, types.ErrForbidden):
 		return status.Error(codes.PermissionDenied, "forbidden")
 	case errors.Is(err, types.ErrUnauthorized):

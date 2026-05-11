@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-gpu-smoke-workload-template
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-gpu-smoke-workload-template
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-infra-f
+data:
+  README: |
+    This template is intentionally stored as data, not applied as a live Job.
+    Operators can render it after selecting a customer-approved diagnostic
+    image and GPU resource key for the target site.
+  smoke-job.yaml: |
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: ani-gpu-smoke
+      namespace: ani-system
+      labels:
+        app.kubernetes.io/name: ani-gpu-smoke
+        app.kubernetes.io/part-of: ani-platform
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          schedulerName: volcano
+          containers:
+            - name: gpu-smoke
+              image: "<customer-approved-gpu-diagnostic-image>"
+              command: ["/bin/sh", "-c", "nvidia-smi || true"]
+              resources:
+                limits:
+                  nvidia.com/gpu: "1"
+          nodeSelector:
+            ani.kubercloud.io/gpu-node: "true"

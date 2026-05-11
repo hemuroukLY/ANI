@@ -1,0 +1,54 @@
+global:
+  profile: instance-foundation
+
+infrastructure:
+  instances:
+    enabled: true
+    lifecycle:
+      supportedActions:
+        - create
+        - start
+        - stop
+        - restart
+        - resize
+        - delete
+      terminalStates:
+        - stopped
+        - failed
+        - deleted
+    networkPlanes:
+      tenantVPC:
+        enabled: true
+        provider: kubeovn
+        defaultForBusinessTraffic: true
+      foundationMesh:
+        enabled: true
+        provider: networkpolicy
+        outsideTenantVPC: true
+      storage:
+        enabled: true
+        provider: networkpolicy
+      management:
+        enabled: true
+        provider: ani-gateway
+      publicIngress:
+        enabled: true
+        provider: ani-gateway
+        defaultEnabled: false
+    storageAttachments:
+      rootDisk:
+        defaultStorageClass: ani-block
+        retainByDefault: true
+      dataDisk:
+        defaultStorageClass: ani-block
+        retainByDefault: true
+      sharedPVC:
+        defaultStorageClass: ani-shared
+        retainByDefault: true
+      objectFuse:
+        defaultBucketClasses:
+          - model
+          - dataset
+          - kb_doc
+      ephemeral:
+        retainByDefault: false

@@ -3,11 +3,12 @@ package worker
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kubercloud/ani/pkg/ports"
 	sharedrepo "github.com/kubercloud/ani/pkg/repo"
-	"github.com/nats-io/nats.go"
 )
 
 type OutboxPublisherConfig struct {
@@ -17,7 +18,7 @@ type OutboxPublisherConfig struct {
 
 type OutboxPublisher struct {
 	db     *pgxpool.Pool
-	js     nats.JetStreamContext
+	bus    ports.MessageBus
 	repo   sharedrepo.OutboxRepo
 	cfg    OutboxPublisherConfig
 	logger *slog.Logger
@@ -25,7 +26,7 @@ type OutboxPublisher struct {
 
 func NewOutboxPublisher(
 	db *pgxpool.Pool,
-	js nats.JetStreamContext,
+	bus ports.MessageBus,
 	repo sharedrepo.OutboxRepo,
 	cfg OutboxPublisherConfig,
 	logger *slog.Logger,
@@ -38,7 +39,7 @@ func NewOutboxPublisher(
 	}
 	return &OutboxPublisher{
 		db:     db,
-		js:     js,
+		bus:    bus,
 		repo:   repo,
 		cfg:    cfg,
 		logger: logger,
@@ -87,7 +88,17 @@ func (p *OutboxPublisher) publishOnce(ctx context.Context) error {
 
 	ids := make([]int64, 0, len(events))
 	for _, event := range events {
-		if _, err := p.js.Publish(event.EventType, event.Payload); err != nil {
+		if err := p.bus.Publish(ctx, ports.EventEnvelope{
+			TenantID:      event.TenantID.String(),
+			AggregateID:   event.AggregateID.String(),
+			AggregateType: event.AggregateType,
+			EventType:     event.EventType,
+			Payload:       event.Payload,
+			OccurredAt:    event.CreatedAt,
+		}, ports.PublishOptions{
+			Subject: event.EventType,
+			Key:     strconv.FormatInt(event.ID, 10),
+		}); err != nil {
 			return err
 		}
 		ids = append(ids, event.ID)

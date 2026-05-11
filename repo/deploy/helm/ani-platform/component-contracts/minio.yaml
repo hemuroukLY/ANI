@@ -1,0 +1,24 @@
+component: minio
+provider: minio
+purpose: S3-compatible object storage for models, datasets, and knowledge-base documents
+required: true
+modeOptions:
+  - external
+  - managed
+buckets:
+  - name: ani-models
+    purpose: model repository objects
+  - name: ani-datasets
+    purpose: training and evaluation datasets
+  - name: ani-kb-docs
+    purpose: uploaded knowledge-base source documents
+secrets:
+  - name: ani-bootstrap-placeholders
+    keys:
+      - minio-endpoint
+validation:
+  offline:
+    - yaml-parse
+  cluster:
+    - bucket-exists-or-create
+    - object-put-get-smoke-test

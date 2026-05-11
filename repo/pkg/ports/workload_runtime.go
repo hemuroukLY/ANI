@@ -1,0 +1,483 @@
+package ports
+
+import (
+	"context"
+	"time"
+)
+
+type WorkloadKind string
+
+const (
+	WorkloadKindVM           WorkloadKind = "vm"
+	WorkloadKindContainer    WorkloadKind = "container"
+	WorkloadKindGPUContainer WorkloadKind = "gpu_container"
+	WorkloadKindInference    WorkloadKind = "inference"
+	WorkloadKindNotebook     WorkloadKind = "notebook"
+	WorkloadKindAgentSandbox WorkloadKind = "agent_sandbox"
+	WorkloadKindBatchJob     WorkloadKind = "batch_job"
+)
+
+type WorkloadState string
+
+const (
+	WorkloadStatePending      WorkloadState = "pending"
+	WorkloadStateProvisioning WorkloadState = "provisioning"
+	WorkloadStateRunning      WorkloadState = "running"
+	WorkloadStateStarting     WorkloadState = "starting"
+	WorkloadStateStopping     WorkloadState = "stopping"
+	WorkloadStateStopped      WorkloadState = "stopped"
+	WorkloadStateFailed       WorkloadState = "failed"
+	WorkloadStateDeleting     WorkloadState = "deleting"
+	WorkloadStateDeleted      WorkloadState = "deleted"
+)
+
+type WorkloadLifecycleAction string
+
+const (
+	WorkloadLifecycleCreate  WorkloadLifecycleAction = "create"
+	WorkloadLifecycleStart   WorkloadLifecycleAction = "start"
+	WorkloadLifecycleStop    WorkloadLifecycleAction = "stop"
+	WorkloadLifecycleRestart WorkloadLifecycleAction = "restart"
+	WorkloadLifecycleResize  WorkloadLifecycleAction = "resize"
+	WorkloadLifecycleDelete  WorkloadLifecycleAction = "delete"
+)
+
+type NetworkPlane string
+
+const (
+	NetworkPlaneTenantVPC      NetworkPlane = "tenant_vpc"
+	NetworkPlaneFoundationMesh NetworkPlane = "foundation_mesh"
+	NetworkPlaneStorage        NetworkPlane = "storage"
+	NetworkPlaneManagement     NetworkPlane = "management"
+	NetworkPlanePublicIngress  NetworkPlane = "public_ingress"
+)
+
+type StorageAttachmentKind string
+
+const (
+	StorageAttachmentRootDisk   StorageAttachmentKind = "root_disk"
+	StorageAttachmentDataDisk   StorageAttachmentKind = "data_disk"
+	StorageAttachmentSharedPVC  StorageAttachmentKind = "shared_pvc"
+	StorageAttachmentObjectFuse StorageAttachmentKind = "object_fuse"
+	StorageAttachmentEphemeral  StorageAttachmentKind = "ephemeral"
+)
+
+type WorkloadResourceRequest struct {
+	CPU          string
+	Memory       string
+	GPU          GPUSchedulingRequest
+	StorageGiB   int64
+	StorageClass string
+}
+
+type WorkloadNetworkAttachment struct {
+	Plane       NetworkPlane
+	NetworkID   string
+	SubnetID    string
+	IPAddress   string
+	Primary     bool
+	Required    bool
+	PolicyRefs  []string
+	Description string
+}
+
+type WorkloadNetworkPolicy struct {
+	TenantIsolated          bool
+	AllowIngressFromGateway bool
+	AllowEgressToInternet   bool
+	AllowedEgressCIDRs      []string
+	Attachments             []WorkloadNetworkAttachment
+}
+
+type WorkloadStorageAttachment struct {
+	Name         string
+	Kind         StorageAttachmentKind
+	MountPath    string
+	SizeGiB      int64
+	StorageClass string
+	ReadOnly     bool
+	Required     bool
+	SourceRef    string
+}
+
+type VMInstanceSpec struct {
+	BootImage       string
+	CloudInitSecret string
+	SSHKeySecret    string
+	Firmware        string
+	MachineType     string
+	RootDisk        WorkloadStorageAttachment
+	DataDisks       []WorkloadStorageAttachment
+}
+
+type ContainerInstanceSpec struct {
+	ImagePullSecret string
+	Ports           []int32
+	Volumes         []WorkloadStorageAttachment
+}
+
+type InstanceLifecyclePolicy struct {
+	AutoStart        bool
+	RestartOnFailure bool
+	DeleteWithTenant bool
+	RetainStorage    bool
+	MaxRestarts      int
+	TTL              time.Duration
+}
+
+type WorkloadSpec struct {
+	TenantID           string
+	Name               string
+	Kind               WorkloadKind
+	Image              string
+	Command            []string
+	Args               []string
+	Resources          WorkloadResourceRequest
+	Network            WorkloadNetworkPolicy
+	Storage            []WorkloadStorageAttachment
+	VM                 *VMInstanceSpec
+	Container          *ContainerInstanceSpec
+	Lifecycle          InstanceLifecyclePolicy
+	Labels             map[string]string
+	Annotations        map[string]string
+	RuntimeClassName   string
+	SchedulerName      string
+	ServiceAccountName string
+	TTL                time.Duration
+}
+
+type WorkloadRef struct {
+	TenantID   string
+	InstanceID string
+	Kind       WorkloadKind
+	ProviderID string
+}
+
+type WorkloadStatus struct {
+	Ref       WorkloadRef
+	State     WorkloadState
+	Endpoint  string
+	NodeName  string
+	Reason    string
+	Networks  []WorkloadNetworkAttachment
+	Storage   []WorkloadStorageAttachment
+	UpdatedAt time.Time
+}
+
+type WorkloadManifest struct {
+	Name     string
+	Kind     string
+	Provider string
+	Content  string
+}
+
+type WorkloadAdmissionResult struct {
+	Allowed  bool
+	Reason   string
+	Warnings []string
+}
+
+type WorkloadPlanAuditRecord struct {
+	TenantID        string
+	UserID          string
+	InstanceID      string
+	InstanceName    string
+	WorkloadKind    WorkloadKind
+	Provider        string
+	Manifests       []WorkloadManifest
+	AdmissionResult WorkloadAdmissionResult
+	CreatedAt       time.Time
+}
+
+type WorkloadProviderDryRunResult struct {
+	Accepted      bool
+	Provider      string
+	ManifestCount int
+	Reason        string
+	Warnings      []string
+	CheckedAt     time.Time
+}
+
+type WorkloadProviderApplyRequest struct {
+	TenantID        string
+	UserID          string
+	InstanceID      string
+	AuditID         string
+	PermissionProof string
+	Operation       WorkloadLifecycleAction
+	Manifests       []WorkloadManifest
+	AdmissionResult WorkloadAdmissionResult
+	DryRunResult    WorkloadProviderDryRunResult
+	RequestedAt     time.Time
+}
+
+type WorkloadProviderApplyResult struct {
+	Applied       bool
+	Provider      string
+	ManifestCount int
+	Operation     WorkloadLifecycleAction
+	ResourceRefs  []string
+	Reason        string
+	Warnings      []string
+	AppliedAt     time.Time
+}
+
+type WorkloadProviderObservation struct {
+	TenantID     string
+	InstanceID   string
+	Kind         WorkloadKind
+	Provider     string
+	ResourceRefs []string
+	Phase        string
+	Endpoint     string
+	NodeName     string
+	Reason       string
+	Networks     []WorkloadNetworkAttachment
+	Storage      []WorkloadStorageAttachment
+	ObservedAt   time.Time
+}
+
+type WorkloadReconcileRequest struct {
+	AuditID     string
+	Current     WorkloadStatus
+	ApplyResult WorkloadProviderApplyResult
+	Observation WorkloadProviderObservation
+}
+
+type WorkloadReconcileResult struct {
+	Status       WorkloadStatus
+	Changed      bool
+	Reason       string
+	ReconciledAt time.Time
+}
+
+type WorkloadProviderStatusRequest struct {
+	TenantID    string
+	InstanceID  string
+	Kind        WorkloadKind
+	ApplyResult WorkloadProviderApplyResult
+	RequestedAt time.Time
+}
+
+type WorkloadInstanceCreateRequest struct {
+	Spec            WorkloadSpec
+	UserID          string
+	PermissionProof string
+	RequestedAt     time.Time
+}
+
+type WorkloadInstanceCreateResult struct {
+	Ref          WorkloadRef
+	AuditID      string
+	Manifests    []WorkloadManifest
+	Admission    WorkloadAdmissionResult
+	DryRun       WorkloadProviderDryRunResult
+	Apply        WorkloadProviderApplyResult
+	Observation  WorkloadProviderObservation
+	Reconcile    WorkloadReconcileResult
+	FinalStatus  WorkloadStatus
+	Orchestrated bool
+}
+
+type WorkloadInstanceGetRequest struct {
+	TenantID   string
+	InstanceID string
+}
+
+type WorkloadInstanceListRequest struct {
+	TenantID string
+	Kind     WorkloadKind
+}
+
+type WorkloadInstanceLifecycleRequest struct {
+	TenantID        string
+	InstanceID      string
+	Action          WorkloadLifecycleAction
+	UserID          string
+	PermissionProof string
+	RequestedAt     time.Time
+}
+
+type WorkloadInstanceLifecycleResult struct {
+	Action    WorkloadLifecycleAction
+	Accepted  bool
+	Reason    string
+	Warnings  []string
+	CheckedAt time.Time
+}
+
+type WorkloadInstanceResizeRequest struct {
+	TenantID        string
+	InstanceID      string
+	Resources       WorkloadResourceRequest
+	UserID          string
+	PermissionProof string
+	RequestedAt     time.Time
+}
+
+type WorkloadInstanceOpsAction string
+
+const (
+	WorkloadInstanceOpsLogs      WorkloadInstanceOpsAction = "logs"
+	WorkloadInstanceOpsEvents    WorkloadInstanceOpsAction = "events"
+	WorkloadInstanceOpsMetrics   WorkloadInstanceOpsAction = "metrics"
+	WorkloadInstanceOpsTerminal  WorkloadInstanceOpsAction = "terminal"
+	WorkloadInstanceOpsExec      WorkloadInstanceOpsAction = "exec"
+	WorkloadInstanceOpsVMConsole WorkloadInstanceOpsAction = "vm_console"
+	WorkloadInstanceOpsVMVNC     WorkloadInstanceOpsAction = "vm_vnc"
+	WorkloadInstanceOpsVMSerial  WorkloadInstanceOpsAction = "vm_serial_console"
+)
+
+type WorkloadInstanceOpsRequest struct {
+	TenantID        string
+	InstanceID      string
+	Action          WorkloadInstanceOpsAction
+	Protocol        string
+	ContainerName   string
+	Command         []string
+	SinceSeconds    int64
+	Limit           int32
+	UserID          string
+	PermissionProof string
+	RequestedAt     time.Time
+}
+
+type WorkloadInstanceOpsResult struct {
+	Action     WorkloadInstanceOpsAction `json:"action"`
+	Accepted   bool                      `json:"accepted"`
+	SessionID  string                    `json:"session_id"`
+	Protocol   string                    `json:"protocol"`
+	ConnectURL string                    `json:"connect_url"`
+	Output     string                    `json:"output"`
+	Reason     string                    `json:"reason"`
+	Warnings   []string                  `json:"warnings"`
+	CheckedAt  time.Time                 `json:"checked_at"`
+	ExpiresAt  time.Time                 `json:"expires_at"`
+}
+
+type WorkloadInstanceRecord struct {
+	TenantID     string
+	InstanceID   string
+	Name         string
+	Kind         WorkloadKind
+	Provider     string
+	AuditID      string
+	ResourceRefs []string
+	Status       WorkloadStatus
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type WorkloadRuntimeCapabilities struct {
+	SupportedKinds         []WorkloadKind
+	SupportsGPU            bool
+	SupportsVM             bool
+	SupportsRuntimeClass   bool
+	SupportsTenantNetwork  bool
+	SupportsInstanceResize bool
+}
+
+// WorkloadRuntime owns instance lifecycle across VM, normal container, GPU
+// container, notebook, agent sandbox, batch, and inference workloads. Business
+// services depend on this port instead of directly binding to KubeVirt,
+// Kubernetes Pod/Deployment APIs, or future runtime providers.
+type WorkloadRuntime interface {
+	Capabilities(ctx context.Context) (WorkloadRuntimeCapabilities, error)
+	Create(ctx context.Context, spec WorkloadSpec) (WorkloadRef, error)
+	Get(ctx context.Context, ref WorkloadRef) (WorkloadStatus, error)
+	ApplyLifecycle(ctx context.Context, ref WorkloadRef, action WorkloadLifecycleAction) (WorkloadStatus, error)
+	Delete(ctx context.Context, ref WorkloadRef) error
+	List(ctx context.Context, tenantID string, kind WorkloadKind) ([]WorkloadStatus, error)
+}
+
+// WorkloadRenderer converts a planned ANI instance into provider manifests for
+// review, dry-run validation, and later provider adapter execution.
+type WorkloadRenderer interface {
+	Render(ctx context.Context, spec WorkloadSpec) ([]WorkloadManifest, error)
+}
+
+// WorkloadAdmission validates rendered provider manifests before any real
+// provider adapter can submit server-side dry-run or create requests.
+type WorkloadAdmission interface {
+	Review(ctx context.Context, manifests []WorkloadManifest) (WorkloadAdmissionResult, error)
+}
+
+// WorkloadPlanAuditStore persists the plan/render/admission trail before any
+// provider-side dry-run or real create/apply action is allowed.
+type WorkloadPlanAuditStore interface {
+	RecordPlan(ctx context.Context, record WorkloadPlanAuditRecord) (string, error)
+}
+
+// WorkloadProviderDryRun runs provider-side validation without creating
+// resources. Implementations may call Kubernetes dryRun=All, KubeVirt through
+// Kubernetes dry-run, or an equivalent customer cloud validation API.
+type WorkloadProviderDryRun interface {
+	DryRun(ctx context.Context, manifests []WorkloadManifest, admission WorkloadAdmissionResult) (WorkloadProviderDryRunResult, error)
+}
+
+// WorkloadProviderApply is the controlled boundary for real provider
+// create/apply execution. Implementations must fail closed unless execution is
+// explicitly enabled and the request carries admission, audit, and provider
+// dry-run evidence.
+type WorkloadProviderApply interface {
+	Apply(ctx context.Context, request WorkloadProviderApplyRequest) (WorkloadProviderApplyResult, error)
+}
+
+// WorkloadStatusReconciler converts provider observations into ANI workload
+// lifecycle state. Business services must depend on this boundary instead of
+// polling Kubernetes, KubeVirt, or customer cloud status APIs directly.
+type WorkloadStatusReconciler interface {
+	Reconcile(ctx context.Context, request WorkloadReconcileRequest) (WorkloadReconcileResult, error)
+}
+
+// WorkloadProviderStatusReader reads provider-specific resource status and
+// normalizes it into WorkloadProviderObservation. Provider SDK usage belongs
+// inside adapters, not business services.
+type WorkloadProviderStatusReader interface {
+	Observe(ctx context.Context, request WorkloadProviderStatusRequest) (WorkloadProviderObservation, error)
+}
+
+// WorkloadInstanceOrchestrator exposes the business-facing instance creation
+// workflow through ANI ports: plan, render, admission, audit, dry-run, gated
+// apply, provider status observation, and lifecycle reconcile.
+type WorkloadInstanceOrchestrator interface {
+	Create(ctx context.Context, request WorkloadInstanceCreateRequest) (WorkloadInstanceCreateResult, error)
+}
+
+// WorkloadInstanceStore persists queryable instance state, provider resource
+// references, and audit correlation. Runtime adapters may keep local planning
+// state, but business queries should use this store-backed boundary.
+type WorkloadInstanceStore interface {
+	UpsertStatus(ctx context.Context, record WorkloadInstanceRecord) error
+	Get(ctx context.Context, tenantID string, instanceID string) (WorkloadInstanceRecord, error)
+	List(ctx context.Context, tenantID string, kind WorkloadKind) ([]WorkloadInstanceRecord, error)
+}
+
+// WorkloadInstanceService is the business-facing API layer for VM, container,
+// GPU container, and future instance types. It wraps orchestration and
+// persistent query ports without exposing provider-specific resources.
+type WorkloadInstanceService interface {
+	Create(ctx context.Context, request WorkloadInstanceCreateRequest) (WorkloadInstanceCreateResult, error)
+	Get(ctx context.Context, request WorkloadInstanceGetRequest) (WorkloadInstanceRecord, error)
+	List(ctx context.Context, request WorkloadInstanceListRequest) ([]WorkloadInstanceRecord, error)
+	Start(ctx context.Context, request WorkloadInstanceLifecycleRequest) (WorkloadInstanceRecord, error)
+	Stop(ctx context.Context, request WorkloadInstanceLifecycleRequest) (WorkloadInstanceRecord, error)
+	Restart(ctx context.Context, request WorkloadInstanceLifecycleRequest) (WorkloadInstanceRecord, error)
+	Resize(ctx context.Context, request WorkloadInstanceResizeRequest) (WorkloadInstanceRecord, error)
+	Delete(ctx context.Context, request WorkloadInstanceLifecycleRequest) (WorkloadInstanceRecord, error)
+	Ops(ctx context.Context, request WorkloadInstanceOpsRequest) (WorkloadInstanceOpsResult, error)
+}
+
+// WorkloadInstanceLifecycleExecutor encapsulates provider-side lifecycle
+// actions after an instance already exists. Provider SDK usage must remain
+// inside adapters.
+type WorkloadInstanceLifecycleExecutor interface {
+	Apply(ctx context.Context, request WorkloadInstanceLifecycleRequest, record WorkloadInstanceRecord) (WorkloadInstanceLifecycleResult, error)
+}
+
+// WorkloadInstanceOps encapsulates visual operations for container-like
+// instances: logs, events, metrics, terminal, and exec. Provider SDK usage must
+// remain inside the ops adapter.
+type WorkloadInstanceOps interface {
+	Run(ctx context.Context, request WorkloadInstanceOpsRequest, record WorkloadInstanceRecord) (WorkloadInstanceOpsResult, error)
+}

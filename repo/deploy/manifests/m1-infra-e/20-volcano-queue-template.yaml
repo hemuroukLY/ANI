@@ -1,0 +1,21 @@
+apiVersion: scheduling.volcano.sh/v1beta1
+kind: Queue
+metadata:
+  name: ani-inference
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/queue-class: inference
+spec:
+  weight: 10
+  reclaimable: false
+---
+apiVersion: scheduling.volcano.sh/v1beta1
+kind: Queue
+metadata:
+  name: ani-training
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/queue-class: training
+spec:
+  weight: 5
+  reclaimable: true

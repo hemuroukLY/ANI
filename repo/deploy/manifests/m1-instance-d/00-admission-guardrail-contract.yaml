@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-admission-guardrail-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-admission-guardrail-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-d
+data:
+  adapter: |
+    pkg/adapters/runtime.LocalAdmissionGuard
+  purpose: |
+    Review rendered provider manifests before any future provider adapter can
+    submit server-side dry-run or create requests.
+  required-checks: |
+    allowed kinds: VirtualMachine, Deployment, Job
+    required label: ani.kubercloud.io/tenant-id
+    required label: ani.kubercloud.io/instance
+    required annotation: ani.kubercloud.io/render-mode=dry-run
+    required annotation: ani.kubercloud.io/network-planes
+    deny: hostNetwork=true
+    deny: privileged containers
+  execution-boundary: |
+    This guardrail does not create cluster resources. Future Kubernetes/KubeVirt
+    provider adapters must pass local admission before server-side dry-run and
+    must pass server-side dry-run before real apply/create.

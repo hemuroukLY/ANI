@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-provider-renderer-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-provider-renderer-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-c
+data:
+  adapter: |
+    pkg/adapters/runtime.KubernetesDryRunRenderer
+  purpose: |
+    Convert a planned ANI instance into provider manifests for review and
+    server-side dry-run before a provider adapter applies resources.
+  provider-mapping: |
+    vm -> KubeVirt VirtualMachine
+    container -> Kubernetes Deployment
+    gpu_container -> Kubernetes Deployment with GPU limits, schedulerName, runtimeClassName
+    inference -> Kubernetes Deployment with GPU/runtime annotations
+    notebook -> Kubernetes Deployment with gateway ingress intent
+    agent_sandbox -> Kubernetes Deployment with sandbox labels and network policy intent
+    batch_job -> Kubernetes Job
+  hard-rules: |
+    Renderer must call PlanningRuntime before rendering.
+    Renderer must not create cluster resources.
+    Renderer output must include render-mode=dry-run.
+    Renderer output must preserve network plane and storage attachment annotations.
+    GPU manifests must preserve GPUInventory scheduling decision fields.

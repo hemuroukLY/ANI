@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-provider-adapter-flow
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-provider-adapter-flow
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-k
+data:
+  dry-run-flow: |
+    WorkloadAdmission
+    KubernetesProviderAdapter.DryRun
+    KubernetesProviderClient.ServerSideDryRun
+    dryRun=All
+  apply-flow: |
+    WorkloadProviderApplyRequest
+    KubernetesProviderAdapter.Apply
+    KubernetesProviderClient.Apply
+    resource refs
+  status-flow: |
+    WorkloadProviderStatusRequest
+    KubernetesProviderAdapter.Observe
+    KubernetesProviderClient.Observe
+    WorkloadProviderObservation
+  future-client-policy: |
+    The production KubernetesProviderClient may use client-go, dynamic client,
+    controller-runtime, or KubeVirt client libraries only inside adapter-owned
+    packages. It must preserve tenant, audit, permission, and resource-ref
+    correlation.

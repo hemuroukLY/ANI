@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-planner-state-machine
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-planner-state-machine
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-b
+data:
+  lifecycle-actions: |
+    create
+    start
+    stop
+    restart
+    resize
+    delete
+  planner-transitions: |
+    create -> pending or provisioning when autoStart=true
+    start -> running
+    stop -> stopped
+    restart -> running only from running
+    resize -> current state unless deleted
+    delete -> deleted
+  early-failure-policy: |
+    invalid network attachments, missing VM root disk, missing image, missing
+    GPUInventory, invalid object_fuse sourceRef, or unsupported kind must fail
+    before any provider resource is created.

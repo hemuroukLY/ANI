@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-provider-apply-flow
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-provider-apply-flow
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-g
+data:
+  required-flow: |
+    PlanningRuntime
+    WorkloadRenderer
+    WorkloadAdmission
+    WorkloadPlanAuditStore
+    WorkloadProviderDryRun
+    WorkloadProviderApply
+  result-contract: |
+    applied
+    provider
+    manifestCount
+    operation
+    resourceRefs
+    reason
+    warnings
+    appliedAt
+  real-provider-policy: |
+    Kubernetes and KubeVirt adapters must not bypass server-side dry-run,
+    audit id checks, user permission checks, tenant scoping, or operation
+    allowlists before create/apply. Customer VM/cloud providers must expose
+    equivalent validation and idempotency behavior before real execution.
+  audit-closure-policy: |
+    The provider apply result must be correlated to the prior audit id.
+    Later runtime status reconciliation must update the instance lifecycle
+    state without removing the immutable plan/render/admission/dry-run trail.

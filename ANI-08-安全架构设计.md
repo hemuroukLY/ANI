@@ -185,6 +185,11 @@ type ANIClaims struct {
 
 **安全要求：**
 - AccessToken 有效期 1 小时，RefreshToken 7 天（不可续期，到期重新登录）
+- `RevokeToken` 将 JWT `jti` 写入 `jwt_blocklist` 持久化表，并写入 `CacheStore` 快路径；JWT 校验先查缓存，未命中时查询持久化表并回填缓存。
+- `RefreshToken` 使用 `refresh_tokens` 持久化表校验，只返回新的 AccessToken，不续发 RefreshToken，符合 7 天不可续期策略。
+- OIDC 登录使用 `BeginOIDCLogin` 生成 state 并构造 Dex 授权 URL；`CompleteOIDCLogin` 必须校验 state 与 redirect_uri 后才能执行 code exchange / ID token verifier。
+- OIDC ID Token 校验优先支持 Dex JWKS discovery 与 `kid` 公钥选择；静态 RS256 公钥配置保留为离线环境 fallback。
+- OIDC group 到 ANI role 必须显式白名单映射；未配置映射时只授予 `user`，不得直接信任外部 group 名获取 `tenant-admin` 或 `platform-admin`。
 - `jti`（JWT ID）用于吊销检查（黑名单存于 Redis，O(1) 查询）
 - 签名算法：RS256（非对称，公钥可公开，私钥由认证服务持有）
 - 密钥轮换：私钥每 90 天自动轮换，旧公钥保留 24 小时用于存量 Token 验证

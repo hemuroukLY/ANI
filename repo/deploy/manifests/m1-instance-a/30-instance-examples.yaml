@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-examples
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-examples
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-a
+data:
+  vm-instance.example.yaml: |
+    tenantID: tenant-a
+    name: erp-vm-01
+    kind: vm
+    vm:
+      bootImage: harbor.ani.internal/base/ubuntu-22.04.qcow2
+      machineType: q35
+      rootDisk:
+        name: root
+        kind: root_disk
+        sizeGiB: 100
+        storageClass: ani-block
+    network:
+      attachments:
+        - plane: tenant_vpc
+          networkID: tenant-a-vpc
+          primary: true
+          required: true
+        - plane: foundation_mesh
+          networkID: ani-foundation
+          required: true
+        - plane: management
+          networkID: ani-management
+          required: true
+  container-instance.example.yaml: |
+    tenantID: tenant-a
+    name: app-pod-01
+    kind: container
+    image: harbor.ani.internal/apps/app:1.0.0
+    network:
+      attachments:
+        - plane: tenant_vpc
+          networkID: tenant-a-vpc
+          primary: true
+          required: true
+        - plane: foundation_mesh
+          networkID: ani-foundation
+          required: true
+    storage:
+      - name: cache
+        kind: ephemeral
+        mountPath: /cache
+        sizeGiB: 20
+  gpu-container-instance.example.yaml: |
+    tenantID: tenant-a
+    name: cuda-worker-01
+    kind: gpu_container
+    image: harbor.ani.internal/runtime/cuda:12.4
+    resources:
+      gpu:
+        preferredVendors:
+          - nvidia
+        requiredCount: 1
+        pool: inference-a100
+    network:
+      attachments:
+        - plane: tenant_vpc
+          networkID: tenant-a-vpc
+          primary: true
+          required: true
+        - plane: storage
+          networkID: ani-storage
+          required: true
+    storage:
+      - name: datasets
+        kind: object_fuse
+        mountPath: /datasets
+        sourceRef: bucket://ani-datasets/tenant-a

@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-gpu-preflight
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-gpu-preflight
+    app.kubernetes.io/part-of: ani-platform
+data:
+  required-crds: |
+    queues.scheduling.volcano.sh
+  recommended-node-label-selector: |
+    ani.kubercloud.io/gpu-node=true
+  preflight.sh: |
+    #!/bin/sh
+    set -eu
+
+    echo "[ani-gpu-preflight] checking GPU node labels"
+    kubectl get nodes -l ani.kubercloud.io/gpu-node=true >/dev/null
+
+    echo "[ani-gpu-preflight] checking Volcano CRDs"
+    for crd in $(cat /config/required-crds); do
+      kubectl get crd "${crd}" >/dev/null
+    done
+
+    echo "[ani-gpu-preflight] checking GPU namespaces"
+    kubectl get namespace ani-gpu-system >/dev/null
+    kubectl get namespace volcano-system >/dev/null
+
+    echo "[ani-gpu-preflight] passed"

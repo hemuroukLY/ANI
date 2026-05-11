@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-provider-dry-run-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-provider-dry-run-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-f
+data:
+  port: |
+    WorkloadProviderDryRun
+  adapter: |
+    pkg/adapters/runtime.LocalProviderDryRun
+  purpose: |
+    Execute provider-side validation after PlanningRuntime, WorkloadRenderer,
+    WorkloadAdmission, and WorkloadPlanAuditStore have completed.
+  provider-mapping: |
+    kubevirt -> kubevirt.io/v1 VirtualMachine
+    kubernetes -> apps/v1 Deployment
+    kubernetes -> batch/v1 Job
+  hard-rules: |
+    admission must be allowed before provider dry-run can proceed
+    mixed providers are not allowed in one dry-run batch
+    unknown providers must fail closed
+    local dry-run does not create resources
+    future Kubernetes adapter must use dryRun=All before apply/create

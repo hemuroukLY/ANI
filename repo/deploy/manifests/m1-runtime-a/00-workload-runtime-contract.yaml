@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-workload-runtime-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-workload-runtime-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-runtime-a
+data:
+  supported-workload-kinds: |
+    vm
+    container
+    gpu_container
+    inference
+    notebook
+    agent_sandbox
+    batch_job
+  required-instance-contract: |
+    Every user-visible runtime object must be represented as an ANI instance
+    with tenantID, instanceID, kind, providerID, state, endpoint, nodeName,
+    reason, labels, and lifecycle timestamps.
+  runtime-provider-contract: |
+    vm: KubeVirt or customer VM/cloud provider adapter
+    container: Kubernetes Pod/Deployment/Job adapter
+    gpu_container: Kubernetes/HAMi/Volcano adapter plus GPUInventory decision
+    inference: model runtime adapter built on WorkloadRuntime
+    notebook: container runtime adapter with persistent volume and ingress policy
+    agent_sandbox: container runtime adapter with strict network and privilege policy
+    batch_job: Kubernetes Job or Volcano Job adapter

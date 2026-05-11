@@ -1,0 +1,25 @@
+component: nats
+provider: nats
+purpose: JetStream-backed asynchronous task queue and lifecycle events
+required: true
+modeOptions:
+  - external
+  - managed
+jetstream:
+  required: true
+  subjects:
+    - ani.tasks.model.*
+    - ani.tasks.kb.*
+    - ani.tasks.import.*
+    - ani.tasks.inference.*
+    - ani.events.task.completed.*
+secrets:
+  - name: ani-bootstrap-placeholders
+    keys:
+      - nats-url
+validation:
+  offline:
+    - yaml-parse
+  cluster:
+    - stream-create-dry-run
+    - publish-subscribe-smoke-test

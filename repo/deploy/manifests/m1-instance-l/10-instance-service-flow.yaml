@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-service-flow
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-service-flow
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-l
+data:
+  create-flow: |
+    WorkloadInstanceService.Create
+    WorkloadInstanceOrchestrator
+    WorkloadInstanceStore
+  query-flow: |
+    WorkloadInstanceService.Get
+    WorkloadInstanceService.List
+    WorkloadInstanceStore.Get
+    WorkloadInstanceStore.List
+  instance-types: |
+    VM instance
+    container instance
+    GPU container instance
+  future-grpc-policy: |
+    Future gRPC/HTTP APIs may wrap WorkloadInstanceService, but must preserve
+    tenant scope, RBAC permission proof, audit correlation, and provider
+    abstraction boundaries.

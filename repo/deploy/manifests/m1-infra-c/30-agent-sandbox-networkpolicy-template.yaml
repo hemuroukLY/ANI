@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ani-agent-sandbox-egress-deny
+  namespace: ani-tenant-template
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/tenant-id: REPLACE_WITH_TENANT_UUID
+spec:
+  podSelector:
+    matchLabels:
+      ani.kubercloud.io/workload-kind: agent-sandbox
+  policyTypes:
+    - Egress
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ani-agent-sandbox-allow-platform-egress
+  namespace: ani-tenant-template
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/tenant-id: REPLACE_WITH_TENANT_UUID
+spec:
+  podSelector:
+    matchLabels:
+      ani.kubercloud.io/workload-kind: agent-sandbox
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ani-system
+      ports:
+        - protocol: TCP
+          port: 8080

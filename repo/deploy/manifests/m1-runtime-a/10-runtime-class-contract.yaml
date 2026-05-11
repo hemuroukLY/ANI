@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-runtime-class-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-runtime-class-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-runtime-a
+data:
+  runtime-classes: |
+    default-container: standard Kubernetes/containerd workload
+    gpu-nvidia: NVIDIA GPU workload, optional RuntimeClass nvidia
+    gpu-huawei: Huawei Ascend workload, site-defined RuntimeClass
+    gpu-hygon: Hygon DCU workload, site-defined RuntimeClass
+    vm-kubevirt: VM workload through KubeVirt adapter
+    sandbox-kata: optional high-isolation container sandbox
+  lifecycle-states: |
+    pending
+    provisioning
+    running
+    stopped
+    failed
+    deleting
+  isolation-policy: |
+    VM, normal container, GPU container, inference, notebook, and agent sandbox
+    instances must apply tenant network isolation by default. External ingress
+    must be explicitly routed through ANI Gateway or a configured ingress adapter.

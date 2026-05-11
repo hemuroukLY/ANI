@@ -1,0 +1,27 @@
+apiVersion: kubeovn.io/v1
+kind: Vpc
+metadata:
+  name: ani-tenant-template
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/tenant-id: REPLACE_WITH_TENANT_UUID
+spec:
+  namespaces:
+    - ani-tenant-template
+---
+apiVersion: kubeovn.io/v1
+kind: Subnet
+metadata:
+  name: ani-tenant-template-private
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/tenant-id: REPLACE_WITH_TENANT_UUID
+spec:
+  protocol: IPv4
+  cidrBlock: 10.244.0.0/24
+  gateway: 10.244.0.1
+  vpc: ani-tenant-template
+  namespaces:
+    - ani-tenant-template
+  private: true
+  natOutgoing: false
