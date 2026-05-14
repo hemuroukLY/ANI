@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ani-gpu-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/component: gpu
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: volcano-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/component: scheduler

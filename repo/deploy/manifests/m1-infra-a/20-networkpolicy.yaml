@@ -1,0 +1,75 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ani-default-deny
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-default-deny
+    app.kubernetes.io/part-of: ani-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ani-allow-control-plane-egress
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-allow-control-plane-egress
+    app.kubernetes.io/part-of: ani-platform
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/part-of
+        operator: In
+        values:
+          - ani-platform
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: ani-platform
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 4222
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 19530
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ani-allow-gateway-ingress
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-allow-gateway-ingress
+    app.kubernetes.io/part-of: ani-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ani-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080

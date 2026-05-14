@@ -1,0 +1,16 @@
+component: harbor
+provider: harbor
+purpose: external container image registry for offline and customer-site deployments
+required: false
+modeOptions:
+  - external
+designConstraints:
+  - Harbor is deployed independently from ANI.
+  - ANI must not hard-depend on Harbor availability at runtime.
+  - ANI Gateway harbor-proxy is a later module-1/module-2 integration slice.
+validation:
+  offline:
+    - yaml-parse
+  cluster:
+    - registry-reachable
+    - trivy-enabled

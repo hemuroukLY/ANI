@@ -1,0 +1,25 @@
+global:
+  profile: cluster-validation
+
+infrastructure:
+  profiles:
+    clusterValidation:
+      description: Run cluster-side preflight checks before installing or upgrading ANI.
+      installDependencies: false
+      requireExistingStorageClass: true
+      requireImageMirror: false
+  validation:
+    enabled: true
+    preflightJob:
+      enabled: true
+      image: bitnami/kubectl:1.30
+      serviceAccountName: ani-cluster-preflight
+      requiredCRDs:
+        - vpcs.kubeovn.io
+        - subnets.kubeovn.io
+      requiredNamespaces:
+        - ani-system
+      requiredSecrets:
+        - namespace: ani-system
+          name: ani-bootstrap-placeholders
+      requiredStorageClasses: []

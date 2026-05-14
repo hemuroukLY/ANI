@@ -1,0 +1,43 @@
+global:
+  profile: offline
+  imageRegistry: harbor.ani.internal/ani
+  imagePullPolicy: IfNotPresent
+
+infrastructure:
+  profiles:
+    selected: offline
+  offline:
+    requireImageMirror: true
+    requirePackagedCharts: true
+    imageLockFile: deploy/offline/images.lock
+    chartLockFile: deploy/offline/charts.lock
+  postgresql:
+    mode: managed
+    component: cloudnative-pg
+    instances: 3
+    storageClassName: REPLACE_WITH_STORAGE_CLASS
+  nats:
+    mode: managed
+    component: nats
+    replicas: 3
+    jetstream:
+      enabled: true
+      fileStore:
+        storageClassName: REPLACE_WITH_STORAGE_CLASS
+  redis:
+    mode: managed
+    component: redis
+    architecture: standalone
+  minio:
+    mode: managed
+    component: minio
+    replicas: 4
+    storageClassName: REPLACE_WITH_STORAGE_CLASS
+  milvus:
+    mode: managed
+    component: milvus
+    modeName: standalone
+    storageClassName: REPLACE_WITH_STORAGE_CLASS
+  harbor:
+    mode: external
+    requiredForRuntime: false

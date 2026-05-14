@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-cluster-preflight
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-cluster-preflight
+    app.kubernetes.io/part-of: ani-platform
+data:
+  required-crds: |
+    vpcs.kubeovn.io
+    subnets.kubeovn.io
+  required-namespaces: |
+    ani-system
+  required-secrets: |
+    ani-system/ani-bootstrap-placeholders
+  required-storageclasses: |
+    REPLACE_WITH_STORAGE_CLASS
+  preflight.sh: |
+    #!/bin/sh
+    set -eu
+
+    echo "[ani-preflight] checking Kubernetes API"
+    kubectl version --short
+
+    echo "[ani-preflight] checking required namespaces"
+    for ns in $(cat /config/required-namespaces); do
+      kubectl get namespace "${ns}" >/dev/null
+    done
+
+    echo "[ani-preflight] checking required CRDs"
+    for crd in $(cat /config/required-crds); do
+      kubectl get crd "${crd}" >/dev/null
+    done
+
+    echo "[ani-preflight] checking required secrets"
+    for item in $(cat /config/required-secrets); do
+      ns="${item%/*}"
+      name="${item#*/}"
+      kubectl get secret -n "${ns}" "${name}" >/dev/null
+    done
+
+    echo "[ani-preflight] checking storage classes"
+    for sc in $(cat /config/required-storageclasses); do
+      [ "${sc}" = "REPLACE_WITH_STORAGE_CLASS" ] && continue
+      kubectl get storageclass "${sc}" >/dev/null
+    done
+
+    echo "[ani-preflight] checking network policies"
+    kubectl get networkpolicy -A >/dev/null
+
+    echo "[ani-preflight] passed"

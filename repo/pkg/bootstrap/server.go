@@ -20,6 +20,16 @@ type Config struct {
 	RedisURL    string
 	GRPCPort    int
 	ServiceName string
+
+	WorkloadProvider               string
+	WorkloadProviderApplyEnabled   bool
+	WorkloadLifecycleProvider      string
+	WorkloadLifecycleApplyEnabled  bool
+	WorkloadOpsProvider            string
+	WorkloadOpsEnabled             bool
+	KubernetesAPIHost              string
+	KubernetesBearerToken          string
+	KubernetesProviderFieldManager string
 }
 
 // MustConnect initializes all dependencies. Exits the process if any connection fails.
@@ -45,12 +55,59 @@ func MustConnect(cfg Config) *Deps {
 		os.Exit(1)
 	}
 
+	ports, err := NewCapabilitiesWithConfig(db, js, rdb, cfg.withEnvironmentOverrides())
+	if err != nil {
+		logger.Error("failed to initialize capability adapters", "err", err)
+		os.Exit(1)
+	}
+
 	return &Deps{
 		DB:     db,
 		NATS:   nc,
 		JS:     js,
 		Redis:  rdb,
+		Ports:  ports,
 		Logger: logger,
+	}
+}
+
+func (c Config) withEnvironmentOverrides() Config {
+	if value := os.Getenv("WORKLOAD_PROVIDER"); value != "" {
+		c.WorkloadProvider = value
+	}
+	if value := os.Getenv("WORKLOAD_PROVIDER_APPLY_ENABLED"); value != "" {
+		c.WorkloadProviderApplyEnabled = parseBool(value)
+	}
+	if value := os.Getenv("WORKLOAD_LIFECYCLE_PROVIDER"); value != "" {
+		c.WorkloadLifecycleProvider = value
+	}
+	if value := os.Getenv("WORKLOAD_LIFECYCLE_APPLY_ENABLED"); value != "" {
+		c.WorkloadLifecycleApplyEnabled = parseBool(value)
+	}
+	if value := os.Getenv("WORKLOAD_OPS_PROVIDER"); value != "" {
+		c.WorkloadOpsProvider = value
+	}
+	if value := os.Getenv("WORKLOAD_OPS_ENABLED"); value != "" {
+		c.WorkloadOpsEnabled = parseBool(value)
+	}
+	if value := os.Getenv("KUBERNETES_API_HOST"); value != "" {
+		c.KubernetesAPIHost = value
+	}
+	if value := os.Getenv("KUBERNETES_BEARER_TOKEN"); value != "" {
+		c.KubernetesBearerToken = value
+	}
+	if value := os.Getenv("KUBERNETES_PROVIDER_FIELD_MANAGER"); value != "" {
+		c.KubernetesProviderFieldManager = value
+	}
+	return c
+}
+
+func parseBool(value string) bool {
+	switch value {
+	case "1", "true", "TRUE", "yes", "YES", "on", "ON":
+		return true
+	default:
+		return false
 	}
 }
 

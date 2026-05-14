@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-status-reconcile-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-status-reconcile-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-h
+data:
+  port: |
+    WorkloadStatusReconciler
+  adapter: |
+    pkg/adapters/runtime.LocalStatusReconciler
+  purpose: |
+    Convert provider observations into ANI workload lifecycle state after
+    provider apply/create has completed.
+  required-evidence: |
+    audit id
+    provider apply must be applied
+    current workload tenant id
+    current workload instance id
+    observation tenant must match workload
+    observation instance must match workload
+    observation provider must match apply result
+    observation resource refs must match apply result
+  forbidden-shortcut: |
+    business services must not directly poll Kubernetes, KubeVirt, or customer
+    cloud status APIs. Provider status readers must feed WorkloadStatusReconciler.

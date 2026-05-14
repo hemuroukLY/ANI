@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-gpu-e2e-preflight
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-gpu-e2e-preflight
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-infra-f
+data:
+  required-crds: |
+    queues.scheduling.volcano.sh
+  required-namespaces: |
+    ani-gpu-system
+    volcano-system
+  required-queues: |
+    ani-inference
+    ani-training
+  required-contract-configmaps: |
+    ani-gpu-node-label-contract
+    ani-gpu-preflight
+  gpu-node-selector: |
+    ani.kubercloud.io/gpu-node=true
+  preflight.sh: |
+    #!/bin/sh
+    set -eu
+
+    require_non_empty() {
+      name="$1"
+      value="$2"
+      if [ -z "${value}" ]; then
+        echo "[ani-gpu-e2e-preflight] missing ${name}" >&2
+        exit 1
+      fi
+    }
+
+    require_list_item() {
+      path="$1"
+      label="$2"
+      while IFS= read -r item; do
+        [ -z "${item}" ] && continue
+        echo "[ani-gpu-e2e-preflight] checking ${label}: ${item}"
+        kubectl get "${item}" >/dev/null
+      done < "${path}"
+    }
+
+    selector="$(cat /config/gpu-node-selector)"
+    echo "[ani-gpu-e2e-preflight] checking GPU nodes with selector ${selector}"
+    node_names="$(kubectl get nodes -l "${selector}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
+    require_non_empty "GPU nodes" "${node_names}"
+
+    echo "[ani-gpu-e2e-preflight] checking required GPU node labels"
+    kubectl get nodes -l "${selector}" -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.ani\.kubercloud\.io/gpu-vendor}{"\t"}{.metadata.labels.ani\.kubercloud\.io/gpu-model}{"\n"}{end}' \
+      | while IFS="$(printf '\t')" read -r node vendor model; do
+          require_non_empty "gpu-vendor label on ${node}" "${vendor}"
+          require_non_empty "gpu-model label on ${node}" "${model}"
+        done
+
+    require_list_item /config/required-crds "CRD"
+
+    while IFS= read -r namespace; do
+      [ -z "${namespace}" ] && continue
+      echo "[ani-gpu-e2e-preflight] checking namespace: ${namespace}"
+      kubectl get namespace "${namespace}" >/dev/null
+    done < /config/required-namespaces
+
+    while IFS= read -r queue; do
+      [ -z "${queue}" ] && continue
+      echo "[ani-gpu-e2e-preflight] checking Volcano queue: ${queue}"
+      kubectl get queues.scheduling.volcano.sh "${queue}" >/dev/null
+    done < /config/required-queues
+
+    while IFS= read -r configmap; do
+      [ -z "${configmap}" ] && continue
+      echo "[ani-gpu-e2e-preflight] checking ANI contract ConfigMap: ${configmap}"
+      kubectl -n ani-system get configmap "${configmap}" >/dev/null
+    done < /config/required-contract-configmaps
+
+    if [ "${ANI_GPU_REQUIRE_HAMI_ALLOCATABLE:-false}" = "true" ]; then
+      echo "[ani-gpu-e2e-preflight] checking GPU allocatable resources"
+      allocatable="$(kubectl get nodes -l "${selector}" -o jsonpath='{range .items[*]}{.status.allocatable.nvidia\.com/gpu}{.status.allocatable.nvidia\.com/vgpu}{.status.allocatable.huawei\.com/Ascend910}{.status.allocatable.hygon\.com/dcu}{"\n"}{end}')"
+      require_non_empty "GPU allocatable resources" "${allocatable}"
+    fi
+
+    if [ "${ANI_GPU_REQUIRE_DCGM_SERVICE:-false}" = "true" ]; then
+      echo "[ani-gpu-e2e-preflight] checking DCGM exporter service"
+      kubectl -n ani-gpu-system get service -l app.kubernetes.io/name=dcgm-exporter >/dev/null
+    fi
+
+    echo "[ani-gpu-e2e-preflight] passed"

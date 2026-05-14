@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-kubernetes-provider-readiness-profile
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-kubernetes-provider-readiness-profile
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-n
+data:
+  dry-run-readiness: |
+    The first real-cluster client implementation must prove
+    KubernetesProviderClient.ServerSideDryRun uses dryRun=All for every
+    Kubernetes Deployment, Kubernetes Job, and KubeVirt VirtualMachine manifest.
+  apply-readiness: |
+    KubernetesProviderClient.Apply must require an accepted provider dry-run,
+    allowed WorkloadAdmission result, audit id, permission proof, tenant id,
+    instance id, and resource refs.
+  observe-readiness: |
+    KubernetesProviderClient.Observe must return WorkloadProviderObservation
+    with matching tenant id, instance id, provider, phase, and resource refs.
+  replacement-policy: |
+    Production e2e may replace only KubernetesProviderClient. The caller-facing
+    ports and orchestrator chain must stay unchanged.

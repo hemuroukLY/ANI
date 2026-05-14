@@ -57,6 +57,37 @@ M2.1-TASK-C
 
 ---
 
+## 〇、开源组件松耦合强制约定
+
+本约定优先级等同于安全边界和多租户边界。
+
+- 除 Kubernetes API 外，业务服务不得直接依赖 MinIO、Milvus、NATS JetStream、Redis、Harbor、CloudNativePG 等组件 SDK。
+- 业务代码必须依赖 ANI 自定义能力接口：`ObjectStore`、`VectorStore`、`MessageBus`、`CacheStore`、`MetadataStore`、`ImageRegistry`、`IdentityProvider`。
+- 组件名只能出现在 adapter 包、bootstrap wiring、部署 profile、集成测试和开发记录中。
+- OpenAPI/Proto 不得新增 `minio_*`、`milvus_*`、`nats_*`、`redis_*`、`harbor_*` 等组件绑定字段。
+- Helm values 顶层应表达能力和 provider，不得把默认组件当作不可替换产品边界。
+- 如确需临时直接依赖组件，必须在 development record 中标注为技术债，并给出迁移到 port/adapter 的批次编号。
+
+推荐结构：
+
+```text
+repo/pkg/ports/       # 能力接口
+repo/pkg/adapters/    # 默认组件适配器实现
+```
+
+工程护栏：
+
+- `make validate-architecture` 会扫描 Go 代码中的组件 SDK 直接导入。
+- `make test` 已包含 `validate-architecture`，新增直接组件依赖会阻断常规测试。
+- 允许的例外必须登记在 `repo/architecture/component-import-allowlist.yaml`，并写明 `reason` 与 `migrate_by`。
+- allowlist 必须标注 `coupling_level`：`port_required`、`adapter_with_extensions`、`bounded_direct` 或 `temporary_exception`。
+- `pkg/adapters/` 与 `pkg/bootstrap/` 是默认允许区；业务 service、worker、repo 层新增组件 SDK 导入默认禁止。
+- 若为了可用性、稳定性或核心性能选择 `bounded_direct`，必须限定模块边界，不得扩散到普通业务服务。
+
+详细规则见 `ANI-13-开源组件松耦合适配器架构.md`。
+
+---
+
 ## 一、模块结构
 
 ### 1.1 Go Workspace 布局
@@ -71,6 +102,8 @@ repo/
 │   │   └── pagination.go           # CursorPage[T]、EncodeCursor、DecodeCursor
 │   ├── nats/
 │   │   └── messages.go              # 所有 NATS Subject 的 Payload struct（唯一来源）
+│   ├── ports/                       # 组件无关的能力接口（ObjectStore/VectorStore/MessageBus...）
+│   ├── adapters/                    # 默认组件适配器（MinIO/Milvus/NATS/Redis/Harbor...）
 │   └── bootstrap/
 │       ├── server.go                # gRPC 服务器启动/关闭模板
 │       ├── db.go                    # PostgreSQL 连接池（pgxpool，带重试）
@@ -264,21 +297,22 @@ type AsyncTaskRepo interface {
 
     // AcquireLease atomically sets lease_until if not already leased.
     // Returns (true, leaseUntil) on success; (false, zero) if already leased.
-    AcquireLease(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, duration time.Duration) (bool, time.Time, error)
+    AcquireLease(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, workerID string, duration time.Duration) (bool, time.Time, error)
 
-    // Heartbeat refreshes last_heartbeat_at to prevent lease expiry.
-    Heartbeat(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID) error
+    // Heartbeat refreshes last_heartbeat_at and lease_until.
+    // Only the current lease_owner may renew the lease.
+    Heartbeat(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, workerID string, duration time.Duration) error
 
-    // UpdateProgress sets progress_pct.
-    UpdateProgress(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, pct int) error
+    // UpdateProgress sets progress_pct for the current lease owner.
+    UpdateProgress(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, workerID string, pct int) error
 
     // Complete marks status=completed, clears lease, writes result JSON.
     // Also writes a TaskCompletedEvent to outbox_events within tx.
-    Complete(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, result any) error
+    Complete(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, workerID string, result any) error
 
     // Fail increments attempt_count; if >= max_attempts, sets status=dead_letter.
     // Also writes a TaskCompletedEvent(failed) to outbox_events within tx.
-    Fail(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, errMsg, compensatingAction string) error
+    Fail(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, workerID string, errMsg, compensatingAction string) error
 
     // GetExpiredLeases returns tasks in Running state with expired leases,
     // used by the reconciler goroutine.
@@ -309,6 +343,7 @@ type AsyncTask struct {
     AttemptCount      int
     MaxAttempts       int
     ProgressPct       int
+    LeaseOwner        string
     ErrorMessage      string
     CompensatingAction string
     LeaseUntil        *time.Time

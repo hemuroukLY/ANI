@@ -3,13 +3,13 @@ go 1.23
 use (
 	./pkg
 	./services/ani-gateway
+	./services/auth-service
 	./services/model-service
 	./services/task-service
 )
 
 // Services added as they are scaffolded:
 // ./services/kb-service
-// ./services/auth-service
 // ./services/metering-service
 // ./operators/inference-operator
 // ./operators/upgrade-operator

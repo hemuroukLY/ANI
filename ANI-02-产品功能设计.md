@@ -1,308 +1,467 @@
 # KuberCloud ANI · 产品功能设计
 
-> 版本 V1 | 广州常青云科技有限公司 | 内部产品规划文件
+> 版本 V8 | 广州常青云科技有限公司 | 内部产品规划文件
+> 最后更新：2026-05-14（V8 架构重构：Core/Services 分层）
 
 ---
 
-## 一、产品架构总图
+## 一、产品整体架构
+
+### 1.1 两层产品架构
+
+ANI 由**基础设施平台层（ANI Core）**和**云服务层（ANI Services）**两层构成：
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  应用层（Python + TypeScript）— 面向业务用户                           │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐             │
-│  │企业知识库 │  │ 文档智能 │  │ 会议智能 │  │ 视频智能 │             │
-│  │  问答    │  │  处理   │  │ 转写摘要 │  │  分析   │             │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘             │
-├──────────────────────────────────────────────────────────────────────┤
-│  平台层（Go）— 面向 IT 管理员                                          │
-│  模型管理 API · 推理网关 · 知识库服务 · Auth/RBAC · 审计日志           │
-├──────────────────────────────────────────────────────────────────────┤
-│  AI 推理层（Python）                                                   │
-│  vLLM（LLM 推理）· Faster-Whisper（语音）· Milvus（向量库）            │
-├──────────────────────────────────────────────────────────────────────┤
-│  调度编排层（Go）— Kubernetes 1.36                                     │
-│  Volcano（批调度）· HAMi（GPU 虚拟化）· NVIDIA GPU Operator            │
-├──────────────────────────────────────────────────────────────────────┤
-│  网络层（Go）— KubeOVN 1.13+                                          │
-│  VPC 租户隔离 · 网络策略 · 沙箱出口管控                               │
-├──────────────────────────────────────────────────────────────────────┤
-│  存储层（复用公司现有分布式存储产品）                                   │
-│  MinIO（模型/数据集）· Rook-Ceph（文档）· PostgreSQL 17（元数据）      │
-└──────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                        ANI Services（云服务层）                            │
+│                                                                            │
+│  ┌─────────────────┐  ┌──────────────────────┐  ┌────────────────────┐  │
+│  │  IaaS 云服务     │  │  AI 全生命周期平台    │  │  AI-Native 应用    │  │
+│  │  云主机/容器/GPU │  │  训练/微调/推理/知识库│  │  知识库问答/Agent  │  │
+│  │  K8s集群/存储/网络│  │  Notebook/模型仓库   │  │  MCP/语音/文档     │  │
+│  └─────────────────┘  └──────────────────────┘  └────────────────────┘  │
+│                                                                            │
+│  ┌──────────────────────────────────────────────────────────────────┐    │
+│  │                    PaaS 托管服务                                   │    │
+│  │   托管数据库 · 托管消息队列 · 托管搜索 · 函数计算 · 托管容器服务    │    │
+│  └──────────────────────────────────────────────────────────────────┘    │
+│                                                                            │
+│        层间接口：ANI Core REST API + Go SDK + Python SDK + ani CLI        │
+│           （api/openapi/v1.yaml 是唯一真实来源，团队内称"API 契约"）       │
+├──────────────────────────────────────────────────────────────────────────┤
+│                        ANI Core（基础设施平台层）                           │
+│                                                                            │
+│  ┌──────────────────────────────────────────────────────────────────┐    │
+│  │  计算层                                                            │    │
+│  │  VM · Container · GPU Container · Sandbox · Batch Job            │    │
+│  │  K8s Cluster · Bare Metal · DPU Node · Notebook(P1)              │    │
+│  ├──────────────────────────────────────────────────────────────────┤    │
+│  │  存储层                                                            │    │
+│  │  块存储（EBS类）· 对象存储（S3类）· 文件存储（EFS类）· 向量存储    │    │
+│  ├──────────────────────────────────────────────────────────────────┤    │
+│  │  网络层                                                            │    │
+│  │  VPC · 子网 · 安全组 · 路由 · 负载均衡 · SDN（KubeOVN）           │    │
+│  ├──────────────────────────────────────────────────────────────────┤    │
+│  │  身份与安全层                                                      │    │
+│  │  Auth · RBAC · OIDC/SSO · API Key · 多租户 · 国密加解密 · 密钥管理│    │
+│  ├──────────────────────────────────────────────────────────────────┤    │
+│  │  平台支撑层                                                        │    │
+│  │  镜像仓库 · 用量计量 · 可观测性 · 服务目录/内部DNS · 事件通知      │    │
+│  ├──────────────────────────────────────────────────────────────────┤    │
+│  │  硬件纳管层                                                        │    │
+│  │  GPU 异构纳管（NVIDIA/昇腾/海光）· DPU 纳管（BlueField）· BM 纳管 │    │
+│  └──────────────────────────────────────────────────────────────────┘    │
+│                                                                            │
+│  底层开源组件（通过 ports/adapters 松耦合封装）：                           │
+│  Kubernetes · KubeVirt · KubeOVN · Kata Containers · Metal3               │
+│  HAMi · Volcano · NVIDIA GPU Operator · NVIDIA DPF                        │
+│  MinIO · Rook-Ceph · Milvus · PostgreSQL · NATS · Redis · Harbor          │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-> 详细技术选型、语言策略与信创适配路径见 [ANI-04-技术栈设计.md](ANI-04-技术栈设计.md)
+### 1.2 层间边界原则
 
-**设计原则：**
-- 算力层复用公司现有虚拟化、超融合、容器平台能力，不重复造轮子
-- 平台层是 ANI 的核心壁垒，统一用 Go 开发，K8s Operator 模式管理所有资源
-- 应用层是最终交付物，业务用户感知的产品，也是决定客户是否续费/扩容的关键
+1. ANI Services **只能**通过 `api/openapi/v1.yaml` 定义的 REST API 或生成的 SDK 调用 ANI Core
+2. ANI Services **禁止** import ANI Core 代码包、直接操作 K8s API、直接连接底层数据库
+3. ANI Core **不包含**任何模型推理逻辑、RAG 逻辑、PaaS 业务逻辑
+4. 新能力扩展：新实例类型通过 port/adapter 扩展；新云服务在 Services 层通过 Core API 组合实现
 
-**新增能力说明（已纳入 Phase 1）：**
-- 模型加解密（国密 SM4/ZUC 对称加密，支持离线加密后上传，推理时 Init Container 解密）
-- 模型远程导入（HuggingFace / ModelScope 异步导入，存入私有仓库，推理 Pod 动态拉取）
-- 容器镜像仓库管理（Harbor 独立部署，Console/BOSS 做 API 封装，保持 Harbor 独立性）
-- Console 与 BOSS 同步全量开发，共享 Monorepo 脚手架
+### 1.3 设计原则
+
+- **编排而非重造**：底层最大化复用成熟开源组件，ANI 价值在于编排与封装
+- **API-First**：所有接口先写 API 契约再生成代码，Services 依赖契约而非实现
+- **可扩展设计**：每类能力（计算/存储/网络/硬件）都有扩展点，未来增加新类型不破坏现有边界
+- **多租户原生**：隔离在设计阶段内建，不是事后补丁；网络/存储/控制面三层均有租户边界
+- **生产级标准**：稳定性、可扩展性、可观测性、安全性是硬性要求，不是锦上添花
 
 ---
 
-## 二、算力层——复用与增强
+## 二、ANI Core — 基础设施平台层
 
-### 2.1 GPU 算力接入
+### 2.1 计算层 — 实例全类型
 
-公司已有虚拟化（VM）和容器平台能力，在此基础上增加 GPU 统一纳管能力：
+#### 2.1.1 实例类型完整定义
 
-**功能要点：**
-- 支持 NVIDIA A 系列、H 系列、国产（昇腾、海光 DCU）等主流 AI 加速卡的统一纳管
-- GPU 虚拟化切分（MIG 模式/vGPU 模式），支持多租户共享同一 GPU
-- GPU 利用率实时监控（解决客户 GPU 服务器买了不会用的问题）
-- 资源配额管理：按部门/项目分配 GPU 算力上限
+| 实例类型 | 底层技术 | 核心场景 | 优先级 |
+|---|---|---|---|
+| **VM（云主机）** | KubeVirt + KVM | 通用虚拟机，兼容传统工作负载 | P0 |
+| **Container（容器实例）** | K8s Pod/Deployment | 微服务、Web 服务，含 K8s 集群可视化管理 | P0 |
+| **GPU Container（GPU容器）** | K8s + HAMi + Volcano | AI 训练/推理算力，GPU 虚拟化切片 | P0 |
+| **Sandbox（安全沙箱）** | Kata Containers（QEMU P0 / Firecracker P1） | Agent 代码执行、不可信负载隔离 | P0 |
+| **Batch Job（批任务）** | K8s Job + Volcano 队列调度 | 离线批计算、数据处理 | P0 |
+| **Notebook（开发环境）** | K8s Pod + 持久化 PVC | 开发调试，应用态与存储态分离 | P1 |
+| **K8s Cluster（租户K8s集群）** | vCluster（虚拟集群）/ Metal3（物理集群） | 租户自主管理 K8s，与最新 K8s 版本一一对齐 | P1 |
+| **Bare Metal（裸金属）** | Metal3 + Ironic + BMC/Redfish | 零虚拟化开销，高性能 AI 推理节点 | P1 |
+| **DPU Node（DPU加速节点）** | NVIDIA DPF（DOCA Platform Framework） | 网络/存储/安全卸载，主机 CPU 100% 用于业务 | P2 |
 
-**交付价值：** 将客户闲置的 GPU 服务器"盘活"，这是签单后的第一个可见成果，也是后续所有 AI 应用的基础。
+#### 2.1.2 K8s 集群管理设计
 
-### 2.2 算力调度策略
+K8s 集群管理采用**三层混合架构**：
 
-- 推理任务优先分配低延迟 GPU（A10、A30）
-- 训练/微调任务调度至高显存 GPU（A100、H100）
-- 支持任务排队与优先级控制（确保生产推理不被训练任务抢占）
+```
+Layer 1：集群生命周期           → ANI Core REST API（创建/升级/删除）
+  POST /api/v1/k8s-clusters
+  GET  /api/v1/k8s-clusters/{id}/kubeconfig   ← ANI 鉴权的 kubeconfig
+
+Layer 2：工作负载操作           → 原生 K8s API 透明代理（不封装）
+  ANY  /api/v1/k8s-clusters/{id}/api/*
+  kubectl / Helm / Argo CD / K9s 等原生工具链 100% 兼容
+  支持与最新 K8s 版本一一对齐的全部资源类型：
+    Pod · Service · Deployment · StatefulSet · DaemonSet
+    Job · CronJob · Ingress · CRD · RBAC · HPA · NetworkPolicy
+    NodePool · PVC · ConfigMap · Secret · 及未来新增资源类型
+
+Layer 3：多集群管理             → Karmada 封装 + ANI 高层 API
+  POST /api/v1/k8s-federation/{id}/propagation-policies
+```
+
+**多租户隔离方案：**
+- 标准方案：每租户一个 vCluster（独立 API Server + etcd，运行在 ANI 物理集群上），KubeOVN VPC 提供网络物理隔离
+- 高隔离方案（高价值客户）：Metal3 + Cluster API 提供独立物理 K8s 集群
+- 观测数据：Metrics/Logs 经 ANI 可观测层聚合，租户只看自己的，管理员可看全局
+
+**为什么不全部用 OpenAPI 封装 K8s：** K8s 有 50+ 资源类型 + CRD 无限扩展，且每年发布 3 个大版本，封装层无法保持同步，且会导致 kubectl/Helm/GitOps 等业界标准工具链失效。
+
+#### 2.1.3 Sandbox 技术选型（已确认）
+
+| 方案 | RuntimeClass | 启动时间 | GPU | 适用场景 | 阶段 |
+|---|---|---|---|---|---|
+| Kata + QEMU | `sandbox-kata` | ~1s | GPU Passthrough ✅ | Agent 通用沙箱，模型推理场景 | **P0** |
+| Kata + Firecracker | `sandbox-kata-fc` | ~150ms | 无 | CPU-only 快速沙箱，代码解释器 | P1 |
+| gVisor | `sandbox-gvisor` | ~1s | CUDA（部分） | 高密度轻量沙箱 | P2 |
+
+Sandbox 对标 E2B 的产品语义：每个 Agent 任务/会话对应一个 Sandbox 实例，支持文件读写、命令执行、网络出口管控、会话暂停/恢复（最长 24 小时）。
+
+#### 2.1.4 裸金属（BM）实例
+
+基于 Metal3（CNCF 项目）+ Ironic 实现 K8s 原生裸金属管理：
+- 硬件发现：通过 BMC（IPMI/Redfish）自动采集 CPU/内存/磁盘/网卡规格
+- 系统部署：PXE/iPXE/Virtual Media 引导，cloud-init 初始化
+- 生命周期：available → provisioning → running → deprovisioning → available
+- 与 Cluster API 集成：BM 节点可直接加入 K8s 集群作为 Worker Node
+
+#### 2.1.5 DPU 加速节点
+
+基于 NVIDIA DPF（DOCA Platform Framework）实现 DPU K8s 原生管理：
+- 卸载能力：OVN-K8s 网络处理（主机 CPU 零占用）、NVMe-oF 存储 I/O、TLS 加密/防火墙
+- 效果：相同硬件配置，AI 推理节点吞吐提升 20-40%
+- BM + DPU 组合是 AI 推理节点的黄金配置
+- 实例创建时通过 `acceleration.dpu.offloads` 声明所需卸载能力
+
+#### 2.1.6 GPU 算力纳管
+
+- 支持 NVIDIA A/H 系列、昇腾 NPU、海光 DCU 统一纳管（通过 `GPUInventory` port 抽象）
+- GPU 虚拟化：MIG 模式（A100/H100）、vGPU 模式
+- 调度策略：推理任务优先低延迟 GPU（A10/A30），训练任务调度高显存 GPU（A100/H100）
+- Volcano 队列优先级：确保生产推理不被训练任务抢占
+
+#### 2.1.7 实例通用生命周期与操作语义
+
+所有实例类型共享统一的生命周期语义（P0）：
+
+**P0 生命周期动作：** 创建（含规划/渲染/准入/审计/dry-run/apply）、查询（状态/健康/事件）、启动、停止、重启、变配（CPU/内存/GPU/副本数）、删除
+
+**P1/P2 生命周期动作：** 克隆、快照、备份/恢复、迁移、休眠/挂起
+
+**P0 运维操作：**
+
+| 操作 | VM | Container | GPU容器 | Sandbox | Batch | K8s集群 | BM |
+|---|---|---|---|---|---|---|---|
+| 日志 | ✅ | ✅ | ✅ | ✅ | ✅ | 代理至集群 | ✅ |
+| 事件 | ✅ | ✅ | ✅ | ✅ | ✅ | 代理至集群 | ✅ |
+| 指标 | ✅ | ✅ | ✅+GPU指标 | ✅ | ✅ | 集群级指标 | ✅+硬件 |
+| exec/终端 | P1 | ✅ | ✅ | ✅(会话) | N/A | kubectl | P1 |
+| VNC/Console | ✅ | N/A | N/A | ✅ | N/A | N/A | ✅(BMC) |
+| 审计 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+**操作反馈统一要求（P0 强制）：**
+- 每个操作前执行 precheck（权限/配额/状态/provider能力）
+- 不可用时展示禁用原因
+- 高风险操作（停止/删除/变配）必须展示确认弹窗和影响说明
+- 后端接受后返回 `operation_id`，前端展示操作时间线
+- 失败时展示原因、建议和是否可重试
+- 所有操作写入审计日志（不可篡改）
 
 ---
 
-## 三、平台层——ANI 核心能力
+### 2.2 存储层 — 四类型统一 API
 
-### 3.1 模型管理平台
+| 类型 | Core API 路径 | 底层技术 | 对标 |
+|---|---|---|---|
+| **块存储** | `/api/v1/volumes` | Rook-Ceph RBD + CSI | AWS EBS |
+| **对象存储** | `/api/v1/objects` | MinIO（S3 兼容） | AWS S3 |
+| **文件存储** | `/api/v1/filesystems` | Rook-CephFS / NFS | AWS EFS |
+| **向量存储** | `/api/v1/vector-stores` | Milvus | — |
 
-这是整个平台的基础，IT 管理员的核心操作界面。
+**文件存储：** 共享 POSIX 文件系统，支持多实例并发挂载；NFS 挂载点在指定 VPC 子网创建；支持快照和容量扩展；实例通过 `storage_attachments[type=filesystem]` 挂载。
 
-**3.1.1 私有模型仓库**
-
-| 功能 | 说明 |
-|---|---|
-| 模型导入 | 支持从离线包导入，支持主流开源模型格式（HuggingFace 格式，GGUF） |
-| 内置模型 | 预集成 Qwen2.5、DeepSeek-V3/R1、GLM-4 等国内主流模型 |
-| 版本管理 | 同一模型多版本并存，支持灰度切换 |
-| 模型元数据 | 记录参数量、能力标签、推荐场景、测评结果 |
-
-**重要约束：** 不依赖外网拉取模型，所有模型从本地或内网存储导入，满足客户断网部署要求。
-
-**3.1.2 一键推理部署**
-
-```
-上传模型 → 选择部署规格（GPU 数量 / 并发数）→ 一键启动 → 获取内网 API Endpoint
-```
-
-- 自动生成 OpenAI 兼容格式的 API（`/v1/chat/completions`），已有系统可无缝对接
-- 支持流式输出（SSE）
-- 推理服务自动健康检查与重启
-- 支持多模型同时在线（不同部门用不同模型）
-
-**3.1.3 推理服务监控**
-
-- 每个 API 调用的延迟、Token 消耗、错误率实时大盘
-- 支持按部门/用户维度统计 AI 使用量（方便内部成本核算）
-
-### 3.2 数据与知识管理平台
-
-支撑企业知识库问答和文档智能的数据底座。
-
-**3.2.1 文档导入与解析**
-
-| 文件类型 | 处理能力 |
-|---|---|
-| PDF | 文字提取 + 表格识别 + 图片 OCR |
-| Word / Excel / PPT | 结构化内容提取，保留层级关系 |
-| 纯文本 / Markdown | 直接导入 |
-| 扫描件 | OCR 识别 + 版面分析 |
-
-**3.2.2 知识库管理**
-
-- 支持创建多个独立知识库（如：人事制度库、产品手册库、法规库）
-- 知识库权限隔离：不同部门只能访问被授权的知识库
-- 文档变更自动同步（源文件更新后知识库自动刷新）
-- 向量化存储（RAG 引擎内置，不需要客户单独配置向量数据库）
-
-**3.2.3 检索增强生成（RAG）引擎**
-
-- 混合检索：向量语义检索 + 关键词检索结合，提升召回准确率
-- 来源引用：回答内容自动标注来自哪个文档的哪一页，方便核查
-- 置信度过滤：低置信度答案主动提示"未找到相关内容"，而非编造
-
-### 3.3 安全合规中心
-
-面向金融、国央企客户的核心门槛，不是加分项，是入场券。
-
-**3.3.1 访问控制**
-
-- 与企业现有 AD/LDAP 集成，无需重新创建账号体系
-- RBAC 权限模型：管理员 / 普通用户 / 审计员 三级角色
-- 应用级权限：哪些用户能用哪些 AI 应用，细粒度控制
-
-**3.3.2 数据安全**
-
-- 所有数据存储在客户自有服务器，常青云无法访问
-- 模型推理全程在客户内网，不经过任何外部网络
-- 敏感信息脱敏：支持配置正则/命名实体识别，自动屏蔽身份证号、手机号等信息后再送入模型
-
-**3.3.3 审计日志**
-
-- 完整记录：谁在什么时间问了什么问题，模型返回了什么
-- 日志不可篡改，支持导出（满足等保审计要求）
-- 可疑行为报警：同一账号短时间大量导出内容时触发告警
-
-**3.3.4 合规认证支持**
-
-- 等保 2.0 三级合规架构设计
-- 信创兼容：支持运行在统信 UOS、麒麟 OS 上，支持鲲鹏、飞腾、昇腾等国产芯片
+**向量存储：** 创建/删除向量集合，向量检索 API（`ANI Services 知识库服务`消费此能力）；通过 Milvus adapter 封装，业务层不直接接触 Milvus SDK。
 
 ---
 
-## 四、应用层——开箱即用的 AI 应用
+### 2.3 网络层
 
-这一层是客户实际感知的产品，也是最终决定续费的关键。每个应用都是**面向业务用户的，无需 IT 干预即可使用**。
+基于 KubeOVN 1.13+ 实现 VPC 级租户网络隔离：
 
-### 4.1 企业知识库问答
-
-**适用场景：** 全行业通用，入门首选场景
-
-**用户交互：**
 ```
-用户：公司员工差旅报销的标准是什么？
-ANI：根据《2024年员工差旅管理办法》第三章第8条：
-     - 国内出差经济舱：800元/天
-     - 住宿标准：一线城市500元/天，其他城市350元/天
-     [来源：差旅管理办法.pdf 第12页]
+/api/v1/networks/
+├── vpcs/                ← VPC 创建/管理（每租户独立 VPC）
+├── subnets/             ← 子网划分
+├── security-groups/     ← 安全组规则（白名单出入站）
+├── route-tables/        ← 路由策略
+└── load-balancers/      ← 负载均衡（四层/七层）
 ```
 
-**核心功能：**
-- 多知识库联合检索（同时搜索多个文件库）
-- 追问上下文保持（多轮对话，不需要每次重复背景）
-- 答案来源跳转：点击来源链接直接定位到原文档对应段落
-- 支持 Web 端 + 企业微信/钉钉机器人集成
-
-**差异化设计：**
-- 当回答置信度不足时，主动提示"请联系 HR 确认"，而非输出错误答案（建立用户信任的关键）
-- 管理员可配置"高风险问题清单"（如：劳动争议类问题），触发后自动转人工
-
-### 4.2 文档智能处理
-
-**适用场景：** 金融合同审查、国央企公文处理、医疗文书处理
-
-**子功能：**
-
-**① 合同要素提取**
-- 输入：合同 PDF/Word
-- 输出：结构化表格（甲方乙方、合同金额、履约期限、违约条款、关键约定）
-- 支持批量处理（一次上传 100 份合同，自动生成汇总表）
-
-**② 文档合规审查**
-- 预设审查规则库（如：合同金额超 XX 万需附法务意见函、缺少某条款视为不合规）
-- 输出合规报告，标注问题位置
-- 规则库由客户自定义维护，不依赖常青云远程更新
-
-**③ 公文智能起草**
-- 输入：标题、主要内容要点、目标受众
-- 输出：符合机关公文格式的完整文稿
-- 内置公文格式模板（通知、请示、报告、函、纪要等）
-- 初稿生成后可在线编辑，历史版本自动保存
-
-**④ 摘要与要点提取**
-- 长文档（研报、政策文件）一键生成执行摘要
-- 支持自定义摘要长度（100字核心结论 / 500字详细摘要）
-
-### 4.3 会议智能
-
-**适用场景：** 国央企、高校、医院行政会议
-
-**功能流程：**
-```
-录音上传（或直播接入）→ 语音转文字 → 发言人区分 → 自动生成纪要 → 人工确认发布
-```
-
-**核心功能：**
-- 中文普通话 + 粤语方言识别支持
-- 发言人自动区分与标注
-- 纪要自动结构化：议题、讨论内容、决议事项、责任人、截止时间
-- 待办事项自动提取，一键同步至企业日历/待办系统
-- 纪要 Word 模板导出（符合客户公文格式）
-
-**重要约束：** 音频文件处理完全在内网，不上传任何外部服务。
-
-### 4.4 视频内容智能
-
-**适用场景：** 监控视频检索、会议录像归档、培训视频管理
-
-**核心功能：**
-
-**① 视频内容检索**
-- 为视频生成时间线摘要（每30秒一个关键帧描述）
-- 支持语义检索：搜索"会议中讨论预算的片段"直接定位时间点
-- 适用于：会议录像归档检索、培训视频快速定位
-
-**② 安防视频分析（可选模块）**
-- 人员行为识别（异常区域闯入、长时间停留）
-- 非实时分析为主（录像回溯），规避实时监控合规风险
-- 适用于：校园安全、医院安防、园区管理
-
-**③ 视频字幕生成**
-- 培训视频/会议录像自动生成中文字幕
-- SRT 字幕文件导出
-
-### 4.5 模型微调平台（轻量版）
-
-**适用场景：** 需要专业领域高准确率的金融、医疗客户
-
-**设计思路：** 不做全功能 MLOps，只做"能让客户独立完成一次微调"的最小闭环。
-
-**功能：**
-
-| 步骤 | 功能 |
-|---|---|
-| 数据准备 | 文档上传 → 自动切片 → 人工标注 Q&A 对（支持导入已有标注数据） |
-| 微调执行 | 选择基础模型 → 设置参数（或使用推荐配置）→ 一键启动 |
-| 效果评测 | 微调前后对比测试，展示准确率变化 |
-| 模型发布 | 微调完成后一键发布为推理服务，替换旧版本 |
-
-**技术说明：** 底层使用 LoRA/QLoRA 方式微调，显存要求低，24GB 显存 GPU 可完成 7B 参数模型微调，适合客户实际硬件配置。
+**网络平面（实例必须声明）：**
+- `tenant_vpc`：租户业务互通
+- `foundation_mesh`：平台控制面/服务互联
+- `storage`：存储访问专用
+- `management`：Sandbox 出口管控/运维入口
+- `public_ingress`：公网暴露（需安全审计）
 
 ---
 
-## 五、运维管理控制台
+### 2.4 身份与安全层
 
-面向 IT 管理员，统一管理整个 ANI 平台的运行状态。
+```
+/api/v1/auth/           ← 登录/Token/OIDC/刷新/吊销
+/api/v1/users/          ← 用户/角色/API Key 管理
+/api/v1/tenants/        ← 租户管理（资源配额/用量）
+/api/v1/secrets/        ← 密钥管理（KV + 实例绑定注入）← PaaS 凭据注入
+/api/v1/encryption/     ← 国密加解密（SM4 密钥管理 + seal/unseal）
+```
 
-**核心看板：**
-- 算力大盘：GPU/CPU 利用率、内存使用率、存储容量
-- 应用大盘：各 AI 应用的日活用户数、调用次数、响应延迟
-- 模型大盘：每个在线模型的推理 QPS、Token 消耗、错误率
+**多租户安全：** 所有数据表使用 PostgreSQL RLS，fail-closed 原则；vCluster 提供 K8s 控制面隔离；KubeOVN VPC 提供网络平面隔离。
 
-**运维功能：**
-- 一键扩容/缩减推理服务实例数
-- 模型灰度升级（新模型上线前先切 10% 流量验证）
-- 系统告警：GPU 温度过高、磁盘空间不足、推理服务异常等自动通知
+**国密加解密：** SM4/ZUC 对称加密，离线加密后上传；推理时 Init Container 通过 `unseal-token` 内存解密，密钥不落盘，不经外网。
 
 ---
 
-## 六、集成接口
+### 2.5 平台支撑层
 
-针对已有 OA、ERP、业务系统的对接需求：
+| 能力 | Core API | 说明 |
+|---|---|---|
+| 镜像仓库 | `/api/v1/registry` | Harbor 封装，含镜像安全扫描 |
+| 用量计量 | `/api/v1/metering` | 按租户/时间/资源类型统计，支持 Token 用量上报 |
+| 可观测性 | `/api/v1/observability` | PromQL 代理查询 + 告警规则管理 |
+| 服务目录 | `/api/v1/service-endpoints` | PaaS 服务内部 DNS 注册（`redis.prod.ani.internal`）|
+| 事件通知 | `/api/v1/notifications` | Webhook/Email/内部消息订阅 |
+| 审计日志 | `/api/v1/audit` | 操作审计，不可篡改，支持导出（等保合规）|
+
+---
+
+### 2.6 ANI Core 完整 API 范围（v1.0.0 目标）
+
+```
+/api/v1/
+├── auth/                    身份与令牌                    ✅ 已有设计
+├── users/                   用户与 API Key                ✅ 已有设计
+├── tenants/                 租户与配额                    ✅ 已有设计
+├── instances/               所有计算实例（9 种类型）        ✅ 已有基础/持续完善
+├── k8s-clusters/            K8s 集群生命周期 + API 代理    ❌ 待建
+├── k8s-federation/          Karmada 多集群                ❌ 待建
+├── networks/vpcs            VPC                           ⚠️ 待补服务层
+├── networks/subnets         子网                          ⚠️ 待补服务层
+├── networks/security-groups 安全组                        ⚠️ 待补服务层
+├── networks/load-balancers  负载均衡                      ⚠️ 待补服务层
+├── volumes/                 块存储                        ⚠️ 待补服务层
+├── filesystems/             文件存储（CephFS/NFS）         ❌ 待建
+├── objects/                 对象存储                      ⚠️ 待补服务层
+├── vector-stores/           向量存储（Milvus）             ❌ 待建
+├── baremetal/hosts          BM 硬件库存                   ❌ 待建
+├── gpu-inventory/           GPU 节点库存                  ✅ 已有设计
+├── dpu-inventory/           DPU 节点库存                  ❌ 待建
+├── registry/                镜像仓库                      ❌ 待建
+├── encryption/              国密加解密                    ❌ 待建
+├── secrets/                 密钥管理与绑定                 ❌ 待建
+├── metering/                用量计量                      ❌ 待建
+├── observability/           指标查询与告警                 ❌ 待建
+├── service-endpoints/       内部 DNS / 服务目录            ❌ 待建
+├── notifications/           事件通知                      ❌ 待建
+└── audit/                   审计日志                      ✅ 已有设计
+```
+
+**缺口统计：4 个已有 / 3 个待补服务层 / 14 个待建（含本次新增 8 个）**
+
+---
+
+## 三、ANI Services — 云服务层
+
+> 本节定义 ANI Services 的完整功能范围。所有服务均由另一小组开发，通过 ANI Core API/SDK 实现，禁止直接操作底层基础设施。
+
+### 域A：IaaS 云服务
+
+| 服务 | 核心功能 | 对标 |
+|---|---|---|
+| 云主机服务 | VM 创建/管理/镜像/快照/弹性扩缩 | AWS EC2 |
+| 容器实例服务 | 容器 CRUD/滚动更新/回滚/副本管理 | AWS ECS/Fargate |
+| GPU 实例服务 | GPU 容器调度/切片/利用率展示 | AWS P 系列 |
+| Sandbox 服务 | Agent 沙箱会话/代码执行/文件读写/浏览器控制 | E2B |
+| K8s 集群服务 | vCluster 管理/kubeconfig/节点池/插件 | AWS EKS / Rancher |
+| 裸金属服务 | BM 实例申请/OS镜像/生命周期 | AWS Bare Metal |
+| VPC 网络服务 | VPC/子网/安全组/路由/对等连接 | AWS VPC |
+| 块存储服务 | 云盘创建/挂载/快照/扩容 | AWS EBS |
+| 文件存储服务 | 共享文件系统/挂载点/快照 | AWS EFS |
+| 对象存储服务 | Bucket 管理/权限/生命周期策略 | AWS S3 Console |
+| 负载均衡服务 | LB 创建/监听/健康检查/证书 | AWS ALB/NLB |
+| 镜像仓库服务 | 容器镜像托管/版本/安全扫描/权限 | AWS ECR / Harbor |
+
+### 域B：AI 全生命周期平台
+
+对标 AWS SageMaker，覆盖从数据到模型上线的完整工作流：
+
+| 服务 | 核心功能 | 对标 |
+|---|---|---|
+| **Notebook 服务** | JupyterLab/VSCode 托管，持久化工作区，应用态与存储态分离 | SageMaker Studio |
+| **数据集服务** | 数据集上传/版本/标注任务/血缘追踪 | SageMaker Data Wrangler |
+| **实验追踪服务** | 训练指标/参数/对比/可视化（MLflow 封装） | SageMaker Experiments |
+| **训练任务服务** | 单机/分布式训练，checkpoint，超参搜索 | SageMaker Training |
+| **微调服务** | SFT/LoRA/RLHF/DPO，数据准备→训练→评估闭环 | SageMaker Fine-tuning |
+| **模型评估服务** | Benchmark 测试/对比/指标报告 | SageMaker Clarify |
+| **模型仓库服务** | 模型版本/元数据/格式转换/国密加解密/导入（HuggingFace/ModelScope/离线包） | SageMaker Model Registry |
+| **推理部署服务** | 模型一键部署为推理端点，自动扩缩，蓝绿发布，OpenAI 兼容 API | SageMaker Endpoints |
+| **AI API 网关** | 统一推理入口/限流/租户隔离/Token 计费/路由 | AWS Bedrock API GW |
+| **Pipeline 服务** | 训练→评估→注册→部署 DAG 工作流编排 | SageMaker Pipelines |
+
+**推理服务 P0 范围（v1.0.0）：**
+- 选择模型版本 + GPU 规格 → 创建 endpoint → 查看状态
+- 日志/事件/指标（QPS/延迟/错误率/Token用量）
+- 启动/停止/重启/变配/删除
+- 基础调用测试（OpenAI 兼容 `/v1/chat/completions`，支持流式输出 SSE）
+- 内置支持：Qwen2.5、DeepSeek-V3/R1、GLM-4 等主流国内模型
+
+### 域C：AI-Native 应用服务
+
+| 服务 | 核心功能 | 对标 |
+|---|---|---|
+| **知识库服务** | 文档上传/解析/向量化/RAG问答/来源引用/知识库权限隔离 | AWS Bedrock KB / Dify |
+| **Agent 开发平台** | 可视化 Agent 编排/工具注册/测试调试 | Dify / Coze |
+| **Agent 运行时服务** | Agent 会话管理/工具执行/记忆/状态持久化/沙箱隔离 | E2B + LangGraph |
+| **MCP 工具市场** | MCP Server 注册/发现/权限控制/版本管理 | — |
+| **语音服务** | ASR（语音转文字）/ TTS（文字转语音）/ 实时转写 | AWS Transcribe |
+| **文档智能服务** | OCR/版式解析/表格提取/合规审查/公文起草/摘要 | AWS Textract |
+| **会议智能服务** | 录音转写/发言人区分/纪要生成/待办提取 | AWS Transcribe+Bedrock |
+
+**知识库 P0 范围（v1.0.0）：**
+- 文档格式：PDF/Word/Excel/PPT/Markdown/扫描件
+- 处理流程：上传 → 自动解析 → 向量化 → 建立知识库
+- 检索：混合检索（向量语义 + 关键词），来源引用（文档名+页码）
+- 安全：知识库权限隔离，不同部门只能访问授权知识库
+- 接入：Web 端 + API（兼容 RAG 标准接口）
+
+### 域D：PaaS 托管服务
+
+全部基于 K8s Operator + ANI Core 实例/存储/网络实现：
+
+| 服务 | 核心功能 | 底层 Operator | 对标 |
+|---|---|---|---|
+| **托管 PostgreSQL** | 全托管，自动备份/扩缩/故障转移 | CloudNativePG | AWS RDS |
+| **托管 MySQL/MongoDB** | 全托管，备份/扩缩/监控 | Percona Operator | AWS RDS |
+| **托管 Redis** | 全托管，主从/集群/备份 | Redis Operator | AWS ElastiCache |
+| **托管 Kafka** | 全托管，Topic管理/消费组/监控 | Strimzi | AWS MSK |
+| **托管 RabbitMQ** | 全托管，Queue/Exchange 管理 | RabbitMQ Operator | AWS MQ |
+| **托管 Elasticsearch** | 全托管，索引/搜索/监控 | ECK Operator | AWS OpenSearch |
+| **托管函数计算** | Serverless Function，按调用付费 | OpenFaaS / Knative | AWS Lambda |
+| **托管容器服务** | 无需管理 K8s，直接跑容器 | — | AWS Fargate |
+
+**PaaS 凭据注入流程：**
+```
+创建托管数据库
+  → Core secrets/ API 生成连接凭据
+  → Core service-endpoints/ API 注册内部 DNS（redis.prod.ani.internal）
+  → 租户绑定实例时凭据自动注入为环境变量
+```
+
+### 域E：平台运营支撑
+
+| 服务 | 核心功能 | 对标 |
+|---|---|---|
+| **用量与计费服务** | 按租户/项目统计资源用量，Token 计费，出账单 | AWS Cost Explorer |
+| **告警与通知服务** | 阈值告警/事件通知/Webhook 推送 | AWS CloudWatch Alarms |
+| **审计中心** | 操作审计/合规报表/数据导出（等保 2.0 三级） | AWS CloudTrail |
+| **BOSS 运营平台** | 租户管理/配额管理/平台健康大盘/白牌化 | — |
+
+---
+
+## 四、集成接口
 
 | 接口类型 | 说明 |
 |---|---|
-| OpenAI 兼容 API | 已集成 OpenAI SDK 的系统无需修改代码，直接切换 API 地址 |
-| Webhook | 文档处理完成、微调任务完成等事件主动推送 |
-| 企业微信/钉钉 Bot | 知识库问答直接在聊天工具内使用 |
-| SSO 集成 | 支持 SAML 2.0、OAuth 2.0 与企业现有身份系统打通 |
+| **ANI Core API 契约** | `api/openapi/v1.yaml`，基础设施资源接口（`/api/v1/` 前缀写在 spec 里），唯一真实来源 |
+| **ANI Services API 契约** | `api/openapi/services/v1.yaml`，云服务层接口（`/api/v1/svc/` 前缀），另一小组维护 |
+| **Go SDK** | 从 Core API 契约自动生成，`github.com/kubercloud/ani-go` |
+| **Python SDK** | 从 Core API 契约自动生成，`pip install kubercloud-ani` |
+| **TypeScript API Client** | 类型安全的 HTTP 客户端（openapi-typescript + openapi-fetch），`@kubercloud/ani-client` |
+| **Java SDK** | 从 Core API 契约自动生成（OkHttp3），`com.kubercloud:ani-java`，面向企业系统集成 |
+| **OpenAI 兼容 API** | 推理服务提供 `/v1/chat/completions`，已有 OpenAI SDK 系统无需修改代码 |
+| **ani CLI** | 命令行工具，覆盖 Core + Services 核心操作 |
+| **Webhook** | 任务完成/告警触发/实例状态变更等事件主动推送 |
+| **SSO 集成** | SAML 2.0 / OAuth 2.0 / OIDC，与企业现有身份系统（AD/LDAP）打通 |
+| **企业微信/钉钉 Bot** | 知识库问答可直接在聊天工具内使用 |
 
 ---
 
-## 七、产品不做的事（边界说明）
+## 五、v1.0.0 P0 交付范围（2026-09-30）
 
-明确边界和"不做什么"同等重要：
+### ANI Core v1.0.0 必须交付
+
+| 能力域 | P0 必须交付 |
+|---|---|
+| 计算实例 | VM / Container / GPU Container / Sandbox(Kata QEMU) / Batch Job |
+| K8s 集群 | vCluster 模式，原生 API 代理，基本 RBAC，多租户隔离 |
+| 裸金属 | BM 硬件库存管理 + 基础 OS 部署（Redfish/IPMI）|
+| 存储 | 块存储 + 对象存储 + 文件存储（CephFS）|
+| 向量存储 | 创建集合 + 检索 API |
+| 网络 | VPC + 子网 + 安全组 + 基础 LB |
+| 身份 | Auth + RBAC + OIDC + API Key + 多租户 RLS |
+| 加解密 | 国密 SM4 密钥管理 + 模型 seal/unseal-token |
+| 密钥管理 | Secrets CRUD + 实例绑定注入 |
+| 硬件库存 | GPU 库存（已有）+ BM 库存 + DPU 库存（基础）|
+| 镜像仓库 | Harbor 封装，基础推拉权限 |
+| 计量 | 实例用量统计 + Token 用量上报 |
+| 可观测 | 指标查询代理 + 基础告警规则 |
+| 平台支撑 | service-endpoints（内部DNS）+ notifications（基础）|
+| SDK | Go SDK + Python SDK（从 API 契约生成）|
+| CLI | ani 覆盖 Core 所有资源核心命令 |
+| Installer | 裸机/VM/已有K8s 三种部署模式，离线包 |
+
+### ANI Services P0 必须交付
+
+| 服务 | P0 必须交付 |
+|---|---|
+| 模型仓库 | 上传/版本/元数据/国密加解密/HuggingFace/ModelScope 导入 |
+| 推理服务 | 部署端点/状态查询/日志/OpenAI 兼容调用测试 |
+| 知识库 | 文档上传/解析/向量化/RAG 问答/来源引用 |
+| IaaS 控制台 | 主要实例类型（VM/Container/GPU/Sandbox）+ 存储 + 网络 Console |
+
+---
+
+## 六、未来扩展路径（Phase 2+）
+
+以下能力已在架构设计中预留扩展点，Phase 2+ 可按需接入，不会破坏 v1.0.0 边界：
+
+| 扩展方向 | 实现路径 |
+|---|---|
+| Kata + Firecracker Sandbox（P1）| 新增 RuntimeClass adapter，不改 WorkloadRuntime port |
+| 新 GPU 厂商（海光二代、摩尔线程等）| 新增 GPUInventory adapter，不改调度层 |
+| DPU 卸载服务（P2）| 新增 DPUProvider adapter + dpu-inventory API |
+| Karmada 多集群（P1）| 新增 k8s-federation API + Karmada adapter |
+| VM 快照/迁移（P1）| 新增生命周期动作，复用现有 WorkloadRuntime port |
+| PaaS Operator 扩展 | Services 层新增 Operator，Core 只需保证 secrets + service-endpoints 稳定 |
+| 信创适配（UOS/麒麟/鲲鹏/飞腾）| 新增 RuntimeClass + 硬件 profile，不改业务逻辑 |
+| 多 Region/AZ（Phase 2）| 新增 ClusterProvider adapter，WorkloadInstanceOrchestrator 不变 |
+| Karmada 跨集群调度 | 新增 federation propagation-policy，不改单集群 instance 链路 |
+| 等保三级合规文档 | 基于已有审计/RBAC/RLS 能力补充合规报告 |
+
+---
+
+## 七、产品边界（不做的事）
 
 | 不做 | 原因 |
 |---|---|
-| 面向开发者的 Prompt 管理平台 | 目标客户没有工程师，此类功能浪费资源 |
-| 通用 AI 编程助手（Copilot 类） | 不在非开发场景内 |
-| 公有云 AI API 中转代理 | 客户要的是数据不出网，与此目标相悖 |
-| 模型从零预训练 | 需要万亿 Token 数据和超算集群，超出定位范围 |
-| 自研大语言模型 | 依托开源生态（Qwen、DeepSeek）即可，不重复投入 |
+| 自研大语言模型 | 依托 Qwen/DeepSeek 等开源模型，不重复投入 |
+| 模型从零预训练 | 需要超算级集群和海量数据，超出定位范围 |
+| 公有云 AI API 中转代理 | 客户核心诉求是数据不出网，与此相悖 |
+| 全部 K8s API 的 OpenAPI 封装 | K8s API 宽泛、快速迭代，只做生命周期封装 + 原生 API 代理 |
+| ANI Core 内实现业务逻辑 | 模型推理配置/RAG 策略/PaaS 业务规则属于 Services 层 |
+| 直接向客户暴露 Milvus/Redis 原始 API | 通过 Core vector-stores/secrets API 封装，保持松耦合 |

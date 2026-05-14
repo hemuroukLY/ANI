@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-query-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-query-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-j
+data:
+  query-api: |
+    WorkloadInstanceStore.Get
+    WorkloadInstanceStore.List
+  required-query-scope: |
+    tenant id is required
+    instance id is required for Get
+    workload kind may filter List
+  result-contract: |
+    WorkloadInstanceRecord
+    WorkloadStatus
+    audit id
+    resource refs
+    createdAt
+    updatedAt
+  recovery-policy: |
+    After process restart, business-facing instance query paths must recover
+    status from workload_instances instead of relying on PlanningRuntime memory.
+  future-api-policy: |
+    Gateway and service APIs for VM, container, GPU container, notebook, agent
+    sandbox, inference, and batch job instances must query through
+    WorkloadInstanceStore or a higher-level service wrapping it.

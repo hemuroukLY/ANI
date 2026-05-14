@@ -1,0 +1,119 @@
+package runtime
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/kubercloud/ani/pkg/ports"
+)
+
+type LocalProviderDryRun struct {
+	now func() time.Time
+}
+
+type ProviderDryRunOption func(*LocalProviderDryRun)
+
+func WithDryRunClock(now func() time.Time) ProviderDryRunOption {
+	return func(executor *LocalProviderDryRun) {
+		if now != nil {
+			executor.now = now
+		}
+	}
+}
+
+func NewLocalProviderDryRun(options ...ProviderDryRunOption) *LocalProviderDryRun {
+	executor := &LocalProviderDryRun{now: time.Now}
+	for _, option := range options {
+		option(executor)
+	}
+	return executor
+}
+
+func (e *LocalProviderDryRun) DryRun(_ context.Context, manifests []ports.WorkloadManifest, admission ports.WorkloadAdmissionResult) (ports.WorkloadProviderDryRunResult, error) {
+	if !admission.Allowed {
+		return ports.WorkloadProviderDryRunResult{
+			Accepted:      false,
+			ManifestCount: len(manifests),
+			Reason:        "admission denied: " + admission.Reason,
+			Warnings:      admission.Warnings,
+			CheckedAt:     e.now().UTC(),
+		}, nil
+	}
+	if len(manifests) == 0 {
+		return ports.WorkloadProviderDryRunResult{}, fmt.Errorf("%w: at least one manifest is required", ports.ErrInvalid)
+	}
+
+	provider := manifests[0].Provider
+	for _, manifest := range manifests {
+		if manifest.Provider != provider {
+			return ports.WorkloadProviderDryRunResult{
+				Accepted:      false,
+				Provider:      provider,
+				ManifestCount: len(manifests),
+				Reason:        "mixed providers are not allowed in one dry-run batch",
+				CheckedAt:     e.now().UTC(),
+			}, nil
+		}
+		doc, err := parseManifestDocument(manifest.Content)
+		if err != nil {
+			return ports.WorkloadProviderDryRunResult{}, err
+		}
+		if err := validateProviderDryRunDocument(manifest.Provider, doc); err != nil {
+			return ports.WorkloadProviderDryRunResult{
+				Accepted:      false,
+				Provider:      provider,
+				ManifestCount: len(manifests),
+				Reason:        err.Error(),
+				CheckedAt:     e.now().UTC(),
+			}, nil
+		}
+	}
+
+	return ports.WorkloadProviderDryRunResult{
+		Accepted:      true,
+		Provider:      provider,
+		ManifestCount: len(manifests),
+		Reason:        "accepted by local provider dry-run",
+		Warnings:      admission.Warnings,
+		CheckedAt:     e.now().UTC(),
+	}, nil
+}
+
+func parseManifestDocument(content string) (map[string]any, error) {
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(content), &doc); err != nil {
+		return nil, fmt.Errorf("%w: invalid manifest JSON: %v", ports.ErrInvalid, err)
+	}
+	return doc, nil
+}
+
+func validateProviderDryRunDocument(provider string, doc map[string]any) error {
+	kind, _ := doc["kind"].(string)
+	apiVersion, _ := doc["apiVersion"].(string)
+	switch provider {
+	case "kubevirt":
+		if kind != "VirtualMachine" || apiVersion != "kubevirt.io/v1" {
+			return fmt.Errorf("kubevirt provider requires kubevirt.io/v1 VirtualMachine")
+		}
+	case "kubernetes":
+		switch kind {
+		case "Deployment":
+			if apiVersion != "apps/v1" {
+				return fmt.Errorf("kubernetes Deployment requires apps/v1")
+			}
+		case "Job":
+			if apiVersion != "batch/v1" {
+				return fmt.Errorf("kubernetes Job requires batch/v1")
+			}
+		default:
+			return fmt.Errorf("kubernetes provider does not allow kind %q", kind)
+		}
+	default:
+		return fmt.Errorf("provider %q is not configured for dry-run", provider)
+	}
+	return nil
+}
+
+var _ ports.WorkloadProviderDryRun = (*LocalProviderDryRun)(nil)

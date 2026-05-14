@@ -21,11 +21,11 @@ type AsyncTaskRepo interface {
 	Create(ctx context.Context, tx pgx.Tx, req CreateTaskReq) (*AsyncTask, error)
 	GetByID(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (*AsyncTask, error)
 	GetByIdempotencyKey(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID, key string) (*AsyncTask, error)
-	AcquireLease(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, duration time.Duration) (bool, time.Time, error)
-	Heartbeat(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID) error
-	UpdateProgress(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, pct int) error
-	Complete(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, result any) error
-	Fail(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, errMsg, compensatingAction string) error
+	AcquireLease(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, workerID string, duration time.Duration) (bool, time.Time, error)
+	Heartbeat(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, workerID string, duration time.Duration) error
+	UpdateProgress(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, workerID string, pct int) error
+	Complete(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, workerID string, result any) error
+	Fail(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, workerID string, errMsg, compensatingAction string) error
 	GetExpiredLeases(ctx context.Context, pool *pgxpool.Pool, limit int) ([]*AsyncTask, error)
 }
 
@@ -59,6 +59,7 @@ type AsyncTask struct {
 	AttemptCount       int
 	MaxAttempts        int
 	ProgressPct        int
+	LeaseOwner         string
 	ErrorMessage       string
 	CompensatingAction string
 	LeaseUntil         *time.Time
@@ -98,6 +99,7 @@ func (r *PostgresAsyncTaskRepo) Create(ctx context.Context, tx pgx.Tx, req Creat
 		RETURNING tenant_id, id, idempotency_key, task_type, COALESCE(resource_type, ''),
 			COALESCE(resource_id, '00000000-0000-0000-0000-000000000000'::uuid),
 			status, attempt_count, max_attempts, progress_pct,
+			COALESCE(lease_owner, ''),
 			COALESCE(error_message, ''), COALESCE(compensating_action, ''),
 			lease_until, last_heartbeat_at, dead_letter_at, COALESCE(webhook_url, ''),
 			created_at, started_at, completed_at
@@ -159,7 +161,10 @@ func (r *PostgresAsyncTaskRepo) GetByIdempotencyKey(ctx context.Context, pool *p
 	return task, nil
 }
 
-func (r *PostgresAsyncTaskRepo) AcquireLease(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, duration time.Duration) (bool, time.Time, error) {
+func (r *PostgresAsyncTaskRepo) AcquireLease(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, workerID string, duration time.Duration) (bool, time.Time, error) {
+	if workerID == "" {
+		return false, time.Time{}, types.Wrapf(types.ErrBadRequest, "taskRepo.AcquireLease worker_id required")
+	}
 	if duration <= 0 {
 		return false, time.Time{}, types.Wrapf(types.ErrBadRequest, "taskRepo.AcquireLease duration must be positive")
 	}
@@ -174,14 +179,15 @@ func (r *PostgresAsyncTaskRepo) AcquireLease(ctx context.Context, pool *pgxpool.
 		UPDATE async_tasks
 		SET status='running',
 			started_at=COALESCE(started_at, NOW()),
-			lease_until=NOW() + ($2::double precision * INTERVAL '1 second'),
+			lease_owner=$2,
+			lease_until=NOW() + ($3::double precision * INTERVAL '1 second'),
 			last_heartbeat_at=NOW(),
 			updated_at=NOW()
 		WHERE id=$1
 		  AND status IN ('pending', 'running', 'failed')
 		  AND (lease_until IS NULL OR lease_until < NOW())
 		RETURNING lease_until
-	`, taskID, duration.Seconds()).Scan(&leaseUntil)
+	`, taskID, workerID, duration.Seconds()).Scan(&leaseUntil)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, time.Time{}, nil
 	}
@@ -194,7 +200,13 @@ func (r *PostgresAsyncTaskRepo) AcquireLease(ctx context.Context, pool *pgxpool.
 	return true, leaseUntil, nil
 }
 
-func (r *PostgresAsyncTaskRepo) Heartbeat(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID) error {
+func (r *PostgresAsyncTaskRepo) Heartbeat(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, workerID string, duration time.Duration) error {
+	if workerID == "" {
+		return types.Wrapf(types.ErrBadRequest, "taskRepo.Heartbeat worker_id required")
+	}
+	if duration <= 0 {
+		return types.Wrapf(types.ErrBadRequest, "taskRepo.Heartbeat duration must be positive")
+	}
 	tx, err := beginTenantTx(ctx, pool)
 	if err != nil {
 		return err
@@ -203,19 +215,24 @@ func (r *PostgresAsyncTaskRepo) Heartbeat(ctx context.Context, pool *pgxpool.Poo
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE async_tasks
-		SET last_heartbeat_at=NOW()
-		WHERE id=$1 AND status='running'
-	`, taskID)
+		SET last_heartbeat_at=NOW(),
+			lease_until=NOW() + ($3::double precision * INTERVAL '1 second'),
+			updated_at=NOW()
+		WHERE id=$1 AND status='running' AND lease_owner=$2 AND lease_until >= NOW()
+	`, taskID, workerID, duration.Seconds())
 	if err != nil {
 		return fmt.Errorf("taskRepo.Heartbeat update: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return types.Wrapf(types.ErrNotFound, "taskRepo.Heartbeat task_id=%s", taskID)
+		return types.Wrapf(types.ErrLeaseTaken, "taskRepo.Heartbeat task_id=%s worker_id=%s", taskID, workerID)
 	}
 	return tx.Commit(ctx)
 }
 
-func (r *PostgresAsyncTaskRepo) UpdateProgress(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, pct int) error {
+func (r *PostgresAsyncTaskRepo) UpdateProgress(ctx context.Context, pool *pgxpool.Pool, taskID uuid.UUID, workerID string, pct int) error {
+	if workerID == "" {
+		return types.Wrapf(types.ErrBadRequest, "taskRepo.UpdateProgress worker_id required")
+	}
 	if pct < 0 || pct > 100 {
 		return types.Wrapf(types.ErrBadRequest, "taskRepo.UpdateProgress pct=%d", pct)
 	}
@@ -227,19 +244,22 @@ func (r *PostgresAsyncTaskRepo) UpdateProgress(ctx context.Context, pool *pgxpoo
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE async_tasks
-		SET progress_pct=$2, last_heartbeat_at=NOW()
-		WHERE id=$1 AND status IN ('pending', 'running')
-	`, taskID, pct)
+		SET progress_pct=$3, last_heartbeat_at=NOW(), updated_at=NOW()
+		WHERE id=$1 AND status='running' AND lease_owner=$2 AND lease_until >= NOW()
+	`, taskID, workerID, pct)
 	if err != nil {
 		return fmt.Errorf("taskRepo.UpdateProgress update: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return types.Wrapf(types.ErrNotFound, "taskRepo.UpdateProgress task_id=%s", taskID)
+		return types.Wrapf(types.ErrLeaseTaken, "taskRepo.UpdateProgress task_id=%s worker_id=%s", taskID, workerID)
 	}
 	return tx.Commit(ctx)
 }
 
-func (r *PostgresAsyncTaskRepo) Complete(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, result any) error {
+func (r *PostgresAsyncTaskRepo) Complete(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, workerID string, result any) error {
+	if workerID == "" {
+		return types.Wrapf(types.ErrBadRequest, "taskRepo.Complete worker_id required")
+	}
 	if err := types.SetDBTenant(ctx, tx); err != nil {
 		return fmt.Errorf("taskRepo.Complete set tenant: %w", err)
 	}
@@ -255,14 +275,15 @@ func (r *PostgresAsyncTaskRepo) Complete(ctx context.Context, tx pgx.Tx, taskID 
 		SET status='completed',
 			progress_pct=100,
 			result=$2,
+			lease_owner=NULL,
 			lease_until=NULL,
 			completed_at=NOW(),
 			updated_at=NOW()
-		WHERE id=$1 AND status <> 'completed'
+		WHERE id=$1 AND status='running' AND lease_owner=$3 AND lease_until >= NOW()
 		RETURNING tenant_id, task_type
-	`, taskID, resultJSON).Scan(&tenantID, &taskType)
+	`, taskID, resultJSON, workerID).Scan(&tenantID, &taskType)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return types.Wrapf(types.ErrNotFound, "taskRepo.Complete task_id=%s", taskID)
+		return types.Wrapf(types.ErrLeaseTaken, "taskRepo.Complete task_id=%s worker_id=%s", taskID, workerID)
 	}
 	if err != nil {
 		return fmt.Errorf("taskRepo.Complete update: %w", err)
@@ -279,7 +300,10 @@ func (r *PostgresAsyncTaskRepo) Complete(ctx context.Context, tx pgx.Tx, taskID 
 	return insertTaskEvent(ctx, tx, taskID, tenantID, event)
 }
 
-func (r *PostgresAsyncTaskRepo) Fail(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, errMsg, compensatingAction string) error {
+func (r *PostgresAsyncTaskRepo) Fail(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, workerID string, errMsg, compensatingAction string) error {
+	if workerID == "" {
+		return types.Wrapf(types.ErrBadRequest, "taskRepo.Fail worker_id required")
+	}
 	if err := types.SetDBTenant(ctx, tx); err != nil {
 		return fmt.Errorf("taskRepo.Fail set tenant: %w", err)
 	}
@@ -294,13 +318,14 @@ func (r *PostgresAsyncTaskRepo) Fail(ctx context.Context, tx pgx.Tx, taskID uuid
 			error_message=$2,
 			compensating_action=NULLIF($3, ''),
 			dead_letter_at=CASE WHEN attempt_count+1 >= max_attempts THEN NOW() ELSE dead_letter_at END,
+			lease_owner=NULL,
 			lease_until=NULL,
 			updated_at=NOW()
-		WHERE id=$1
+		WHERE id=$1 AND status='running' AND lease_owner=$4 AND lease_until >= NOW()
 		RETURNING tenant_id, task_type, status
-	`, taskID, errMsg, compensatingAction).Scan(&tenantID, &taskType, &status)
+	`, taskID, errMsg, compensatingAction, workerID).Scan(&tenantID, &taskType, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return types.Wrapf(types.ErrNotFound, "taskRepo.Fail task_id=%s", taskID)
+		return types.Wrapf(types.ErrLeaseTaken, "taskRepo.Fail task_id=%s worker_id=%s", taskID, workerID)
 	}
 	if err != nil {
 		return fmt.Errorf("taskRepo.Fail update: %w", err)
@@ -358,6 +383,7 @@ const taskSelectSQL = `
 	SELECT tenant_id, id, idempotency_key, task_type, COALESCE(resource_type, ''),
 		COALESCE(resource_id, '00000000-0000-0000-0000-000000000000'::uuid),
 		status, attempt_count, max_attempts, progress_pct,
+		COALESCE(lease_owner, ''),
 		COALESCE(error_message, ''), COALESCE(compensating_action, ''),
 		lease_until, last_heartbeat_at, dead_letter_at, COALESCE(webhook_url, ''),
 		created_at, started_at, completed_at
@@ -380,7 +406,7 @@ func taskScanDest(t *AsyncTask) []any {
 	return []any{
 		&t.TenantID, &t.ID, &t.IdempotencyKey, &t.TaskType, &t.ResourceType,
 		&t.ResourceID, &t.Status, &t.AttemptCount, &t.MaxAttempts, &t.ProgressPct,
-		&t.ErrorMessage, &t.CompensatingAction, &t.LeaseUntil, &t.LastHeartbeatAt,
+		&t.LeaseOwner, &t.ErrorMessage, &t.CompensatingAction, &t.LeaseUntil, &t.LastHeartbeatAt,
 		&t.DeadLetterAt, &t.WebhookURL, &t.CreatedAt, &t.StartedAt, &t.CompletedAt,
 	}
 }

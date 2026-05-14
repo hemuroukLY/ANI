@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-storage-plan
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-storage-plan
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-a
+data:
+  storage-attachment-kinds: |
+    root_disk
+    data_disk
+    shared_pvc
+    object_fuse
+    ephemeral
+  default-storage-by-kind: |
+    vm: root_disk required, data_disk optional
+    container: ephemeral default, shared_pvc optional
+    gpu_container: ephemeral default, shared_pvc/object_fuse optional
+    inference: object_fuse or init-container model cache, ephemeral runtime cache
+    notebook: shared_pvc required for workspace, object_fuse optional for datasets
+    agent_sandbox: ephemeral default, shared_pvc only when explicitly allowed
+    batch_job: ephemeral default, object_fuse/shared_pvc for datasets and outputs
+  lifecycle-policy: |
+    Root disks are retained or deleted according to instance lifecycle policy.
+    Ephemeral storage is deleted with the provider workload.
+    Shared PVCs and object storage attachments are tenant-scoped and must not be
+    implicitly deleted unless an owner reference is recorded.
+  preprovisioning-policy: |
+    Runtime adapters must resolve storage class, bucket class, PVC name, and
+    mount mode before scheduling an instance. Scheduling must fail early if
+    required storage cannot be provisioned or attached.

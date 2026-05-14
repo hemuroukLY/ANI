@@ -1,0 +1,25 @@
+global:
+  profile: runtime-foundation
+
+infrastructure:
+  runtime:
+    enabled: true
+    providers:
+      vm:
+        enabled: false
+        provider: kubevirt
+        mode: external
+      container:
+        enabled: true
+        provider: kubernetes
+      gpuContainer:
+        enabled: true
+        provider: kubernetes-volcano-hami
+      sandbox:
+        enabled: true
+        provider: kubernetes-networkpolicy
+        runtimeClassName: ""
+    defaultIsolation:
+      tenantNetworkPolicy: true
+      ingressViaGateway: true
+      egressInternet: false

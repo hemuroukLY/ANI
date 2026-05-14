@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-provider-apply-gate-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-provider-apply-gate-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-g
+data:
+  port: |
+    WorkloadProviderApply
+  adapter: |
+    pkg/adapters/runtime.LocalProviderApply
+  purpose: |
+    Provide the controlled provider apply/create boundary after planning,
+    rendering, admission, audit, and provider dry-run have completed.
+  execution-switch: |
+    provider apply is disabled by default
+    execution must fail closed unless explicitly enabled
+    local gate validates evidence and returns resource refs for tests
+  required-evidence: |
+    tenant id
+    user id
+    instance id
+    audit id
+    permission proof
+    admission must be allowed
+    provider dry-run must be accepted
+    dry-run provider and manifest count must match the apply request
+  allowed-operation: |
+    create only
+  provider-mapping: |
+    kubevirt -> kubevirt.io/v1 VirtualMachine
+    kubernetes -> apps/v1 Deployment
+    kubernetes -> batch/v1 Job

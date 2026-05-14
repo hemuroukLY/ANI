@@ -19,6 +19,7 @@ func Register(h *server.Hertz) {
 	registerAuth(v1)
 	registerMetering(v1)
 	registerHarbor(v1)
+	registerDemoInstances(v1)
 
 	// OpenAI-compatible inference proxy (separate URL prefix, no /api prefix)
 	h.Group("/v1").POST("/chat/completions", inferenceProxy)

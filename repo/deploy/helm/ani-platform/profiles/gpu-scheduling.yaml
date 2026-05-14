@@ -1,0 +1,34 @@
+global:
+  profile: gpu-scheduling
+
+infrastructure:
+  gpu:
+    enabled: true
+    nodeSelector:
+      ani.kubercloud.io/gpu-node: "true"
+    operator:
+      provider: nvidia-gpu-operator
+      mode: external
+      chartVersion: latest
+    virtualization:
+      provider: hami
+      mode: external
+      chartVersion: "2.4.x"
+      migRequired: false
+      vgpuRequired: true
+    scheduler:
+      provider: volcano
+      mode: external
+      chartVersion: "1.10.x"
+      queues:
+        inference:
+          name: ani-inference
+          weight: 10
+        training:
+          name: ani-training
+          weight: 5
+    telemetry:
+      provider: dcgm-exporter
+      mode: external
+      chartVersion: latest
+      scrapeRequired: true

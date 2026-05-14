@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-hami-device-plugin-contract
+  namespace: ani-gpu-system
+  labels:
+    app.kubernetes.io/name: ani-hami-device-plugin-contract
+    app.kubernetes.io/part-of: ani-platform
+data:
+  resources: |
+    nvidia.com/gpu
+    nvidia.com/vgpu
+    huawei.com/Ascend910
+  scheduling-contract: |
+    ANI services must request GPU resources through Kubernetes resource requests/limits.
+    HAMi is the default GPU virtualization provider, not a business API boundary.
+    Runtime services must not depend on HAMi SDK internals.

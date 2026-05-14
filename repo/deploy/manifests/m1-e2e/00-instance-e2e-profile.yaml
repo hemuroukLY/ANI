@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-m1-instance-e2e-profile
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-m1-instance-e2e-profile
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-e2e
+data:
+  profile: |
+    M1 end-to-end integration profile
+  instance-types: |
+    VM
+    container
+    GPU container
+  create-chain: |
+    WorkloadInstanceService.Create
+    WorkloadInstanceOrchestrator
+    WorkloadRuntime
+    WorkloadRenderer
+    WorkloadAdmission
+    WorkloadPlanAuditStore
+    WorkloadProviderDryRun
+    WorkloadProviderApply
+    WorkloadProviderStatusReader
+    WorkloadStatusReconciler
+    WorkloadInstanceStore
+  lifecycle-chain: |
+    WorkloadInstanceService.Start
+    WorkloadInstanceService.Stop
+    WorkloadInstanceService.Restart
+    WorkloadInstanceService.Resize
+    WorkloadInstanceService.Delete
+  query-chain: |
+    WorkloadInstanceService.Get
+    WorkloadInstanceService.List
+    WorkloadInstanceStore.Get
+    WorkloadInstanceStore.List
+  ops-chain: |
+    WorkloadInstanceService.Ops
+    WorkloadInstanceOps
+    logs
+    events
+    metrics
+    terminal
+    exec

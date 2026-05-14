@@ -1,0 +1,33 @@
+capability: gpuScheduling
+providers:
+  gpuOperator:
+    default: nvidia-gpu-operator
+    mode: external
+    requiredForGPUNodes: true
+  virtualization:
+    default: hami
+    mode: external
+    requiredForVGPU: true
+  batchScheduler:
+    default: volcano
+    mode: external
+    requiredForTraining: true
+  telemetry:
+    default: dcgm-exporter
+    mode: external
+    requiredForGPUObservability: true
+contracts:
+  nodeLabels:
+    required:
+      - ani.kubercloud.io/gpu-node
+      - ani.kubercloud.io/gpu-vendor
+      - ani.kubercloud.io/gpu-model
+  volcanoQueues:
+    - ani-inference
+    - ani-training
+  metrics:
+    - DCGM_FI_DEV_GPU_UTIL
+    - DCGM_FI_DEV_FB_USED
+notes:
+  - Kubernetes resource requests/limits remain the scheduling boundary.
+  - HAMi and Volcano are default providers, not business API contracts.

@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-heterogeneous-gpu-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-heterogeneous-gpu-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-gpu-a
+data:
+  supported-vendors: |
+    nvidia
+    huawei
+    hygon
+  required-node-labels: |
+    ani.kubercloud.io/gpu-node=true
+    ani.kubercloud.io/gpu-vendor=<nvidia|huawei|hygon>
+    ani.kubercloud.io/gpu-model=<model>
+    ani.kubercloud.io/gpu-pool=<pool>
+    ani.kubercloud.io/gpu-runtime=<cuda|ascend|rocm-compatible>
+    ani.kubercloud.io/gpu-driver-version=<driver-version>
+    ani.kubercloud.io/gpu-kernel-compatible=true|false
+  optional-node-labels: |
+    ani.kubercloud.io/gpu-memory-mib=<memory>
+    ani.kubercloud.io/gpu-mig-capable=true|false
+    ani.kubercloud.io/gpu-hami-enabled=true|false
+    ani.kubercloud.io/gpu-runtime-class=<runtime-class>
+  resource-name-contract: |
+    nvidia: nvidia.com/gpu or nvidia.com/vgpu
+    huawei: huawei.com/Ascend910 or site-defined Ascend resource key
+    hygon: hygon.com/dcu or site-defined DCU resource key
+  scheduling-contract: |
+    ANI workload services must request GPU capacity through GPUInventory and
+    WorkloadRuntime ports. Vendor adapters translate ANI intent into node
+    selectors, tolerations, scheduler name, Volcano queue, runtime class, and
+    resource name.

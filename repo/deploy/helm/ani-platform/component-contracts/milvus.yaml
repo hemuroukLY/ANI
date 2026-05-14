@@ -1,0 +1,23 @@
+component: milvus
+provider: milvus
+purpose: vector database for RAG retrieval
+required: true
+modeOptions:
+  - external
+  - managed
+profiles:
+  dev:
+    modeName: standalone
+  attachK8s:
+    modeName: standalone
+  offline:
+    modeName: cluster
+collections:
+  defaultVectorDim: 1024
+  defaultMetricType: COSINE
+validation:
+  offline:
+    - yaml-parse
+  cluster:
+    - collection-create-dry-run
+    - vector-insert-search-smoke-test

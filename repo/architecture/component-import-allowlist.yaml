@@ -1,0 +1,80 @@
+# Component SDK imports outside pkg/adapters and pkg/bootstrap require an
+# explicit coupling level. Availability and stability take priority over
+# extensibility: direct bindings are allowed only when bounded and justified.
+#
+# coupling_level:
+#   port_required            - temporary debt; must migrate behind pkg/ports.
+#   adapter_with_extensions  - basic capability uses a port; advanced capability
+#                              may use provider-specific extension interfaces.
+#   bounded_direct           - strategic direct binding in a bounded module.
+#   temporary_exception      - short-lived migration exception with migrate_by.
+allowed:
+  - path: pkg/repo/outbox_repo.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: PostgreSQL outbox repository is a bounded persistence module; pgx transaction semantics preserve atomicity and outbox stability
+  - path: pkg/repo/task_repo.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: PostgreSQL task repository is a bounded persistence module; direct pgx keeps RLS, locking, and lease transitions explicit
+  - path: pkg/types/tenant.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+    reason: RLS tenant helper is PostgreSQL-specific platform metadata plumbing and must remain explicit for stability
+  - path: services/auth-service/internal/service/api_keys.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgtype
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: API key persistence is a bounded auth metadata module; direct pgx preserves RLS-safe transactions and typed nullable fields
+  - path: services/auth-service/internal/service/auth_service.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: auth service currently wires a bounded API key persistence module that owns PostgreSQL/RLS access
+  - path: services/auth-service/internal/service/token_blocklist.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: JWT revocation uses PostgreSQL as a bounded durability fallback plus CacheStore for fast-path validation
+  - path: services/auth-service/internal/service/refresh_tokens.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: Refresh token persistence is a bounded auth metadata module and must remain durable across cache restarts
+  - path: services/auth-service/internal/service/oidc_sessions.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: OIDC callback persists users, role mappings, and refresh tokens in a bounded auth metadata module
+  - path: services/task-service/internal/service/task_service.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: task worker mutation path uses explicit PostgreSQL transactions for lease correctness and outbox atomicity
+  - path: services/task-service/internal/worker/outbox_publisher.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: outbox scanner is a bounded platform worker that must read cross-tenant unpublished events transactionally
+  - path: services/model-service/internal/repo/model_repo.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: PostgreSQL model repository is a bounded persistence module; direct pgx keeps RLS and transaction behavior explicit
+  - path: services/model-service/internal/service/model_service.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: model service currently wires a bounded model repository that owns PostgreSQL/RLS access

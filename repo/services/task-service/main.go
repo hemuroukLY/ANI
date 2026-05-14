@@ -24,7 +24,7 @@ func main() {
 	outboxRepo := sharedrepo.NewPostgresOutboxRepo()
 
 	if cfg.OutboxEnabled {
-		publisher := worker.NewOutboxPublisher(deps.DB, deps.JS, outboxRepo, worker.OutboxPublisherConfig{
+		publisher := worker.NewOutboxPublisher(deps.DB, deps.Ports.MessageBus, outboxRepo, worker.OutboxPublisherConfig{
 			PollInterval: cfg.OutboxPollInterval,
 			BatchSize:    cfg.OutboxBatchSize,
 		}, deps.Logger)

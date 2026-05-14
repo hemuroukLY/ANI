@@ -1,0 +1,20 @@
+component: redis
+provider: redis
+purpose: rate limiting, JWT blocklist, and short-lived coordination state
+required: true
+modeOptions:
+  - external
+  - managed
+keys:
+  jwtBlocklistPrefix: jwt:blocklist
+  rateLimitPrefix: ratelimit:tenant
+secrets:
+  - name: ani-bootstrap-placeholders
+    keys:
+      - redis-url
+validation:
+  offline:
+    - yaml-parse
+  cluster:
+    - ping
+    - ttl-write-read

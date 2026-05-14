@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-kubernetes-lifecycle-execution
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-kubernetes-lifecycle-execution
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-q
+data:
+  profile: |
+    M1-INSTANCE-Q
+    Kubernetes lifecycle execution
+  service-chain: |
+    WorkloadInstanceService
+    WorkloadInstanceLifecycleExecutor
+    KubernetesLifecycleExecutor
+    KubernetesRESTClient
+  configuration: |
+    WORKLOAD_LIFECYCLE_PROVIDER=local
+    WORKLOAD_LIFECYCLE_PROVIDER=kubernetes_rest
+    WORKLOAD_LIFECYCLE_APPLY_ENABLED=false
+    disabled by default
+  lifecycle-actions: |
+    Start
+    Stop
+    Restart
+    Resize
+    Delete
+  provider-operations: |
+    Deployment scale subresource
+    Job scale subresource
+    KubeVirt VirtualMachine start
+    KubeVirt VirtualMachine stop
+    DELETE resource
+    resource refs

@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-schema
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-schema
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-runtime-a
+data:
+  workload-spec.example.yaml: |
+    tenantID: tenant-a
+    name: demo-gpu-container
+    kind: gpu_container
+    image: harbor.ani.internal/ani/runtime:latest
+    resources:
+      cpu: "4"
+      memory: 16Gi
+      gpu:
+        preferredVendors:
+          - nvidia
+        preferredModels:
+          - A100-SXM4-80GB
+        requiredMemoryMiB: 40960
+        requiredCount: 1
+        virtualizationModes:
+          - mig
+        pool: inference-a100
+    network:
+      tenantIsolated: true
+      allowIngressFromGateway: true
+      allowEgressToInternet: false
+  workload-status.example.yaml: |
+    ref:
+      tenantID: tenant-a
+      instanceID: inst_01
+      kind: gpu_container
+      providerID: k8s/default/pod/demo-gpu-container
+    state: running
+    endpoint: https://gateway.example.com/instances/inst_01
+    nodeName: gpu-node-01
+    reason: ""

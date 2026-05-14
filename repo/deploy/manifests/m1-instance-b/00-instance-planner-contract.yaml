@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-planner-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-planner-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-b
+data:
+  adapter: |
+    pkg/adapters/runtime.PlanningRuntime
+  purpose: |
+    PlanningRuntime validates and normalizes ANI instance specs before a real
+    Kubernetes, KubeVirt, Volcano, or customer-cloud runtime adapter creates
+    provider resources.
+  responsibilities: |
+    validate tenantID, name, kind, image, VM boot image, root disk, GPU request
+    normalize default network planes by instance kind
+    normalize default storage attachments
+    require tenant_vpc for business connectivity
+    reject GPU instances when GPUInventory is unavailable
+    maintain lifecycle state transitions for create/start/stop/restart/resize/delete
+  non-goals: |
+    does not create Pod, Deployment, Job, KubeVirt VM, PVC, VPC, or Subnet
+    does not replace provider-specific runtime adapters

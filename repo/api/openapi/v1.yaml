@@ -1,41 +1,45 @@
 openapi: 3.1.0
 
 info:
-  title: KuberCloud ANI API
+  title: KuberCloud ANI Core API
   version: 1.0.0
   description: |
-    KuberCloud ANI (AI专有云) 统一 REST API。
-    所有接口通过 ANI Gateway 暴露，内部服务通过 gRPC 通信。
+    KuberCloud ANI Core — 基础设施平台 REST API 契约（唯一真实来源）。
+
+    ## 文件范围与边界
+    本文件（api/openapi/v1.yaml）仅包含 ANI Core 基础设施资源：
+    instances（VM/Container/GPU/Sandbox/BM/K8s集群）、volumes/filesystems/objects/
+    vector-stores、networks、auth/secrets/encryption、gpu-inventory/dpu-inventory、
+    registry/metering/observability/notifications/audit 等。
+    ANI Services 资源（模型仓库/推理/知识库/PaaS）在 api/openapi/services/v1.yaml。
+
+    ## URL 前缀规范
+    servers[0].url = "https://{host}/api/v1"（前缀在 spec 中定义，Gateway 不做路径变换）。
+    版本升级时新建 api/openapi/v2.yaml，本文件路径保持稳定。
+
+    ## SDK 生成（make gen-core-sdk）
+    Go: github.com/kubercloud/ani-go | Python: pip install kubercloud-ani
+    TypeScript: @kubercloud/ani-client | Java: com.kubercloud:ani-java
 
     ## 认证
     Bearer JWT（1小时有效）或 X-API-Key Header。
     tenant_id 从 JWT claims 提取，请求体中的 tenant_id 字段将被忽略。
 
     ## 错误格式
-    所有错误响应统一为 ErrorResponse schema：
     `{ code: string, message: string, request_id: string, details?: object }`
-
-    ## 标准错误码
-    - `UNAUTHORIZED` – 未认证或 Token 无效
-    - `FORBIDDEN` – 有认证但无权限
-    - `NOT_FOUND` – 资源不存在
-    - `CONFLICT` – 资源已存在（如同名模型）
-    - `BAD_REQUEST` – 请求参数不合法
-    - `RATE_LIMIT_EXCEEDED` – 超出速率限制
-    - `NOT_IMPLEMENTED` – 功能尚未实现（Stub 期间）
-    - `INTERNAL_ERROR` – 服务内部错误（不暴露细节）
+    标准错误码：UNAUTHORIZED / FORBIDDEN / NOT_FOUND / CONFLICT / BAD_REQUEST /
+    RATE_LIMIT_EXCEEDED / NOT_IMPLEMENTED / INTERNAL_ERROR
 
     ## 分页
-    所有列表接口使用 cursor 分页（不使用 offset）：
-    `?limit=20&cursor=<opaque_token>` → 返回 `{ items: [], next_cursor: string | null }`
+    cursor 分页：`?limit=20&cursor=<token>` → `{ items: [], next_cursor: string | null }`
 
     ## 异步操作
-    返回 202 的接口统一在响应体返回 `AsyncTask`，并在 `Location` Header 中附上任务 URL。
-    客户端轮询 `GET /api/v1/tasks/{task_id}` 或配置 Webhook 接收完成通知。
+    202 响应体返回 AsyncTask，Location Header 附任务 URL。
+    轮询 GET /api/v1/tasks/{task_id} 或配置 Webhook。
 
-    ## SSE 流式推理
-    流式推理使用独立端点 `GET /v1/inference/stream`（不与 JSON 接口混用同一路径），
-    避免 SDK 生成工具在同一 path 下的响应类型冲突。
+    ## ⚠️ V8 迁移注解
+    /models、/inference-services、/knowledge-bases 为历史遗留路径，逻辑属 ANI Services，
+    将在 SPEC-SPLIT-A 批次迁移至 api/openapi/services/v1.yaml，迁移前暂时保留。
 
 servers:
   - url: https://{host}/api/v1
@@ -106,106 +110,79 @@ security:
         created_at:       { type: string, format: date-time }
         completed_at:     { type: string, format: date-time, nullable: true }
 
-    # 模型
-    Model:
-      type: object
-      required: [id, name, display_name, source, status, created_at]
-      properties:
-        id:           { type: string, format: uuid }
-        name:         { type: string, example: "qwen2.5-72b" }
-        display_name: { type: string, example: "Qwen2.5 72B Instruct" }
-        description:  { type: string }
-        source:       { type: string, enum: [upload, huggingface, modelscope, builtin] }
-        capabilities: { type: array, items: { type: string }, example: ["text-generation"] }
-        status:       { type: string, enum: [pending, downloading, ready, error, deleted] }
-        total_size_bytes: { type: integer }
-        created_at:   { type: string, format: date-time }
+    # Demo/Services schemas 已迁移：
+    # - DemoInstance/DemoCreateInstanceRequest → api/openapi/dev.yaml
+    # - Model/InferenceService/KnowledgeBase → api/openapi/services/v1.yaml
+    # （SPEC-SPLIT-A 过渡期，路径仍在本文件，schemas 已移走）
 
-    ModelVersion:
-      type: object
-      required: [id, model_id, version, format, created_at]
-      properties:
-        id:           { type: string, format: uuid }
-        model_id:     { type: string, format: uuid }
-        version:      { type: string, example: "v1" }
-        format:       { type: string, enum: [safetensors, gguf, pytorch] }
-        is_encrypted: { type: boolean, default: false }
-        encrypt_algo: { type: string, enum: [sm4, zuc, aes256gcm] }
-        encrypt_hint: { type: string, description: "用户自定义密钥提示" }
-        size_bytes:   { type: integer }
-        created_at:   { type: string, format: date-time }
+    # ── ANI Core 基础设施 Schemas ─────────────────────────────────────────────
 
-    # 推理服务
-    InferenceService:
+    HealthCheck:
       type: object
-      required: [id, name, model, status, created_at]
+      required: [status, checks]
       properties:
-        id:           { type: string, format: uuid }
-        name:         { type: string, example: "qwen2.5-72b-prod" }
-        model:        { type: string, example: "qwen2.5-72b:v1" }
-        replicas:     { type: integer, default: 1 }
-        gpu_type:     { type: string, example: "A100" }
-        gpu_count_per_pod: { type: integer, default: 1 }
-        max_concurrency: { type: integer, default: 8 }
-        placement:
+        status:  { type: string, enum: [ok, degraded, error] }
+        version: { type: string, example: "v0.8.0" }
+        checks:
           type: object
-          properties:
-            region: { type: string }
-            az:     { type: string }
-        status:
-          type: string
-          enum: [pending, downloading, decrypting, deploying, running, stopping, stopped, failed]
-        endpoint_url: { type: string, description: "运行中时的内部调用地址" }
-        created_at:   { type: string, format: date-time }
+          additionalProperties:
+            type: object
+            properties:
+              status:     { type: string, enum: [ok, fail] }
+              latency_ms: { type: integer }
+              error:      { type: string, nullable: true }
 
-    # 知识库
-    KnowledgeBase:
+    InstanceRecord:
       type: object
-      required: [id, name, status, created_at]
+      description: ANI Core 计算实例（VM/Container/GPU/Sandbox/BM/K8s集群/Batch）
+      required: [id, tenant_id, name, kind, state, provider, created_at, updated_at]
       properties:
-        id:              { type: string, format: uuid }
-        name:            { type: string, example: "人事制度知识库" }
-        description:     { type: string }
-        embedding_model: { type: string, default: "bge-m3" }
-        chunk_size:      { type: integer, default: 512 }
-        top_k:           { type: integer, default: 5 }
-        doc_count:       { type: integer }
-        status:          { type: string, enum: [active, rebuilding, deleted] }
-        created_at:      { type: string, format: date-time }
+        id:             { type: string, format: uuid }
+        tenant_id:      { type: string, format: uuid }
+        name:           { type: string }
+        kind:           { type: string, enum: [vm, container, gpu_container, sandbox, batch_job, notebook, k8s_cluster, bare_metal, dpu_node] }
+        state:          { type: string, enum: [pending, provisioning, starting, running, stopping, stopped, failed, deleting, deleted] }
+        state_reason:   { type: string, nullable: true, description: "机器可读的状态原因码，如 InsufficientGPU" }
+        state_message:  { type: string, nullable: true, description: "人类可读的状态描述" }
+        provider:       { type: string, example: "kubernetes_rest" }
+        audit_id:       { type: string, format: uuid, nullable: true }
+        resource_refs:  { type: array, items: { type: string } }
+        endpoint:       { type: string, nullable: true }
+        node_name:      { type: string, nullable: true }
+        created_at:     { type: string, format: date-time }
+        updated_at:     { type: string, format: date-time }
 
-    KBDocument:
+    InstanceOperation:
       type: object
-      required: [id, kb_id, file_name, parse_status, created_at]
+      description: 实例操作记录（创建/启动/停止/变配/删除等）
+      required: [id, instance_id, tenant_id, operation, status, requested_by, created_at]
       properties:
-        id:           { type: string, format: uuid }
-        kb_id:        { type: string, format: uuid }
-        file_name:    { type: string }
-        file_type:    { type: string, enum: [pdf, docx, xlsx, pptx, txt, md] }
-        file_size_bytes: { type: integer }
-        parse_status: { type: string, enum: [pending, parsing, indexing, ready, failed] }
-        chunk_count:  { type: integer }
-        created_at:   { type: string, format: date-time }
-
-    KBQueryResponse:
-      type: object
-      required: [answer, sources]
-      properties:
-        answer:
-          type: string
-          description: LLM 生成的回答
-        sources:
+        id:               { type: string, format: uuid }
+        instance_id:      { type: string, format: uuid }
+        tenant_id:        { type: string, format: uuid }
+        operation:        { type: string, enum: [create, start, stop, restart, resize, delete] }
+        status:           { type: string, enum: [accepted, in_progress, succeeded, failed, cancelled] }
+        idempotency_key:  { type: string, nullable: true, description: "客户端提供的幂等键" }
+        requested_by:     { type: string, format: uuid, description: "发起操作的用户 ID" }
+        precheck_result:  { type: object, nullable: true }
+        failure_reason:   { type: string, nullable: true }
+        failure_message:  { type: string, nullable: true }
+        retry_eligible:   { type: boolean, default: false }
+        steps:
           type: array
           items:
             type: object
+            required: [step_name, status]
             properties:
-              doc_id:    { type: string, format: uuid }
-              file_name: { type: string }
-              page:      { type: integer }
-              content:   { type: string, description: "引用的原文片段" }
-              score:     { type: number, format: float }
-        session_id:      { type: string, format: uuid }
-        input_tokens:    { type: integer }
-        output_tokens:   { type: integer }
+              step_name:    { type: string, example: "admission_check" }
+              status:       { type: string, enum: [pending, running, succeeded, failed, skipped] }
+              message:      { type: string, nullable: true }
+              started_at:   { type: string, format: date-time, nullable: true }
+              completed_at: { type: string, format: date-time, nullable: true }
+        before_spec:      { type: object, nullable: true, description: "变更前的实例规格快照（用于 diff）" }
+        after_spec:       { type: object, nullable: true, description: "变更后的实例规格快照" }
+        created_at:       { type: string, format: date-time }
+        updated_at:       { type: string, format: date-time }
 
   # 公共响应
   responses:
@@ -245,12 +222,93 @@ security:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
 
 # ── API 路径定义 ──────────────────────────────────────────────────────────────
+# 说明：/demo/* 路径已迁移至 api/openapi/dev.yaml（不参与 SDK 生成）
+#       /models /inference-services /knowledge-bases 为过渡期路径，
+#       将在 SPEC-SPLIT-A 批次迁移至 api/openapi/services/v1.yaml
 paths:
+
+  # ── 健康检查（K8s probe 必须）──────────────────────────────────────────────
+  /healthz:
+    get:
+      operationId: liveness
+      summary: Liveness probe（进程存活检查）
+      description: |
+        K8s liveness probe 端点。只要进程能响应即返回 200。
+        不检查依赖（Postgres/NATS/Redis），仅表示"进程在运行"。
+        不需要认证。
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: 进程存活
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:   { type: string, enum: [ok], example: "ok" }
+                  version:  { type: string, example: "v0.8.0" }
+                  build_at: { type: string, format: date-time }
+        "503":
+          description: 进程异常（极少见，进程若能响应通常返回200）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /readyz:
+    get:
+      operationId: readiness
+      summary: Readiness probe（服务就绪检查）
+      description: |
+        K8s readiness probe 端点。检查所有关键依赖是否可用。
+        任一依赖不可用则返回 503，此时 K8s 从 LB 摘除该实例。
+        不需要认证。
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: 服务就绪，可接受流量
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checks]
+                properties:
+                  status: { type: string, enum: [ok, degraded] }
+                  checks:
+                    type: object
+                    description: 各依赖的健康状态
+                    additionalProperties:
+                      type: object
+                      properties:
+                        status:  { type: string, enum: [ok, fail] }
+                        latency_ms: { type: integer }
+                        error:   { type: string, nullable: true }
+                    example:
+                      postgres:  { status: ok, latency_ms: 3 }
+                      nats:      { status: ok, latency_ms: 1 }
+                      redis:     { status: ok, latency_ms: 1 }
+        "503":
+          description: 服务未就绪（至少一个依赖不可用）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checks]
+                properties:
+                  status: { type: string, enum: [degraded, error] }
+                  checks: { type: object, additionalProperties: true }
+
+  # ── 认证 ────────────────────────────────────────────────────────────────────
+  /auth/token:
+  # /demo/* 路径已移至 api/openapi/dev.yaml，不参与 SDK 生成
 
   # ── 认证 ────────────────────────────────────────────────────────────────────
   /auth/token:
     post:
-      summary: 获取 AccessToken（用户名密码登录）
+      operationId: getToken
+      summary: 获取 AccessToken（用户名密码登录 或 OIDC callback）
       tags: [Auth]
       security: []
       requestBody:
@@ -681,6 +739,52 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
 
+  # ── 实例操作历史（Control Plane 操作追踪）──────────────────────────────────
+  /instances/{instance_id}/operations:
+    get:
+      operationId: listInstanceOperations
+      summary: 查询实例操作历史
+      description: |
+        返回指定实例的所有操作记录（创建、启动、停止、变配、删除等）。
+        每条操作记录包含：操作类型、状态、触发用户、时间线步骤、失败原因和重试建议。
+      tags: [Instances]
+      parameters:
+        - { name: instance_id, in: path,  required: true, schema: { type: string, format: uuid } }
+        - { name: limit,       in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor,      in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 操作历史列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CursorPage'
+                  - properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/InstanceOperation' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /instance-operations/{operation_id}:
+    get:
+      operationId: getInstanceOperation
+      summary: 查询单个操作详情
+      description: 通过 operation_id 查询操作详情，包含完整时间线步骤。
+      tags: [Instances]
+      parameters:
+        - { name: operation_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 操作详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstanceOperation' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
   # ── 异步任务 ────────────────────────────────────────────────────────────────
   /tasks/{task_id}:
     get:
@@ -723,11 +827,32 @@ paths:
                         period:         { type: string }
 
 # ── Tag 分组（Swagger UI 显示顺序）──────────────────────────────────────────
+# 注：Models/InferenceServices/KnowledgeBases 为 SPEC-SPLIT-A 过渡期遗留，
+#     正式路径在 api/openapi/services/v1.yaml
 tags:
-  - { name: Auth,              description: "认证与授权" }
-  - { name: Branding,          description: "平台品牌化配置" }
-  - { name: Models,            description: "模型仓库管理" }
-  - { name: InferenceServices, description: "推理服务部署与管理" }
-  - { name: KnowledgeBases,    description: "知识库与 RAG 问答" }
-  - { name: Tasks,             description: "异步任务查询" }
+  - { name: Health,         description: "健康检查（K8s liveness/readiness probe）" }
+  - { name: Auth,           description: "认证与授权" }
+  - { name: Instances,      description: "计算实例（VM/Container/GPU/Sandbox/BM/K8s集群）" }
+  - { name: Networks,       description: "VPC/子网/安全组/负载均衡" }
+  - { name: Volumes,        description: "块存储卷" }
+  - { name: Filesystems,    description: "文件存储（CephFS/NFS）" }
+  - { name: ObjectStore,    description: "对象存储（S3兼容）" }
+  - { name: VectorStore,    description: "向量存储（Milvus）" }
+  - { name: K8sClusters,    description: "K8s 集群生命周期 + 原生 API 代理" }
+  - { name: BareMetalHosts, description: "裸金属硬件库存管理" }
+  - { name: GPU,            description: "GPU 节点库存与调度" }
+  - { name: DPU,            description: "DPU 加速节点库存" }
+  - { name: Registry,       description: "镜像仓库" }
+  - { name: Encryption,     description: "国密加解密" }
+  - { name: Secrets,        description: "密钥管理与工作负载绑定" }
+  - { name: Metering,       description: "用量计量" }
+  - { name: Observability,  description: "指标查询与告警" }
+  - { name: Notifications,  description: "事件通知" }
+  - { name: Audit,          description: "审计日志" }
+  - { name: Branding,       description: "平台品牌化配置" }
+  - { name: Tasks,          description: "异步任务查询" }
+  # 过渡期保留（SPEC-SPLIT-A 完成后移除）
+  - { name: Models,            description: "⚠️ 过渡期：模型仓库（迁移至 services/v1.yaml 中）" }
+  - { name: InferenceServices, description: "⚠️ 过渡期：推理服务（迁移至 services/v1.yaml 中）" }
+  - { name: KnowledgeBases,    description: "⚠️ 过渡期：知识库服务（迁移至 services/v1.yaml 中）" }
   - { name: Metering,          description: "计量与用量统计" }

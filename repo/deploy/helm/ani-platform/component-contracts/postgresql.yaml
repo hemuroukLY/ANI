@@ -1,0 +1,32 @@
+component: postgresql
+provider: cloudnative-pg
+purpose: platform metadata and Row-Level Security enforcement
+required: true
+modeOptions:
+  - external
+  - managed
+contracts:
+  appRole:
+    name: ani_app_user
+    constraints:
+      - no-superuser
+      - no-bypassrls
+      - rls-forced
+  migratorRole:
+    name: ani_migrator
+    constraints:
+      - migration-only
+      - not-used-by-app-services
+  migration:
+    path: deploy/migrations
+    firstMigration: 20260501_001_init_schema.sql
+secrets:
+  - name: ani-bootstrap-placeholders
+    keys:
+      - database-url
+validation:
+  offline:
+    - yaml-parse
+  cluster:
+    - migration-dry-run
+    - rls-tenant-isolation-test

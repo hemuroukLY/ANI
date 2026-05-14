@@ -1,0 +1,127 @@
+openapi: 3.1.0
+
+info:
+  title: KuberCloud ANI Services API
+  version: 1.0.0
+  description: |
+    ANI Services 层 REST API 契约。由 ANI Services 团队维护。
+    SPEC-SPLIT-A 迁移完成后，/models /inference-services /knowledge-bases
+    将从 v1.yaml 移至本文件。
+
+servers:
+  - url: https://{host}/models/v1
+    description: 模型仓库（独立 base path，可单独部署）
+    variables:
+      host: { default: ani.internal }
+
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+    ApiKeyAuth:  { type: apiKey, in: header, name: X-API-Key }
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message, request_id]
+      properties:
+        code:       { type: string }
+        message:    { type: string }
+        request_id: { type: string }
+        details:    { type: object, additionalProperties: true }
+
+    Model:
+      type: object
+      required: [id, name, source, status, created_at]
+      properties:
+        id:           { type: string, format: uuid }
+        name:         { type: string }
+        display_name: { type: string }
+        source:       { type: string, enum: [upload, huggingface, modelscope, builtin] }
+        capabilities: { type: array, items: { type: string } }
+        status:       { type: string, enum: [pending, downloading, ready, error, deleted] }
+        total_size_bytes: { type: integer }
+        created_at:   { type: string, format: date-time }
+
+    ModelVersion:
+      type: object
+      required: [id, model_id, version, format, created_at]
+      properties:
+        id:           { type: string, format: uuid }
+        model_id:     { type: string, format: uuid }
+        version:      { type: string }
+        format:       { type: string, enum: [safetensors, gguf, pytorch] }
+        is_encrypted: { type: boolean }
+        size_bytes:   { type: integer }
+        created_at:   { type: string, format: date-time }
+
+    CreateModelRequest:
+      type: object
+      required: [idempotency_key, name, source]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        name:    { type: string }
+        source:  { type: string, enum: [upload, huggingface, modelscope] }
+        source_url: { type: string }
+
+    InferenceEndpoint:
+      type: object
+      required: [id, name, model_version_id, status, created_at]
+      properties:
+        id:               { type: string, format: uuid }
+        name:             { type: string }
+        model_version_id: { type: string, format: uuid }
+        replicas:         { type: integer, default: 1 }
+        gpu_profile:      { type: string }
+        status:           { type: string, enum: [pending, deploying, running, stopping, stopped, failed] }
+        endpoint_url:     { type: string }
+        created_at:       { type: string, format: date-time }
+
+    CreateInferenceEndpointRequest:
+      type: object
+      required: [idempotency_key, name, model_version_id]
+      properties:
+        idempotency_key:  { type: string, format: uuid }
+        name:             { type: string }
+        model_version_id: { type: string, format: uuid }
+        replicas:         { type: integer, minimum: 1, default: 1 }
+        gpu_profile:      { type: string }
+
+    KnowledgeBase:
+      type: object
+      required: [id, name, status, created_at]
+      properties:
+        id:      { type: string, format: uuid }
+        name:    { type: string }
+        status:  { type: string, enum: [active, rebuilding, deleted] }
+        doc_count: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    KBQueryRequest:
+      type: object
+      required: [question]
+      properties:
+        question:   { type: string }
+        top_k:      { type: integer, default: 5 }
+        session_id: { type: string, format: uuid, nullable: true }
+
+    KBQueryResponse:
+      type: object
+      required: [answer, sources]
+      properties:
+        answer:  { type: string }
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              doc_id:    { type: string, format: uuid }
+              file_name: { type: string }
+              page:      { type: integer }
+              content:   { type: string }
+              score:     { type: number }
+        session_id:    { type: string, format: uuid }
+        input_tokens:  { type: integer }
+        output_tokens: { type: integer }
+
+# 路径定义在 SPEC-SPLIT-A 完成后从 v1.yaml 迁移到此处
+paths: {}

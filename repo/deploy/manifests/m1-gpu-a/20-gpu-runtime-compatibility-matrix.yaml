@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-gpu-runtime-compatibility-matrix
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-gpu-runtime-compatibility-matrix
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-gpu-a
+data:
+  compatibility-policy: |
+    Heterogeneous GPU environments must be classified before scheduling.
+    Nodes with incompatible kernel, driver, device plugin, runtime, or resource
+    name state must be labeled as not schedulable for ANI GPU workloads.
+  vendor-adapters: |
+    nvidia: GPU Operator, GPU Feature Discovery, DCGM, NVIDIA device plugin
+    huawei: Ascend device plugin, NPU exporter, site runtime package
+    hygon: DCU device plugin, DCU exporter, site runtime package
+  remediation-policy: |
+    detect: inventory adapter observes labels, allocatable resources, runtime class, and plugin health
+    classify: adapter emits GPUNodeClass ready/reason state
+    isolate: invalid nodes receive ani.kubercloud.io/gpu-kernel-compatible=false or a site taint
+    schedule: WorkloadRuntime consumes GPUSchedulingDecision only when ready=true

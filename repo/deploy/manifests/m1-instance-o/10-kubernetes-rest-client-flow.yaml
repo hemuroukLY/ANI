@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-kubernetes-rest-client-flow
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-kubernetes-rest-client-flow
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-o
+data:
+  dry-run-flow: |
+    POST /apis/apps/v1/namespaces/{tenant}/deployments?dryRun=All
+    POST /apis/batch/v1/namespaces/{tenant}/jobs?dryRun=All
+    POST /apis/kubevirt.io/v1/namespaces/{tenant}/virtualmachines?dryRun=All
+  apply-flow: |
+    PATCH resource path with application/apply-patch+yaml
+    fieldManager=ani-workload-runtime
+    force=true
+  observe-flow: |
+    GET resource path
+    map Deployment availableReplicas to Running
+    map Job active/succeeded/failed to Running/Succeeded/Failed
+    map KubeVirt VirtualMachine printableStatus or phase

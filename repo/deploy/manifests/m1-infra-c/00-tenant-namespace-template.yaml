@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ani-tenant-template
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/tenant-scope: tenant
+    ani.kubercloud.io/tenant-id: REPLACE_WITH_TENANT_UUID
+    ani.kubercloud.io/network-profile: kubeovn-vpc

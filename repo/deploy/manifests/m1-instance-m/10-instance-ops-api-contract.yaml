@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-ops-api-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-ops-api-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-m
+data:
+  port: |
+    WorkloadInstanceOps
+  adapter: |
+    pkg/adapters/runtime.LocalInstanceOpsGuard
+  service-api: |
+    WorkloadInstanceService.Ops
+  visual-ops: |
+    logs
+    events
+    metrics
+    terminal
+    exec
+  hard-rules: |
+    ops are disabled by default
+    terminal and exec are container-only
+    terminal and exec require running instance
+    tenant id, instance id, user id, and permission proof are required
+    business services must not call Kubernetes exec/logs/events APIs directly
+  future-provider-policy: |
+    Production ops adapters may use Kubernetes logs, events, metrics, exec, and
+    KubeVirt console/VNC APIs only inside adapter-owned packages.

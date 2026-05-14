@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-kubernetes-ops-execution
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-kubernetes-ops-execution
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-r
+data:
+  profile: |
+    M1-INSTANCE-R
+    Kubernetes visual ops execution
+  ops-chain: |
+    WorkloadInstanceOps
+    KubernetesInstanceOps
+    KubernetesRESTClient
+  configuration: |
+    WORKLOAD_OPS_PROVIDER=local
+    WORKLOAD_OPS_PROVIDER=kubernetes_rest
+    WORKLOAD_OPS_ENABLED=false
+    disabled by default
+  actions: |
+    logs
+    events
+    metrics
+    terminal
+    exec
+  provider-operations: |
+    pod log subresource
+    events API
+    metrics.k8s.io
+    pod exec subresource

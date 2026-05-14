@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-gpu-node-label-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-gpu-node-label-contract
+    app.kubernetes.io/part-of: ani-platform
+data:
+  required-labels: |
+    ani.kubercloud.io/gpu-node=true
+    ani.kubercloud.io/gpu-vendor=nvidia|huawei|hygon
+    ani.kubercloud.io/gpu-model=<model>
+  optional-labels: |
+    ani.kubercloud.io/gpu-mig-capable=true|false
+    ani.kubercloud.io/gpu-hami-enabled=true|false
+    ani.kubercloud.io/gpu-pool=<pool-name>
+  notes: |
+    These labels are a scheduling contract. They do not install drivers.
+    GPU Operator, HAMi, Volcano, and DCGM remain deploy-profile controlled components.

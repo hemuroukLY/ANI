@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-instance-orchestrator-contract
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-instance-orchestrator-contract
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-instance-i
+data:
+  port: |
+    WorkloadInstanceOrchestrator
+  adapter: |
+    pkg/adapters/runtime.LocalInstanceOrchestrator
+  required-flow: |
+    WorkloadRuntime planning
+    WorkloadRenderer
+    WorkloadAdmission
+    WorkloadPlanAuditStore
+    WorkloadProviderDryRun
+    WorkloadProviderApply
+    WorkloadProviderStatusReader
+    WorkloadStatusReconciler
+  required-evidence: |
+    user id
+    permission proof
+    audit id
+    admission result
+    dry-run result
+    apply result
+    provider observation
+    final workload status
+  business-api-policy: |
+    Business services create instances through WorkloadInstanceOrchestrator.
+    They must not manually sequence provider manifests, dry-run, apply, status
+    reader, or reconcile calls.

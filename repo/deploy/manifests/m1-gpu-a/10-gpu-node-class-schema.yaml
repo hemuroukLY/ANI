@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-gpu-node-class-schema
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-gpu-node-class-schema
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: m1-gpu-a
+data:
+  gpu-node-class.example.yaml: |
+    nodeName: gpu-node-01
+    vendor: nvidia
+    model: A100-SXM4-80GB
+    kernelVersion: 5.15.0
+    osImage: Ubuntu 22.04
+    pool: inference-a100
+    ready: true
+    labels:
+      ani.kubercloud.io/gpu-node: "true"
+      ani.kubercloud.io/gpu-vendor: nvidia
+      ani.kubercloud.io/gpu-model: A100-SXM4-80GB
+      ani.kubercloud.io/gpu-pool: inference-a100
+      ani.kubercloud.io/gpu-runtime: cuda
+      ani.kubercloud.io/gpu-driver-version: "550.54"
+      ani.kubercloud.io/gpu-kernel-compatible: "true"
+    devices:
+      - vendor: nvidia
+        model: A100-SXM4-80GB
+        memoryMiB: 81920
+        resourceName: nvidia.com/gpu
+        virtualizationMode: mig
+        driverVersion: "550.54"
+        runtimeVersion: "12.4"
+        capabilities:
+          - fp16
+          - bf16
+          - tensor-parallel
+  scheduling-decision.example.yaml: |
+    nodeSelector:
+      ani.kubercloud.io/gpu-node: "true"
+      ani.kubercloud.io/gpu-vendor: nvidia
+      ani.kubercloud.io/gpu-pool: inference-a100
+    tolerations:
+      - key=ani.kubercloud.io/gpu-node,operator=Exists,effect=NoSchedule
+    resourceName: nvidia.com/gpu
+    resourceQuantity: "1"
+    runtimeClassName: nvidia
+    schedulerName: volcano
+    queueName: ani-inference
