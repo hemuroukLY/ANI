@@ -10,17 +10,27 @@ type ReconcileTarget struct {
 	TenantID       string
 	InstanceID     string
 	Kind           WorkloadKind
+	State          WorkloadState
 	Provider       string
 	LastObservedAt time.Time
 }
 
+type ReconcileTargetListRequest struct {
+	StaleBefore time.Time
+	Limit       int
+}
+
+type ReconcileTargetLister interface {
+	ListReconcileTargets(ctx context.Context, request ReconcileTargetListRequest) ([]ReconcileTarget, error)
+}
+
 // ReconcileResult holds the outcome of a single reconcile attempt.
 type ReconcileResult struct {
-	TenantID        string
-	InstanceID      string
-	PreviousState   WorkloadState
-	CurrentState    WorkloadState
-	StateChanged    bool
+	TenantID      string
+	InstanceID    string
+	PreviousState WorkloadState
+	CurrentState  WorkloadState
+	StateChanged  bool
 	// ProviderMissing is true when the provider resource no longer exists
 	// (e.g. K8s Deployment deleted out-of-band). The controller marks the
 	// instance failed with reason ProviderResourceLost.
@@ -41,7 +51,8 @@ type ReconcileControllerConfig struct {
 	// StaleThresholdSeconds marks an instance as priority-reconcile candidate
 	// if its last observation is older than this value. Default 120.
 	StaleThresholdSeconds int
-	// MaxConcurrentReconciles limits parallel provider calls. Default 10.
+	// MaxConcurrentReconciles limits the number of targets processed per tick.
+	// Implementations may use it as a provider-call concurrency cap. Default 10.
 	MaxConcurrentReconciles int
 }
 
@@ -63,7 +74,7 @@ type ReconcileControllerConfig struct {
 //
 //	WorkloadInstanceStore.List(non-terminal or stale)
 //	  ↓
-//	WorkloadProviderStatusReader.Observe (per instance, up to MaxConcurrent)
+//	WorkloadProviderStatusReader.Observe (per instance, up to MaxConcurrentReconciles per tick)
 //	  ↓
 //	WorkloadStatusReconciler.Reconcile
 //	  ↓

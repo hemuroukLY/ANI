@@ -78,7 +78,7 @@ def validate_error_mock(spec: dict[str, Any]) -> None:
 
 def validate_docs() -> None:
     required = {
-        "CLAUDE.md": read(DOC_ROOT / "CLAUDE.md"),
+        "ANI-DOCS-INDEX.md": read(DOC_ROOT / "ANI-DOCS-INDEX.md"),
         "ANI-06-开发计划.md": read(DOC_ROOT / "ANI-06-开发计划.md"),
         "CURRENT-SPRINT.md": read(ROOT / "CURRENT-SPRINT.md"),
         "development-records/README.md": read(ROOT / "development-records/README.md"),

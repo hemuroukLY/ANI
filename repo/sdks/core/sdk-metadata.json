@@ -53,6 +53,54 @@
       "scope": ""
     },
     {
+      "operationId": "listEncryptionKeys",
+      "method": "GET",
+      "path": "/encryption/keys",
+      "scope": "scope:encryption:read"
+    },
+    {
+      "operationId": "createEncryptionKey",
+      "method": "POST",
+      "path": "/encryption/keys",
+      "scope": "scope:encryption:create"
+    },
+    {
+      "operationId": "deleteEncryptionKey",
+      "method": "DELETE",
+      "path": "/encryption/keys/{key_id}",
+      "scope": "scope:encryption:delete"
+    },
+    {
+      "operationId": "getEncryptionKey",
+      "method": "GET",
+      "path": "/encryption/keys/{key_id}",
+      "scope": "scope:encryption:read"
+    },
+    {
+      "operationId": "revokeEncryptionKey",
+      "method": "POST",
+      "path": "/encryption/keys/{key_id}/revoke",
+      "scope": "scope:encryption:manage"
+    },
+    {
+      "operationId": "rotateEncryptionKey",
+      "method": "POST",
+      "path": "/encryption/keys/{key_id}/rotate",
+      "scope": "scope:encryption:manage"
+    },
+    {
+      "operationId": "sealEncryptionObject",
+      "method": "POST",
+      "path": "/encryption/seal",
+      "scope": "scope:encryption:use"
+    },
+    {
+      "operationId": "createEncryptionUnsealToken",
+      "method": "POST",
+      "path": "/encryption/unseal-token",
+      "scope": "scope:encryption:use"
+    },
+    {
       "operationId": "listStorageFilesystems",
       "method": "GET",
       "path": "/filesystems",
@@ -123,6 +171,42 @@
       "method": "GET",
       "path": "/instances/{instance_id}/operations",
       "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "listK8sClusters",
+      "method": "GET",
+      "path": "/k8s-clusters",
+      "scope": "scope:k8s-clusters:read"
+    },
+    {
+      "operationId": "createK8sCluster",
+      "method": "POST",
+      "path": "/k8s-clusters",
+      "scope": "scope:k8s-clusters:create"
+    },
+    {
+      "operationId": "deleteK8sCluster",
+      "method": "DELETE",
+      "path": "/k8s-clusters/{cluster_id}",
+      "scope": "scope:k8s-clusters:delete"
+    },
+    {
+      "operationId": "getK8sCluster",
+      "method": "GET",
+      "path": "/k8s-clusters/{cluster_id}",
+      "scope": "scope:k8s-clusters:read"
+    },
+    {
+      "operationId": "getK8sClusterKubeconfig",
+      "method": "GET",
+      "path": "/k8s-clusters/{cluster_id}/kubeconfig",
+      "scope": "scope:k8s-clusters:read"
+    },
+    {
+      "operationId": "proxyK8sClusterAPI",
+      "method": "POST",
+      "path": "/k8s-clusters/{cluster_id}/proxy",
+      "scope": "scope:k8s-clusters:proxy"
     },
     {
       "operationId": "getMeteringUsage",
@@ -257,6 +341,36 @@
       "scope": ""
     },
     {
+      "operationId": "listSecrets",
+      "method": "GET",
+      "path": "/secrets",
+      "scope": "scope:secrets:read"
+    },
+    {
+      "operationId": "createSecret",
+      "method": "POST",
+      "path": "/secrets",
+      "scope": "scope:secrets:create"
+    },
+    {
+      "operationId": "deleteSecret",
+      "method": "DELETE",
+      "path": "/secrets/{secret_id}",
+      "scope": "scope:secrets:delete"
+    },
+    {
+      "operationId": "getSecret",
+      "method": "GET",
+      "path": "/secrets/{secret_id}",
+      "scope": "scope:secrets:read"
+    },
+    {
+      "operationId": "bindSecret",
+      "method": "POST",
+      "path": "/secrets/{secret_id}/bindings",
+      "scope": "scope:secrets:bind"
+    },
+    {
       "operationId": "getTasksTaskId",
       "method": "GET",
       "path": "/tasks/{task_id}",
@@ -338,6 +452,16 @@
     "CreateStorageVolumeRequest",
     "CreateVectorStoreRequest",
     "CursorPage",
+    "EncryptionKey",
+    "EncryptionKeyCreateRequest",
+    "EncryptionKeyListResponse",
+    "EncryptionKeyRevokeRequest",
+    "EncryptionKeyRotateRequest",
+    "EncryptionKeyRotationResponse",
+    "EncryptionSealRequest",
+    "EncryptionSealResponse",
+    "EncryptionUnsealTokenRequest",
+    "EncryptionUnsealTokenResponse",
     "ErrorResponse",
     "HealthCheck",
     "InstanceConsoleSession",
@@ -346,6 +470,12 @@
     "InstanceListResponse",
     "InstanceOperation",
     "InstanceRecord",
+    "K8sCluster",
+    "K8sClusterCreateRequest",
+    "K8sClusterKubeconfig",
+    "K8sClusterListResponse",
+    "K8sClusterProxyRequest",
+    "K8sClusterProxyResponse",
     "ListAPIKeysResponse",
     "LogoutRequest",
     "NetworkLoadBalancer",
@@ -362,6 +492,11 @@
     "RefreshAccessTokenRequest",
     "RefreshAccessTokenResponse",
     "RevokeStatusResponse",
+    "Secret",
+    "SecretBinding",
+    "SecretBindingRequest",
+    "SecretCreateRequest",
+    "SecretListResponse",
     "StorageFilesystem",
     "StorageFilesystemListResponse",
     "StorageObject",
@@ -379,26 +514,36 @@
     "WorkloadIdentityBinding"
   ],
   "idempotencyOperations": [
+    "createEncryptionKey",
+    "revokeEncryptionKey",
+    "rotateEncryptionKey",
+    "sealEncryptionObject",
     "createStorageFilesystem",
     "createInstance",
     "applyInstanceLifecycle",
+    "createK8sCluster",
+    "proxyK8sClusterAPI",
     "createNetworkLoadBalancer",
     "createNetworkSecurityGroup",
     "createNetworkSubnet",
     "createNetworkVPC",
     "createStorageObject",
+    "createSecret",
     "createVectorStore",
     "createStorageVolume"
   ],
   "cursorPaginationOperations": [
+    "listEncryptionKeys",
     "listStorageFilesystems",
     "listInstances",
     "listInstanceOperations",
+    "listK8sClusters",
     "listNetworkLoadBalancers",
     "listNetworkSecurityGroups",
     "listNetworkSubnets",
     "listNetworkVPCs",
     "listStorageObjects",
+    "listSecrets",
     "listVectorStores",
     "listStorageVolumes"
   ],

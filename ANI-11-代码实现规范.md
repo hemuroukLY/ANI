@@ -14,7 +14,7 @@
 
 - 产品计划阶段只以 `ANI-06-开发计划.md` 为准。
 - `模块 1/2/3...` 表示产品开发模块，不能被代码生成批次复用。
-- 当前实现已进入 `Phase 1 / Sprint 2`：`SPEC-CORE-ALPHA → M1-INSTANCE-U → M1-INSTANCE-V`。历史 `M2.1-TASK-*` 仅作为已完成批次归档存在，不代表当前任务。
+- 当前实现阶段不得写死在本文；以 `ANI-DOCS-INDEX.md`、`ANI-06-开发计划.md` Section 零和 `repo/CURRENT-SPRINT.md` 为准。历史 `M2.1-TASK-*`、`SPEC-CORE-ALPHA`、`M1-INSTANCE-U/V` 仅作为已完成批次归档存在，不代表当前任务。
 
 ### 0.2 代码生成批次编号
 
@@ -80,7 +80,33 @@ ANI Core Phase 1 的交付对象分为两类：
 - dev/mock profile 必须与真实 API schema、状态机、错误码、RBAC scope 保持一致；release profile 禁止静态假成功。
 - AI 不得擅自提升成熟度标签。`contract → local-profile → real-provider → real-path → production` 的每次提升都必须有验收命令和 development record。
 - 2026-06-10 后，Services P0 依赖的 Core API 禁止删除字段、改路径、改状态机、改错误码或改变字段语义；新增可选字段允许，但必须保持 SDK 兼容。
+- 2026-06-15 至 2026-06-20，ANI Services 必须输出完整前端功能、Services 功能和接口定义；该定义评审通过后，旧 `model-service`、空 `kb-service`、RAG 原型、推理 operator 骨架和前端单 API Client 中与新定义冲突的部分必须删除或覆盖。
 - 任何 breaking API change 必须在提交说明和 development record 中列出受影响的 Services 场景、迁移方式和批准人。
+
+### 0.6 前端 Core API Client / Services API Client 强制拆分
+
+本文中的 **API Client** 指“由 OpenAPI 契约生成或类型绑定的调用代码”，不是用户浏览器、不是 Console 页面本身，也不是任意 HTTP client。它的作用是把 `GET/POST/...`、path、query、request body、response、error 类型固定到代码里，避免前端手写 URL 或误把 Core/Services 资源混用。
+
+| 术语 | 精确定义 | 真实来源 | base path | 允许访问 |
+|---|---|---|---|---|
+| Core API Client | 前端/SDK 中调用 ANI Core API 的类型安全代码 | `repo/api/openapi/v1.yaml` | `/api/v1` | instances、networks、volumes、objects、vector-stores、k8s-clusters、encryption、secrets、auth、operations、tasks 等 Core 资源 |
+| Services API Client | 前端/SDK 中调用 ANI Services API 的类型安全代码 | `repo/api/openapi/services/v1.yaml` | `/api/v1/svc` | models、inference-services、knowledge-bases 等 Services 业务资源 |
+| API 调用方 | 发起 HTTP 请求的一方，可以是浏览器页面、CLI、SDK、第三方系统或测试脚本 | 不等同于生成代码 | 取决于调用目标 | 必须通过对应 API Client 或 SDK 调用 |
+
+Console/BOSS 可以同时使用两个 API Client，但不能用 Core API Client 调 `/models`、`/inference-services`、`/knowledge-bases`，也不能把 Services 资源补进 Core OpenAPI。当前 `frontends/console` 中如存在单 API Client 或旧 schema 使用，属于历史遗留；6.15-6.20 Services 功能与接口定义确认后必须按双 API Client 结构覆盖。
+
+### 0.7 REST / SDK / gRPC 术语边界
+
+Core/Services 之间的跨层控制面契约是 **Core OpenAPI REST API + Core SDK**。REST API 不只是给网页前端使用；Go 后端 Services、CLI、自动化脚本、第三方系统和测试程序也应通过同一套契约或由它生成的 SDK 调用 Core。
+
+| 术语 | 精确定义 | 允许用途 | 禁止误用 |
+|---|---|---|---|
+| Core OpenAPI REST API | `repo/api/openapi/v1.yaml` 定义的 Core 控制面 HTTP 契约 | Core 对 Console/BOSS、Services、CLI、SDK、第三方系统输出基础设施能力 | 把 Services 业务资源补进 Core API |
+| Core SDK | 从 Core OpenAPI 生成的调用代码，可有 Go/Python/TypeScript/Java 等语言版本 | 后端 Services 和前端/CLI 都可使用；默认以 HTTP/REST transport 调用 Core | import Core 内部包或跳过 API 契约调用内部实现 |
+| gRPC Client | 调用 `.proto` 生成 service stub 的代码 | Core 内部 service 间通信、Gateway 内部路由、测试工具、或被 SDK transport adapter 隐藏的实现细节 | 作为 ANI Services 绕过 Core OpenAPI 的跨层产品接口 |
+| Proto | Core 内部 gRPC service 的实现契约 | 描述内部 RPC message/service，服务性能与工程组织 | 与 OpenAPI 维护两套冲突的同一资源语义 |
+
+如果某能力同时有 OpenAPI 和 Proto 描述，OpenAPI 是跨层控制面真实来源；Proto 必须对齐它。只有当架构评审明确批准“SDK 内部使用 gRPC transport”时，gRPC 才能作为 SDK 的隐藏传输实现，并且 SDK 暴露的资源、错误语义、幂等、分页和权限仍必须来自 OpenAPI。
 
 ---
 
@@ -142,7 +168,7 @@ repo/
 │       ├── nats.go                  # NATS JetStream 连接
 │       └── redis.go                 # Redis 连接
 │
-├── api/proto/                       # Protobuf 定义（唯一的 API 权威来源）
+├── api/proto/                       # Protobuf 定义（Core 内部 gRPC 实现契约，不能替代 OpenAPI）
 │   ├── buf.yaml
 │   ├── buf.gen.yaml
 │   ├── common/v1/common.proto
@@ -418,7 +444,7 @@ type KBDocumentRepo interface {
 ### 流程 A：部署推理服务（完整端到端）
 
 ```
-1. Client POST /api/v1/inference-services
+1. API 调用方 POST /api/v1/svc/inference-services
    Headers: Authorization: Bearer <jwt>
    Body: { name, model, replicas, gpu_type, idempotency_key, ... }
 
@@ -494,7 +520,7 @@ type KBDocumentRepo interface {
 10. outbox_publisher 发布 TaskCompletedEvent
     Subject: ani.events.task.completed.{taskID}
 
-11. ANI Gateway SSE handler (if client is listening):
+11. ANI Gateway SSE handler（如果 API 调用方正在监听）：
     js.Subscribe(subject) → 推送 SSE event 到前端
     OR Webhook dispatcher: POST to webhook_url
 ```
@@ -502,7 +528,7 @@ type KBDocumentRepo interface {
 ### 流程 B：上传文档到知识库（完整端到端）
 
 ```
-1. Client POST /api/v1/knowledge-bases/{kb_id}/documents (multipart/form-data)
+1. API 调用方 POST /api/v1/svc/knowledge-bases/{kb_id}/documents (multipart/form-data)
    → 文件由 ANI Gateway 接收（不超过 500MB）
 
 2. Gateway kbHandler.PrepareUpload(ctx, req)：
@@ -516,9 +542,9 @@ type KBDocumentRepo interface {
       → COMMIT
       → 返回 {doc_id, upload_url, storage_path}
 
-3. Client PUT {upload_url} （直传 MinIO，不经过 Gateway）
+3. API 调用方 PUT {upload_url} （直传对象存储，不经过 Gateway）
 
-4. Client POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded
+4. API 调用方 POST /api/v1/svc/knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded
 
 5. Gateway kbHandler.NotifyUploaded(ctx, req)：
    gRPC: kbSvcClient.NotifyDocumentUploaded(doc_id)
@@ -564,7 +590,9 @@ type KBDocumentRepo interface {
 ### 流程 C：HuggingFace 模型导入（完整端到端）
 
 ```
-1. Client POST /api/v1/models/import
+> 以下流程属于 ANI Services 示例，不属于 ANI Core API。Services API 路径以 `repo/api/openapi/services/v1.yaml` 和 `/api/v1/svc` 为准；Core API 不得新增 models 业务路径。
+
+1. API 调用方 POST /api/v1/svc/models/import
    Body: { source, repo_id, revision, idempotency_key, webhook_url }
 
 2. Gateway modelHandler.ImportModel(ctx, req)：
@@ -892,20 +920,30 @@ frontends/console/src/routes/
 ### 6.2 API Client 生成方式
 
 ```bash
-# 从 API 契约生成 TypeScript 类型（make gen-api 中调用）
-npx openapi-typescript ../../api/openapi/v1.yaml -o src/api/schema.d.ts
+# 从 Core / Services 两套 API 契约分别生成 TypeScript 类型（make gen-api 中调用）
+npx openapi-typescript ../../api/openapi/v1.yaml -o src/api/core-schema.d.ts
+npx openapi-typescript ../../api/openapi/services/v1.yaml -o src/api/services-schema.d.ts
+```
 
-# 使用方式（类型安全，无手写 URL）
+```typescript
+// 使用方式（类型安全，无手写 URL）
 import createClient from 'openapi-fetch'
-import type { paths } from './api/schema'
+import type { paths as corePaths } from './api/core-schema'
+import type { paths as servicePaths } from './api/services-schema'
 
-const api = createClient<paths>({ baseUrl: '/api/v1' })
+export const coreApi = createClient<corePaths>({ baseUrl: '/api/v1' })
+export const servicesApi = createClient<servicePaths>({ baseUrl: '/api/v1/svc' })
 
-// 使用
-const { data, error } = await api.GET('/models', {
+// Core 资源只能走 coreApi
+const { data: instances } = await coreApi.GET('/instances', {
     params: { query: { limit: 20 } }
 })
-// data 和 error 都是类型安全的，来自 API 契约
+
+// Services 业务资源只能走 servicesApi
+const { data: models, error } = await servicesApi.GET('/models', {
+    params: { query: { limit: 20 } }
+})
+// data 和 error 都是类型安全的，来自各自 API 契约
 ```
 
 ### 6.3 状态管理约定
@@ -914,7 +952,7 @@ const { data, error } = await api.GET('/models', {
 // ✅ 服务端数据（API 响应）用 TanStack Query
 const { data: models, isLoading } = useQuery({
     queryKey: ['models', { limit: 20 }],
-    queryFn: () => api.GET('/models', { params: { query: { limit: 20 } } })
+    queryFn: () => servicesApi.GET('/models', { params: { query: { limit: 20 } } })
         .then(({ data }) => data),
     staleTime: 30_000,   // 30s 内不重新请求
 })

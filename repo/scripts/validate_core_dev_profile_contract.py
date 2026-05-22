@@ -54,7 +54,7 @@ def load_yaml(path: str) -> dict:
 
 def validate_docs() -> None:
     docs = {
-        "CLAUDE.md": read("../CLAUDE.md"),
+        "ANI-DOCS-INDEX.md": read("../ANI-DOCS-INDEX.md"),
         "ANI-06-开发计划.md": read("../ANI-06-开发计划.md"),
         "development-records/README.md": read("development-records/README.md"),
         "development-records/core-dev-profile-a-boundary-contract.md": read("development-records/core-dev-profile-a-boundary-contract.md"),

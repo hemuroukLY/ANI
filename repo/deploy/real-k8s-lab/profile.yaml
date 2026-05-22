@@ -1,0 +1,61 @@
+profile: REAL-K8S-LAB-A
+status: contract
+description: >
+  Sprint 5 real provider development lab for validating ANI Core against
+  Kubernetes, Kube-OVN, KubeVirt and vCluster on three public-cloud VMs.
+
+minimum_nodes: 3
+
+components:
+  kubernetes:
+    required: true
+    purpose: API Server, Namespace, RBAC, ServiceAccount and StorageClass baseline.
+    live_checks:
+      - id: kubernetes-nodes-ready
+        command: kubectl get nodes -o json
+        pass_condition: at_least_minimum_nodes_ready
+      - id: kubernetes-storageclass
+        command: kubectl get storageclass -o json
+        pass_condition: at_least_one_storageclass
+  kube_ovn:
+    required: true
+    purpose: VPC, Subnet, NetworkPolicy and Service/LB real provider validation.
+    live_checks:
+      - id: kubeovn-vpc-crd
+        command: kubectl get crd vpcs.kubeovn.io -o json
+        pass_condition: crd_exists
+      - id: kubeovn-subnet-crd
+        command: kubectl get crd subnets.kubeovn.io -o json
+        pass_condition: crd_exists
+  kubevirt:
+    required: true
+    purpose: VM lifecycle, console and VNC validation; requires nested virtualization or emulation fallback.
+    live_checks:
+      - id: kubevirt-vm-crd
+        command: kubectl get crd virtualmachines.kubevirt.io -o json
+        pass_condition: crd_exists
+      - id: kubevirt-kubevirt-cr
+        command: kubectl get kubevirt -A -o json
+        pass_condition: at_least_one_item
+  vcluster:
+    required: true
+    purpose: Tenant Kubernetes cluster lifecycle, kubeconfig and API proxy validation.
+    live_checks:
+      - id: vcluster-workloads
+        command: kubectl get pods -A -l app=vcluster -o json
+        pass_condition: at_least_one_item
+  kms_sm4_and_secret:
+    required: false
+    purpose: Sprint 5-6 encryption and K8s Secret injection validation.
+    live_checks:
+      - id: kubernetes-secret-api
+        command: kubectl auth can-i create secrets --all-namespaces
+        pass_condition: stdout_yes
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and documentation are present; no live cluster proof.
+  live:
+    meaning: Live kubectl checks passed against the real lab.
+  production_like:
+    meaning: Live checks, failure recovery, security hardening and HA evidence are present.

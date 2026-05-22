@@ -26,6 +26,9 @@ func TestNewCapabilitiesDefaultsToLocalProviderAdapters(t *testing.T) {
 	if _, ok := capabilities.WorkloadIdentity.(*runtimeadapter.MetadataWorkloadIdentityService); !ok {
 		t.Fatalf("WorkloadIdentity = %T, want MetadataWorkloadIdentityService", capabilities.WorkloadIdentity)
 	}
+	if _, ok := capabilities.WorkloadController.(*runtimeadapter.LocalWorkloadReconcileController); !ok {
+		t.Fatalf("WorkloadController = %T, want LocalWorkloadReconcileController", capabilities.WorkloadController)
+	}
 	if _, ok := capabilities.InstanceService.(*runtimeadapter.LocalInstanceService); !ok {
 		t.Fatalf("InstanceService = %T, want LocalInstanceService with operation store", capabilities.InstanceService)
 	}

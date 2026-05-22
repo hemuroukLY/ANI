@@ -21,6 +21,9 @@ func Register(h *server.Hertz) {
 	registerNetworkResources(v1)
 	registerStorageResources(v1)
 	registerVectorStoreResources(v1)
+	registerK8sClusterResources(v1)
+	registerEncryptionResources(v1)
+	registerSecretResources(v1)
 
 	svc := h.Group("/api/v1/svc")
 	registerModels(svc)

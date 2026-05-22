@@ -85,16 +85,14 @@ def load_yaml(path: str) -> dict[str, Any]:
 
 
 def validate_docs() -> None:
-    claude = read_doc("CLAUDE.md")
     docs_index = read_doc("ANI-DOCS-INDEX.md")
     plan = read_doc("ANI-06-开发计划.md")
 
     for path, text in {
-        "CLAUDE.md": claude,
         "ANI-DOCS-INDEX.md": docs_index,
     }.items():
         if "Sprint 4" not in text:
-            fail(f"{path} must point to Sprint 4 after Sprint 3 closure")
+            fail(f"{path} must preserve Sprint 4 closure references")
     if "| Sprint 3 | ✅ 已完成" not in plan:
         fail("ANI-06-开发计划.md must mark Sprint 3 completed")
     if "Sprint 4 ⭐（当前）" not in plan:

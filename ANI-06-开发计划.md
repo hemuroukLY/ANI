@@ -1,7 +1,7 @@
 # KuberCloud ANI · 开发计划
 
 > 版本 V8.3 | 广州常青云科技有限公司 | 内部产品规划文件
-> 最后更新：2026-05-20（Sprint 2 完成，Sprint 3 提前启动）
+> 最后更新：2026-05-23（补充真实底座组件引入强制门禁）
 
 ---
 
@@ -15,7 +15,9 @@
 
 | 文档 | 职责 | 使用时机 |
 |---|---|---|
+| `CLAUDE.md` | AI/人类开发入口、稳定强制规则、架构红线、提交门禁；不维护批次流水账 | 每次开发会话启动时先读 |
 | `ANI-06-开发计划.md` | 总路线、Services 解锁门禁、Sprint 边界、延期项 | 判断当前阶段和长期节奏 |
+| `ANI-05-系统架构设计.md` | 系统架构图、Core/Services 模块边界、API/SDK/ports/adapters 结构 | 解释架构和新人理解全局时使用 |
 | `repo/CURRENT-SPRINT.md` | 当前 Sprint 的执行清单、入口文件、验收命令 | 每次开始开发先读 |
 | `repo/development-records/README.md` | 已完成批次索引 | 查历史实现和验证记录 |
 | `repo/development-records/*.md` | 单批次闭环记录 | 需要追溯技术细节时再读 |
@@ -23,12 +25,12 @@
 ### 项目全局进度
 
 ```
-当前阶段：Phase 1 / Sprint 4 收尾（开发与验收完成，待提交 GitHub）
+当前阶段：Phase 1 / Sprint 5 收敛中（K8s、加解密、Secret local profile 主链路已完成，controller 已具备默认关闭的 bootstrap opt-in 运行剖面，真实 provider/HA 能力未完成）
 当前不是 Phase 2：Phase 2 指 2026-10 以后延期能力，不是下一次开发阶段
 交付目标：2026-09-30 ANI Core v1.0.0 + ANI Services P0
-关键节奏：ANI Core 必须先在 2026-06 上中旬解锁 ANI Services 开发，不能等到 2026-09-30 才完成接口与 SDK
-刚完成：Sprint 3（2026-05-20，网络/存储/向量/Workload Identity/SDK Alpha/Core Dev Profile Ready）
-下一步：先提交 Sprint 4 到 GitHub；提交完成后再按 repo/CURRENT-SPRINT.md 切换下一阶段开发
+关键节奏：ANI Core 必须先在 2026-06 上中旬解锁 ANI Services 开发；2026-06-15 至 2026-06-20，ANI Services 必须输出完整前端功能、Services 功能和接口定义，用于覆盖 Repo 中陈旧 Services 逻辑
+刚完成：Sprint 5 Core dev/local profile 主链路切片和真实底座验证门禁（2026-05-23，k8s-clusters CRUD+kubeconfig+proxy + encryption keys/seal/unseal-token/rotate/revoke + secrets CRUD/bindings + WorkloadReconcileController opt-in 运行剖面 + REAL-K8S-LAB-A）
+下一步：继续 Sprint 5 未完成项，并通过 REAL-K8S-LAB-A / make validate-real-k8s-profile 强制并行引入真实 K8s/Kube-OVN/KubeVirt/vCluster 验证环境；不能把 Sprint 6 作为当前执行入口，除非 Sprint 5 剩余能力完成或明确重新排期
 ```
 
 | 阶段 | 状态 | 完成时间 | 说明 |
@@ -39,8 +41,8 @@
 | **Sprint 1** | ✅ 已完成 | 2026-05-18 | 操作语义底座 + Health + Idempotency + Auth Final |
 | **Sprint 2** | ✅ 已完成 | 2026-05-20 | VM & Container/GPU 深度 + **Core API Alpha Freeze** |
 | Sprint 3 | ✅ 已完成 | 2026-05-20 | 网络/存储/向量 API + **SDK Alpha + Dev Profile Ready** |
-| Sprint 4 ⭐（当前） | ✅ 开发与验收完成，待提交 GitHub | 2026-05-21（开发验收完成）；计划窗口 2026-07-01~07-15 | API Beta 准备 + 四语言 SDK + Mock Server |
-| Sprint 5 | ⏳ 计划中 | 2026-07-16~07-31 | **K8s集群(vCluster)** + 控制器 + 加解密 ← K8S-A 恢复 v1.0.0 |
+| Sprint 4 | ✅ 已完成并归档 | 2026-05-21（开发验收完成）；计划窗口 2026-07-01~07-15 | API Beta 准备 + 四语言 SDK + Mock Server |
+| Sprint 5 ⭐（当前） | 🔄 部分完成 | 2026-05-23 完成 K8s/Encryption/Secrets local profile 主链路切片、WorkloadReconcileController opt-in 运行剖面和 REAL-K8S-LAB-A contract gate；计划窗口 2026-07-16~07-31 | 已完成 k8s-clusters CRUD+kubeconfig+proxy、encryption keys/seal/unseal-token/rotate/revoke、secrets CRUD/bindings local profile，以及 controller 默认关闭的 bootstrap 后台运行；vCluster 真实生命周期、真实 proxy 转发、controller leader election/指标/退避、真实 KMS/SM4 provider、真实 K8s Secret 注入尚未完成 |
 | Sprint 6 | ⏳ 计划中 | 2026-08-01~08-15 | Sandbox + 平台支撑 + Services 模型仓库/推理 |
 | Sprint 7 | ⏳ 计划中 | 2026-08-16~09-01 | Installer + 知识库 RAG（从零建）+ Console Alpha |
 | Sprint 8 | ⏳ 计划中 | 2026-09-01~09-15 | Console + BOSS |
@@ -55,9 +57,9 @@ ANI Core 的 Phase 1 有两个交付对象：先交付给 ANI Services 开发团
 | 日期 | 门禁 | ANI Core 必须交付 | ANI Services 可开始 |
 |---|---|---|---|
 | **2026-05-31** | P0 依赖矩阵冻结 | VM/GPU/存储/网络/Auth/Operation/SDK/API 依赖全列清楚，能力标注 current/target maturity | 产品页面、业务流和前端信息架构设计 |
-| **2026-06-10** | Core API Alpha Freeze | P0 path/schema/error/state/RBAC scope 基本冻结，breaking change 需 CTO/架构负责人批准 | 生成 SDK、写 client、写 mock 集成 |
+| **2026-06-10** | Core API Alpha Freeze | P0 path/schema/error/state/RBAC scope 基本冻结，breaking change 需 CTO/架构负责人批准 | 生成 SDK、写 API Client、写 mock 集成 |
 | **2026-06-20** | SDK Alpha | Go/Python/TypeScript/Java SDK 可生成、可 import，核心示例可编译 | Services 后端开始真实代码开发 |
-| **2026-06-30** | Core Dev Profile Ready | Core P0 API 具备 dev/local profile，状态机和错误语义与真实实现一致；不包含 Services 业务 mock | Services 可通过 Core SDK/API 做端到端开发与 Console 联调 |
+| **2026-06-30** | Core Dev Profile Ready | Core P0 API 具备 dev/local profile，状态机和错误语义与真实实现一致；不包含 Services 业务 mock | Services 可通过 Core SDK / Core OpenAPI 做端到端开发与 Console 联调 |
 | **2026-07-31** | Core Real Path Beta | VM/GPU Container 主链路真实跑通，含网络、存储、Auth/RBAC/RLS、审计、幂等和 operation timeline | Services 开始真实 provider 联调 |
 | **2026-08-15** | Core API Beta Freeze | Services P0 依赖 API 禁止 breaking change，缺口必须有 owner/date | Services 功能冻结，集中修 bug |
 | **2026-08-31** | Core Integration RC | Services 依赖缺口清零，部署和集成文档可演练 | 全项目联调、验收文档、部署演练 |
@@ -65,6 +67,50 @@ ANI Core 的 Phase 1 有两个交付对象：先交付给 ANI Services 开发团
 | **2026-09-30** | Final Delivery | ANI Core v1.0.0 + ANI Services P0 | 客户交付 |
 
 **硬规则：** 凡是 ANI Services Phase 1 P0 场景依赖的 Core 能力，不允许在对应 Runtime Ready 日期后仍停留在 `contract`、`local-profile`、stub、mock success 或 `NOT_IMPLEMENTED`。
+
+### Services 功能与接口定义门禁（2026-06-15 至 2026-06-20）
+
+ANI 目标定义决定开发规划和阶段规划。项目初期 Core/Services 边界没有完全想清楚，因此当前 Repo 中保留了一些早期 Services 逻辑；这些逻辑只能作为历史参考或临时骨架，不能反向定义 ANI Services 的最终边界。
+
+**源头定义：**
+
+1. ANI Core 是基础设施能力底座，向 Services 提供稳定 Core OpenAPI REST API、Core SDK 和 CLI；这是 Core/Services 的跨层控制面契约。
+2. ANI Services 是最终产品功能层，负责云服务、人机交互展现、AI 应用和功能编排。
+3. Services 只能通过 Core OpenAPI REST API / Core SDK 使用 Core 能力；旧代码里绕过 Core、直接调用 Core 内部 gRPC service、直接贴底层组件或把 Services 资源写进 Core API 的做法都不是未来方向。
+
+**6.15-6.20 必须交付：**
+
+| 交付物 | 内容 | 作用 |
+|---|---|---|
+| 前端功能定义 | Console/BOSS 信息架构、主要页面、用户角色、关键操作流、错误与空状态 | 指导 Services API Client、Core API Client 拆分和前端实现 |
+| Services 功能定义 | IaaS 云服务、AI 全生命周期、AI-Native 应用、运维/用量/编排能力的 P0/P1/P2 范围 | 避免把“模型仓库/推理/知识库”误认为 ANI Services 全部 |
+| Services 接口定义 | `repo/api/openapi/services/v1.yaml` 的完整 P0 接口、状态机、幂等、错误语义、分页和权限 scope | 让 Core 按最终需求补齐 API/SDK，形成循环收敛 |
+| 旧 Services 清理清单 | 标出 `repo/services/model-service/`、`repo/services/kb-service/`、`repo/ai/`、`repo/operators/inference-operator/`、`repo/frontends/console/` 中保留、删除、覆盖的内容 | 防止历史骨架继续误导人和 AI 开发 |
+
+**硬规则：** 2026-06-20 后，Repo 中与新 Services 功能/接口定义冲突的旧 Services 逻辑必须删除或覆盖；文档、OpenAPI、SDK、前端 API Client 和代码实现必须以新定义与 Core OpenAPI/SDK 为准。
+
+### 真实底座组件引入强制门禁
+
+从 **Sprint 5** 开始，ANI Core 进入真实 provider 收敛阶段。以下规则为强制规则，不是建议：
+
+1. **Sprint 1~4 允许以 API 契约、local profile、Mock Server 和 SDK 为主**，目标是先稳定产品能力边界、接口语义、状态机、权限、幂等、错误结构、SDK 和文档。
+2. **Sprint 5 开始必须并行建设真实底座组件验证环境**，至少包含 K8s、Kube-OVN、KubeVirt、vCluster；涉及存储、对象、向量、加密和镜像仓库时，还必须逐步引入对应真实组件或等价测试实例。
+3. **凡是需要证明“能和开源组件对接并运行”的能力，不得只靠 local profile 标完成**。local profile 只能标记为 `dev/local profile completed`，不能标记为 `real provider completed`、`production ready` 或 `runtime ready`。
+4. **网络、VM、容器/GPU 容器、K8s 集群、K8s proxy、Secret 注入、存储挂载等能力，在 Sprint 5 之后必须具备真实组件门禁**，否则不得进入“真实主链路完成”或“可交付”状态。
+5. **真实环境门禁必须形成固定命令或记录**。当前固定入口为 `REAL-K8S-LAB-A` 和 `make validate-real-k8s-profile`：默认校验门禁定义和文档闭环，三台云 VM 的 kubeconfig 就绪后使用 live 模式执行真实 kubectl 检查。未形成门禁前，只能称为“已开发契约与 local profile”。
+
+真实底座引入顺序：
+
+| 阶段 | 必须引入的真实底座 | 目的 | 未完成时不得声称 |
+|---|---|---|---|
+| Sprint 5 当前起 | K8s 测试集群 | 验证 Namespace、RBAC、ServiceAccount、API Server、StorageClass 等基础能力 | Core Real Path Beta |
+| Sprint 5 当前起 | Kube-OVN | 验证 VPC、Subnet、NetworkPolicy、Service/LB 等网络资源能真实创建和观察 | 网络真实 provider 完成 |
+| Sprint 5 当前起 | KubeVirt | 验证 VM 创建、启动、停止、删除、console/VNC 等能力能真实运行 | VM 真实 provider 完成 |
+| Sprint 5 当前起 | vCluster | 验证 K8s 集群创建、kubeconfig、proxy 能真实访问租户集群 | K8s 集群服务完成 |
+| Sprint 5~6 | MinIO / KMS或SM4实现 / K8s Secret | 验证对象存储、加解密、Secret 注入真实链路 | 模型仓库加密和凭据注入可交付 |
+| Sprint 6~7 | Harbor / observability / metering 相关组件 | 验证镜像、监控、计量和平台支撑真实链路 | 平台支撑完成 |
+
+因此，Sprint 5 之后每个涉及底座组件的批次必须同时说明三件事：当前是 `contract`、`local-profile` 还是 `real-provider`；依赖哪些真实组件和版本；用什么命令或记录证明已经跑通。
 
 ### 已完成冲刺：Sprint 3（2026-05-20）
 
@@ -77,7 +123,7 @@ ANI Core 的 Phase 1 有两个交付对象：先交付给 ANI Services 开发团
 | SDK-ALPHA-A（四语言 SDK Alpha）| P0 ⭐ | ✅ Alpha 生成和 smoke 门禁已完成：Core/Services 四语言 SDK 生成、分层隔离和 smoke 校验 |
 | CORE-DEV-PROFILE-A（原 MOCK-DEV-A）| P0 | ✅ 已完成：Core P0 API dev/local profile 显式标记、合同守卫和 SDK 对齐；不做 Services 业务 mock |
 
-### 当前冲刺：Sprint 4 收尾（2026-05-20 提前启动 → 2026-07-15）
+### 已完成冲刺：Sprint 4 收尾（2026-05-20 提前启动 → 2026-07-15）
 
 | 批次 | 优先级 | 状态 |
 |---|---|---|
@@ -87,7 +133,20 @@ ANI Core 的 Phase 1 有两个交付对象：先交付给 ANI Services 开发团
 | MOCK-A | P0 | ✅ 首个切片完成：Core Mock Server 由 `api/openapi/v1.yaml` 驱动，`make validate-mock-a` 校验全量 Core path 覆盖 |
 | DOC-API-A | P0 | ✅ 首个切片完成：Core/Services 静态 API 文档由 API 契约生成，`make validate-doc-api` 校验覆盖 |
 
-**→ 明日继续入口：先按 [`repo/CURRENT-SPRINT.md`](repo/CURRENT-SPRINT.md) 完成 Sprint 4 GitHub 提交；提交完成后再切换下一 Sprint / 下一阶段开发。**
+### 当前冲刺：Sprint 5 收敛（K8s 集群 + 加解密）
+
+| 批次 | 优先级 | 状态 |
+|---|---|---|
+| M1-K8S-A local profile | P0 ⭐ | ✅ 已完成：`/api/v1/k8s-clusters` create/get/list/delete + kubeconfig + proxy、OpenAPI schema、ports、local runtime service、租户隔离、幂等请求、SDK 生成和 router 单元测试 |
+| M1-ENCRYPT-A/B local profile | P0 | ✅ 已完成：`/api/v1/encryption/keys` create/get/list/delete + seal + unseal-token + rotate + revoke、OpenAPI schema、ports、local runtime service、租户隔离、幂等 create/seal/rotate/revoke、SDK 生成和 router 单元测试 |
+| M1-SECRETS-A local profile | P0 | ✅ 已完成：`/api/v1/secrets` create/get/list/delete + bindings、OpenAPI schema、ports、local runtime service、租户隔离、幂等创建、SDK 生成和 router 单元测试；响应不返回明文 |
+| M1-K8S-A 后续切片 | P0 ⭐ | ⏳ 未完成：真实 vCluster provider、升级、真实 vCluster API 转发、节点池管理 |
+| M1-RECONCILE-A | P0 | ✅ 已完成基础闭环：controller adapter/capability + `bootstrap.RunGRPC` opt-in 后台运行；未完成 leader election、指标、退避和独立 worker 部署形态 |
+| REAL-K8S-LAB-A | P0 ⭐ | ✅ 已完成 contract gate：`deploy/real-k8s-lab/profile.yaml`、`make validate-real-k8s-profile` 和 live kubectl 检查入口；真实三台云 VM 环境尚未部署 |
+| M1-ENCRYPT-A 后续切片 | P0 | ⏳ 未完成：真实 KMS/SM4 provider、真实 provider 下的密钥生命周期操作和加解密验证 |
+| M1-SECRETS-A 后续切片 | P0 | ⏳ 未完成：真实 K8s Secret 写入与实例环境变量/文件挂载注入 |
+
+**→ 继续入口：按 [`repo/CURRENT-SPRINT.md`](repo/CURRENT-SPRINT.md) 继续 Sprint 5；下一个最小可验收闭环优先 K8s 真实 vCluster provider/真实 proxy 转发或 Encryption/Secrets 真实 provider。**
 
 ### 已完成批次完整记录
 
@@ -107,7 +166,7 @@ ANI Core 的 Phase 1 有两个交付对象：先交付给 ANI Services 开发团
 ### v1.0.0 后续延期项（不是当前下一阶段）
 
 > ⚠️ **M1-K8S-A 已从延期列表移回 v1.0.0 范围（Sprint 5）**，理由见 Sprint 5 说明。
-> 这里的延期项不是 Sprint 4 当前优先要做的任务；当前下一阶段是 API Beta 准备与 SDK/Mock Server 加固。
+> 这里的延期项不是 Sprint 5 当前优先要做的任务；当前下一阶段仍是 Sprint 5 未完成主链路收敛。
 
 | 条目 | 理由 |
 |---|---|
@@ -129,7 +188,7 @@ ANI Core 的 Phase 1 有两个交付对象：先交付给 ANI Services 开发团
 | **开发语言** | Go（平台层）、Python（AI 应用层）、TypeScript（前端） |
 
 **每个模块的 AI 辅助标准流程：**
-1. 人工编写 API 契约 / Protobuf 定义（明确接口契约）
+1. 人工编写 OpenAPI 契约；如涉及 Core 内部 gRPC，再补 Protobuf 实现契约并保持对齐
 2. AI 生成 Server Stub、Client、单元测试骨架
 3. 人工审查逻辑正确性和安全边界
 4. AI 补充错误处理、日志、Metrics 等横切代码
@@ -172,14 +231,15 @@ S10 09-26~09-30  v1.0.0 发布
 
 ```
 当前代码实际状态：
-  ✅ pkg/ports/ 31个接口，pkg/adapters/runtime/ 28个文件 — 架构基础完整
+  ✅ pkg/ports/ 与 pkg/adapters/runtime/ 已建立 ports/adapters 架构基础；具体数量以当前代码为准
   ✅ auth-service JWT/OIDC/RBAC 完整实现
   ✅ DB migrations 4个SQL，operations 表与 instance 深度字段已建
   ✅ /api/v1/instances Core Alpha path/schema/error/state/RBAC scope 已冻结，dev/local profile 可供 Services P0 依赖
-  ⚠️  /api/v1/networks /volumes handler — 仍需 Sprint 3 补真实或 contract-compatible dev profile
-  ⚠️  model-service 有实现但属于 Services 层，需要划清边界
-  ❌ kb-service — 完全空目录，Sprint 6 从零建
-  ❌ K8s vCluster 集成 — 零代码，Sprint 5 建
+  ✅ /api/v1/networks /volumes /objects /filesystems /vector-stores 已完成 Core dev/local profile；真实 provider 仍需 Sprint 5+ 收敛
+  ⚠️  model-service 属于 ANI Services 早期逻辑，只能作为历史参考；6.15-6.20 Services 定义通过后按新定义删除或覆盖
+  ⚠️  kb-service 当前为空目录，不能被文档描述成已实现知识库服务
+  ⚠️  frontends/console 当前仍有历史单 API Client 使用痕迹；最终必须拆 Core API Client 与 Services API Client
+  ⚠️  K8s 集群 API local dev profile — 已有 create/get/list/delete + kubeconfig + proxy；真实 vCluster 生命周期和真实 proxy 转发仍未建
   ❌ Kata Containers 集成 — 零代码，Sprint 6 建
 
 关键依赖链（必须按顺序）：
@@ -193,7 +253,7 @@ S10 09-26~09-30  v1.0.0 发布
        ↓ 解锁 Services 团队（06-30 前后）
   Sprint 4：API Beta 准备 + 四语言 SDK + Mock Server
        ↓ Services 团队基于稳定 SDK 持续开发
-  Sprint 5：vCluster 生命周期（Services IaaS 最高需求）+ 加解密（模型上传需要）
+  Sprint 5：K8s/Encryption/Secrets local profile 主链路和 controller opt-in 运行剖面已完成；继续补 vCluster 真实生命周期/真实 proxy 转发 + controller HA 能力 + 真实加解密/Secret 注入 provider
        ↓ Services 团队并行：模型仓库 + 推理服务（依赖 objects + encryption）
   Sprint 6：Sandbox（Agent 服务需要）+ 平台支撑（告警/计量）
        ↓ Services 团队并行：知识库（依赖 vector-stores + objects）
@@ -333,10 +393,10 @@ prism mock api/openapi/v1.yaml --port 4010   # 所有路径返回 200 mock
 
 | 批次 | 内容 | 难度 | 预估 | 解锁对象 |
 |---|---|---|---|---|
-| **M1-K8S-A** ⭐ | vCluster 生命周期 API（创建/升级/删除/kubeconfig）+ 原生 K8s API 透明代理 | 高 | 6天 | Services K8s集群服务；租户 kubectl/Helm 工具链 |
-| **M1-RECONCILE-A** | WorkloadReconcileController（30s/5s 双速后台 goroutine，控制平面/数据平面分离）| 高 | 4天 | 生产级状态一致性保证 |
-| **M1-ENCRYPT-A** | SM4 密钥管理 + seal/unseal-token | 中 | 3天 | Services 模型仓库加密功能 |
-| **M1-SECRETS-A** | Secret CRUD + 实例绑定注入 | 中 | 2天 | Services PaaS 凭据注入 |
+| **M1-K8S-A** ⭐ | 已完成 local profile：create/get/list/delete + kubeconfig + proxy；未完成：vCluster provider、升级、真实 vCluster API 转发 | 高 | 6天 | Services K8s集群服务；租户 kubectl/Helm 工具链 |
+| **M1-RECONCILE-A** | 已完成基础闭环：WorkloadReconcileController adapter/capability + 默认关闭的 bootstrap opt-in 后台 goroutine；未完成 leader election、指标、退避和独立 worker 部署形态 | 高 | 4天 | 生产级状态一致性保证 |
+| **M1-ENCRYPT-A** | 已完成 local profile：encryption keys create/get/list/delete + seal + unseal-token + rotate + revoke；未完成：真实 SM4/KMS provider 和真实 provider 下的密钥生命周期操作 | 中 | 3天 | Services 模型仓库加密功能 |
+| **M1-SECRETS-A** | 已完成 local profile：Secret CRUD + bindings；未完成：真实 K8s Secret 写入与实例环境变量/文件挂载注入 | 中 | 2天 | Services PaaS 凭据注入 |
 
 > M1-SANDBOX-A 移到 Sprint 6，腾出时间给 K8S-A。Sandbox 不在 Services P0 关键路径上。
 
@@ -349,6 +409,8 @@ make test
 # Reconcile Controller 独立扫描 workload_instances 并更新状态（不依赖 API 调用）
 # POST /api/v1/encryption/seal → 返回 unseal-token
 ```
+
+**当前代码校准（2026-05-22）：** 上述完工标准尚未全部满足。当前满足 `POST/GET/LIST/DELETE /api/v1/k8s-clusters`、`GET /api/v1/k8s-clusters/{id}/kubeconfig`、`POST /api/v1/k8s-clusters/{id}/proxy` 的 local dev profile，`POST/GET/LIST/DELETE /api/v1/encryption/keys`、`POST /api/v1/encryption/seal`、`POST /api/v1/encryption/unseal-token` 的 local dev profile，`POST/GET/LIST/DELETE /api/v1/secrets`、`POST /api/v1/secrets/{id}/bindings` 的 local dev profile，以及 WorkloadReconcileController 默认关闭的 bootstrap opt-in 后台运行剖面；真实 vCluster、kubectl 可用性、真实 proxy 转发、controller leader election/指标/退避、真实 KMS/SM4 和真实 Secret 注入仍未完成。
 
 **解锁：** Services K8s集群服务；Services 模型加密功能；生产级状态一致性
 
@@ -383,7 +445,7 @@ make test
 make test  # 全通（含 E2E）
 # POST /api/v1/instances {kind: "sandbox"} → 实例启动，exec 可运行 python 命令
 # Services（另一小组验证）
-# 模型文件上传 + SM4 加密 → 成功写入 MinIO
+# 模型文件上传 + SM4 加密 → 通过 Core objects API 写入对象存储
 # 推理端点部署 + GET /v1/chat/completions → 得到 LLM 回答
 ```
 
@@ -405,7 +467,7 @@ make test  # 全通（含 E2E）
 
 | 批次 | 依赖的 Core API | 内容 | 特别说明 |
 |---|---|---|---|
-| **SVC-KB-A** | `/api/v1/vector-stores`（Milvus）+ `/api/v1/objects`（MinIO）| 知识库：文档上传→解析→向量化→混合检索→问答→来源引用 | **kb-service 是空目录，从零构建，预估 10 天** |
+| **SVC-KB-A** | `/api/v1/vector-stores` + `/api/v1/objects`（均经 Core API/SDK）| 知识库：文档上传→解析→向量化→混合检索→问答→来源引用 | **kb-service 是空目录，从零构建，预估 10 天** |
 | **SVC-CONSOLE-Alpha** | 所有 Core API（Sprint 1-4 实现的端点）| 实例列表/详情/操作页面接真实 Core API | 依赖 Sprint 4 API 冻结后的稳定 SDK |
 
 **完工标准：**
@@ -481,18 +543,19 @@ git tag v1.0.0
 
 ---
 
-### ANI Services P0 完整范围定义
+### ANI Services P0 临时范围定义（待 2026-06-15 至 2026-06-20 重置）
 
-> 本节是 ANI Services 交付边界的**唯一权威定义**（基于2026-05-15会话确认）。
-> ANI Services 由另一小组开发，全部通过 ANI Core REST API / SDK 实现。
-> 代码位置：`repo/services/`（当前 model-service 有实现，kb-service 为空壳）。
+> 本节保留 2026-05-15 会话形成的 Services 初始范围，用于说明历史规划和 Core 依赖；它不再承担 ANI Services 交付边界的最终定稿职责。
+> ANI Services 由另一小组开发，全部通过 ANI Core OpenAPI REST API / Core SDK 实现；不得直接调用 Core 内部 gRPC service 或底层组件 SDK。
+> 2026-06-15 至 2026-06-20，Services 团队必须输出完整前端功能、Services 功能和接口定义；评审通过后，Repo 中旧 Services 逻辑按新定义删除或覆盖。
+> 代码位置：`repo/services/`、`repo/ai/`、`repo/operators/inference-operator/`、`repo/frontends/console/` 中存在早期 Services 逻辑或骨架，均不得被 Core 调用，也不得当成最终 Services 边界。
 
 #### 域A：IaaS 云服务（基于 Core instances/networks/volumes API）
 
 | 服务 | v1.0.0 P0 范围 | 依赖 Core Sprint |
 |---|---|---|
 | 云主机/容器/GPU实例控制台 | 创建/生命周期/运维的 Console UI | Sprint 1~2 |
-| **K8s 集群服务** | vCluster 创建/kubeconfig/原生 API 代理；kubectl/Helm 兼容 | **Sprint 5（M1-K8S-A）** |
+| **K8s 集群服务** | vCluster 创建/kubeconfig/原生 API 代理；kubectl/Helm 兼容 | **Sprint 5（M1-K8S-A/B，当前完成 local CRUD+kubeconfig+proxy 切片）** |
 | VPC/子网/安全组管理 | CRUD Console UI | Sprint 3 |
 | 块存储/文件存储/对象存储 | CRUD Console UI | Sprint 3 |
 | 镜像仓库服务 | Harbor 镜像浏览/推拉权限 | Sprint 6（M1-REGISTRY-A）|
@@ -501,7 +564,7 @@ git tag v1.0.0
 
 | 服务 | v1.0.0 P0 范围 | 依赖 Core Sprint | 代码现状 |
 |---|---|---|---|
-| **模型仓库** | 上传/版本/元数据/SM4加解密/HuggingFace导入 | Sprint 5（加解密）| model-service 有实现，需划清边界 |
+| **模型仓库** | 上传/版本/元数据/SM4加解密/HuggingFace导入 | Sprint 5（加解密；当前只完成 keys CRUD local 切片）| model-service 有实现，需划清边界 |
 | **推理服务** | 端点部署/状态/日志/OpenAI 兼容 `/v1/chat/completions` | Sprint 4（API冻结）| 从零建 |
 | Notebook | JupyterLab 托管（P1，v1.x）| — | 未建 |
 | 训练/微调 | LoRA 微调（Phase 2）| — | 未建 |
@@ -524,9 +587,9 @@ git tag v1.0.0
 
 #### 重要边界说明（防止越界）
 
-1. **model-service 划清边界**：model-service 逻辑属于 ANI Services，代码暂存 Core 仓库。它**只能调用** `api/v1/objects`（MinIO）和 `api/v1/encryption`（SM4），**不得** import `pkg/ports/` 或任何 Core 内部包。
-2. **kb-service 完全从零建**：`repo/services/kb-service/` 是空目录，Services 团队需要先建 go.mod、实现 RAG 引擎（Python）和管理 API（Go），工程量约10天。
-3. **ANI Services 禁止直接调用 K8s API**：所有 K8s 操作必须通过 Core `instances/` 或 `k8s-clusters/` API，不得绕过。
+1. **旧 Services 逻辑不再定义目标边界**：model-service、空 kb-service、RAG 原型、推理 operator 骨架和当前前端单 API Client 都只能作为历史参考；6.15-6.20 Services 定义通过后，冲突部分删除或覆盖。
+2. **ANI Services 只能调用 Core API/SDK**：对象存储、加解密、K8s、网络、存储、向量存储等基础能力必须经 Core OpenAPI REST API / Core SDK 使用，不得 import `pkg/ports/`、Core 内部包、直接调用 Core 内部 gRPC service 或绕过 Core 直接操作底层组件。
+3. **Services API 单独维护**：`models`、`inference-services`、`knowledge-bases` 等业务资源只能维护在 `repo/api/openapi/services/v1.yaml`，不得回流到 Core `repo/api/openapi/v1.yaml`。
 
 ---
 
@@ -545,7 +608,8 @@ ANI Core：
   [ ] 国密 SM4 加解密（seal/unseal）
   [ ] Secrets API + 实例绑定注入
   [x] Workload Identity（lifecycle-bound scoped API key P0）
-  [ ] WorkloadReconcileController 后台运行
+  [x] WorkloadReconcileController 默认关闭的可配置后台运行
+  [ ] WorkloadReconcileController leader election / 指标 / 退避
   [ ] 镜像仓库 API（Harbor 封装）
   [ ] 用量计量 API
   [ ] 可观测性 API（PromQL 代理 + 告警）
@@ -616,10 +680,10 @@ ANI Services P0：
 
 - [ ] **K8s 1.36 集群部署规范**
   - 节点规划：Master ×3（HA）、GPU 工作节点、存储节点
-  - 安装方式：RKE2 1.36（比 kubeadm 更适合离线环境和安全加固）
+  - 安装方式：上游原生 Kubernetes 1.36 bootstrap，保持 API、RuntimeClass、CSI、CNI、CRD 语义与开源社区同步
   - 容器运行时：containerd 2.1+
   - 离线安装包制作：镜像预拉取 + 离线 Helm Chart 打包
-  - **开源组件：** RKE2 1.36、containerd 2.1
+  - **开源组件：** Kubernetes 1.36、containerd 2.1
 
 - [ ] **KubeOVN 1.13+ 网络部署**
   - 多租户 VPC 规划（每客户独立 VPC，物理隔离）
@@ -677,7 +741,7 @@ ANI Services P0：
 
 - [ ] **上层专项实例**
   - 推理实例、Notebook、Agent Sandbox、Batch Job 都必须构建在 `WorkloadRuntime` 之上
-  - 模型管理平台不得直接绕过运行时抽象创建 Pod、Deployment 或 KubeVirt VM
+  - Services 模型与推理能力不得直接绕过运行时抽象创建 Pod、Deployment 或 KubeVirt VM
   - **实现：** `M1-RUNTIME-A`
 
 #### 1.2.2 Instance Fabric / 网络与存储预置
@@ -898,12 +962,12 @@ ANI Services P0：
   3. RBAC 授权（OPA 策略检查）
   4. 令牌桶限流（按租户维度，防止单一客户耗尽 GPU 资源）
   5. 审计日志打点（异步写入，不阻塞主流程）
-  6. 路由分发 → 对应 gRPC Service
+  6. 路由分发 → 对应 Core 内部 service（可用 gRPC 实现，但不暴露为 Services 绕过 OpenAPI 的跨层契约）
   7. 统一错误响应：`{ code, message, request_id, details }`
 
 - [ ] **API 契约优先工作流**
   - 所有 API 的契约定义先于代码，禁止反向
-  - `make gen-api`：oapi-codegen 生成 Go Server/Client → buf 生成 Protobuf 代码 → grpc-gateway 生成 REST 转发层
+  - `make gen-api`：OpenAPI 生成 REST Server/Client 与 SDK 类型；buf/Protobuf/grpc-gateway 只服务 Core 内部 gRPC 实现和协议转译，不替代 OpenAPI 作为 Core/Services 控制面真实来源
   - 同一 Spec 同时生成：Go SDK、Python SDK、TypeScript SDK、API 文档站
 
 - [ ] **SSE 流式输出**
@@ -943,24 +1007,24 @@ ANI Services P0：
 
 ---
 
-### 模块 3：模型管理平台 ⏳ ANI Services — Sprint 6 实现（SVC-MODEL-A）
+### 模块 3：Services 首批 AI 能力切片 ⏳ ANI Services — Sprint 6 实现（SVC-MODEL-A）
 
 > **归属：ANI Services 层**（另一小组负责，调用 Core API）
 > Sprint 6 中 SVC-MODEL-A 实现核心功能（依赖 Sprint 5 的加解密 API）。
 
-**目标：** IT 管理员无需懂 AI，把模型文件变成一个可调用的内网 API。
+**目标：** IT 管理员无需懂 AI，把模型文件变成一个可调用的内网 API。注意：模型仓库只是 ANI Services 的首批 AI 能力切片，不代表 ANI Services 的完整范围；完整范围以 2026-06-15 至 2026-06-20 输出的 Services 功能与接口定义为准。
 
 #### 3.1 私有模型仓库（Go）
 
 - [ ] **模型元数据服务**
   - 数据表：`models (id, name, version, format, size_bytes, status, is_encrypted, encrypt_algo, encrypt_hint, meta_json)`
-  - API：`GET/POST /api/v1/models`、`GET /api/v1/models/{id}`、`DELETE /api/v1/models/{id}/versions/{ver}`
+  - Services API：`GET/POST /api/v1/svc/models`、`GET /api/v1/svc/models/{id}`、`DELETE /api/v1/svc/models/{id}/versions/{ver}`
   - 版本管理：同一模型多版本并存，支持 tag（latest / stable）
   - 能力标签：文本生成、嵌入、语音识别、视觉理解等
 
 - [ ] **模型文件上传**
   - 分片上传 + 断点续传（支持 >100GB 大文件）
-  - 上传写入 MinIO `ani-models` Bucket
+  - 通过 Core objects API/SDK 写入对象存储；底层 MinIO/S3 细节不得泄漏到 Services 业务代码
   - 格式支持：HuggingFace safetensors、GGUF
   - 完整性校验：SHA256 checksum 验证后才更新状态为 `ready`
 
@@ -1008,7 +1072,7 @@ ANI Services P0：
     ```
     Init Container（Go 实现）:
       1. 从 K8s Secret 读取密钥
-      2. 从 MinIO 下载 .anip 文件
+      2. 通过 Core objects API/SDK 获取模型对象读取地址并下载 .anip 文件
       3. 流式解密到 emptyDir（tmpfs 内存盘）
     主容器（vLLM）:
       4. 从 emptyDir 加载明文模型
@@ -1019,14 +1083,14 @@ ANI Services P0：
 
 - [ ] **微调模型加密发布**
   - 微调完成后可选"加密后发布到仓库"
-  - 工作流：微调完成 → 加密 API → 加密文件写入 MinIO → 元数据标记 `is_encrypted=true`
+  - 工作流：微调完成 → 加密 API → 通过 Core objects API 写入加密文件 → 元数据标记 `is_encrypted=true`
 
 #### 3.3 远程模型导入（Go + Python）
 
 > 模型不预先打包进镜像，Pod 启动时从模型仓库动态拉取，实现镜像与模型彻底解耦。
 
 - [ ] **HuggingFace 导入**
-  - `POST /api/v1/models/import` `{ source: "huggingface", repo_id: "Qwen/Qwen2.5-72B-Instruct" }`
+  - `POST /api/v1/svc/models/import` `{ source: "huggingface", repo_id: "Qwen/Qwen2.5-72B-Instruct" }`
   - 异步执行，返回 `task_id`，客户端轮询或 Webhook 通知进度
   - Python 下载服务：`huggingface_hub` 库，支持 `HF_ENDPOINT` 配置（指向国内镜像站）
   - 断点续传：记录已下载 shard，中断后从断点继续，不重下
@@ -1034,7 +1098,7 @@ ANI Services P0：
   - **开源组件：** huggingface_hub latest
 
 - [ ] **ModelScope 导入**
-  - `POST /api/v1/models/import` `{ source: "modelscope", model_id: "qwen/Qwen2.5-72B-Instruct" }`
+  - `POST /api/v1/svc/models/import` `{ source: "modelscope", model_id: "qwen/Qwen2.5-72B-Instruct" }`
   - 使用 `modelscope` Python SDK
   - 共用 HuggingFace 的任务调度框架，逻辑一致
   - **开源组件：** modelscope latest
@@ -1044,7 +1108,7 @@ ANI Services P0：
   vLLM 推理 Pod 启动时:
     Init Container（Go 单一二进制）:
       1. 检查节点 PVC 缓存是否已有该模型版本
-      2. 如无缓存：调用模型仓库 API → 获取 MinIO presigned URL → 下载
+      2. 如无缓存：调用模型仓库 API → 通过 Core objects API/SDK 获取对象读取地址 → 下载
       3. 如模型加密：执行解密（SM4/ZUC）
       4. 将模型文件 ready 信号写入共享 emptyDir
     主容器（vLLM）:
@@ -1098,7 +1162,7 @@ ANI Services P0：
 
 - [ ] **文档上传 API**
   - 格式：PDF、Word(.docx)、Excel(.xlsx)、PPT(.pptx)、TXT、Markdown
-  - 文件存入 MinIO `ani-kb-docs`，上传完成后发 NATS 消息触发解析任务
+  - 文件通过 Core objects API/SDK 写入知识库文档对象空间，上传完成后由 Services 自有任务机制触发解析任务
 
 - [ ] **文档解析服务（Python）**
   - **开源组件：** Docling（IBM 开源，PDF 版面分析 + 表格识别 + OCR 最完整）
@@ -1111,27 +1175,27 @@ ANI Services P0：
 - [ ] **向量化服务**
   - 嵌入模型：BGE-M3（BAAI，中英文双语效果最佳，免费开源）
   - 切片策略：语义边界切分（chunk ≈ 512 token，不硬截断段落）
-  - 写入 Milvus（Collection 按知识库 ID 隔离，租户间不互通）
+  - 通过 Core vector-stores API/SDK 写入向量集合（底层 Milvus 细节封装在 Core adapter 内）
   - **开源组件：** sentence-transformers、Milvus 2.5+
 
 - [ ] **混合检索**
-  - 语义检索：Milvus ANN 向量搜索（召回语义相关段落）
+  - 语义检索：通过 Core vector-stores search API 执行向量召回
   - 关键词检索：PostgreSQL pg_trgm 全文搜索（召回精确关键词）
   - 融合重排：RRF（Reciprocal Rank Fusion）算法，两路召回合并去重排序
   - Top-K：默认召回 5 段，可按知识库配置覆盖
 
 - [ ] **问答生成**
   - Prompt 模板：系统提示词 + 检索上下文 + 用户问题
-  - 来源引用：每段答案附来源文档名 + 页码（从 Milvus metadata 提取）
+  - 来源引用：每段答案附来源文档名 + 页码（从向量检索 metadata 提取）
   - 置信度过滤：相似度低于阈值时返回"未找到相关内容"，不编造答案
   - 多轮对话：保留最近 10 轮历史，支持追问
 
 - [ ] **知识库管理 API（Go）**
-  - `POST /api/v1/knowledge-bases` — 创建知识库
-  - `POST /api/v1/knowledge-bases/{id}/documents` — 上传文档
-  - `GET /api/v1/knowledge-bases/{id}/documents` — 文档列表及解析状态
-  - `DELETE /api/v1/knowledge-bases/{id}/documents/{doc_id}` — 删除文档
-  - `POST /api/v1/knowledge-bases/{id}/query` — 执行问答
+  - `POST /api/v1/svc/knowledge-bases` — 创建知识库
+  - `POST /api/v1/svc/knowledge-bases/{id}/documents` — 上传文档
+  - `GET /api/v1/svc/knowledge-bases/{id}/documents` — 文档列表及解析状态
+  - `DELETE /api/v1/svc/knowledge-bases/{id}/documents/{doc_id}` — 删除文档
+  - `POST /api/v1/svc/knowledge-bases/{id}/query` — 执行问答
   - 权限隔离：知识库归属租户，跨租户无法访问
 
 ---
@@ -1374,11 +1438,19 @@ M5（9月）
 
 ## 七、开源组件选型清单
 
-所有组件均满足：① 生产级成熟度 ② 符合 Go/Python/TS 技术栈 ③ 支持完全离线部署 ④ 有信创替代路径
+所有组件均满足：① 生产级成熟度 ② 符合 Go/Python/TS 技术栈 ③ 支持完全离线部署 ④ 有信创替代路径 ⑤ GitHub 社区热度、源码和文档质量足以支撑人类与 AI 协同开发、修 bug、运维和可替换路径。
+
+组件选型不是追新，也不是只看 stars。每个 P0 默认组件都必须能回答：
+
+- 社区是否足够成熟：GitHub stars、forks、contributors、release 频率、issue/PR 响应是否健康。
+- 源码和文档是否足够 AI 可读：架构清晰、API 文档完整、运维文档丰富，便于 AI 生成测试、排障脚本和修复补丁。
+- 是否方便运营运维：metrics、logs、health check、backup/restore、upgrade/rollback、离线部署是否可落地。
+- 是否松耦合可替换：License、协议、数据迁移、替代组件、adapter 边界和回滚方式是否清楚。
+- 是否避免新项目踩坑：新开源项目、维护者不稳定或文档薄弱的组件不得进入 P0 主链路，除非经过架构负责人批准并给出退出方案。
 
 | 层级 | 组件 | 版本 | 选型理由 |
 |---|---|---|---|
-| 编排 | Kubernetes（RKE2） | 1.36 | 行业标准，RKE2 适合离线和安全加固 |
+| 编排 | 上游原生 Kubernetes | 1.36 | 行业标准，与开源社区 API/RuntimeClass/CSI/CNI/CRD 语义同步，不绑定特定发行版 |
 | 网络 | KubeOVN | 1.13+ | Go 实现，国内主导，原生 VPC 多租户 |
 | 容器运行时 | containerd | 2.1+ | K8s 推荐标准运行时 |
 | GPU | HAMi | 2.4+ | 唯一同时支持 NVIDIA+昇腾+海光 的开源方案 |
@@ -1522,19 +1594,22 @@ M5（9月）
 
 ### 模块 M1-K8S-CLUSTER：K8s 集群管理 API
 
-**目标：** 为租户提供完整的 K8s 集群生命周期管理 + 原生 API 代理，对标 AWS EKS / Rancher。
+**目标：** 为租户提供完整的 K8s 集群生命周期管理 + 原生 API 代理，对标 AWS EKS / 原生 Kubernetes 管理体验。
 
 **代码批次规划：**
 
 - [ ] `M1-K8S-A`：vCluster 生命周期 API
-  - `POST /api/v1/k8s-clusters`（创建 vCluster，指定 K8s 版本/节点池/网络）
-  - `GET /api/v1/k8s-clusters/{id}`（集群状态/版本/节点数）
+  - [x] `POST /api/v1/k8s-clusters`（当前为 local dev profile 创建，不是真实 vCluster）
+  - [x] `GET /api/v1/k8s-clusters/{id}`（当前返回 local profile 状态/版本）
+  - [x] `GET /api/v1/k8s-clusters`（当前返回租户隔离的 local profile 列表）
+  - [x] `DELETE /api/v1/k8s-clusters/{id}`（当前标记为 deleting，不是真实删除 vCluster）
   - `PUT /api/v1/k8s-clusters/{id}`（升级 K8s 版本/调整节点池）
-  - `DELETE /api/v1/k8s-clusters/{id}`
-  - `GET /api/v1/k8s-clusters/{id}/kubeconfig`（ANI 鉴权的租户 kubeconfig）
+  - [x] `GET /api/v1/k8s-clusters/{id}/kubeconfig`（当前返回 local dev profile 模拟 kubeconfig，不是真实 kubectl 生产凭据）
+  - [x] `POST /api/v1/k8s-clusters/{id}/proxy`（当前为 Core 管控面 proxy local profile，不真实转发）
 
-- [ ] `M1-K8S-B`：原生 K8s API 代理
-  - `ANY /api/v1/k8s-clusters/{id}/api/*`（透明代理到 vCluster API Server）
+- [ ] `M1-K8S-B`：原生 K8s API 代理（local profile 已完成，真实转发未完成）
+  - [x] `POST /api/v1/k8s-clusters/{id}/proxy` 契约 + local profile（method/path/query/body）
+  - [ ] 透明代理或 adapter 转发到 vCluster API Server
   - ANI JWT 验证 → 路由到对应 vCluster → 返回原生 K8s 响应
   - 支持 kubectl、Helm、Argo CD 等原生工具链
   - 可观测：代理请求记录审计日志
@@ -1555,13 +1630,15 @@ M5（9月）
 **代码批次规划：**
 
 - [ ] `M1-ENCRYPT-A`：国密加解密 API
-  - `CRUD /api/v1/encryption/keys`（SM4 密钥管理，轮换/吊销）
-  - `POST /api/v1/encryption/seal`（加密对象存储路径）
-  - `POST /api/v1/encryption/unseal-token`（生成解密令牌，Init Container 使用）
+  - [x] `CRUD /api/v1/encryption/keys`（当前为 key metadata local dev profile，不含真实 KMS/SM4 provider）
+  - [x] `POST /api/v1/encryption/seal`（当前返回 local dev profile sealed object URI 和 unseal token）
+  - [x] `POST /api/v1/encryption/unseal-token`（当前生成 local dev profile 解密令牌，Init Container 真实集成待后续）
+  - [x] `POST /api/v1/encryption/keys/{key_id}/rotate`（当前为 local dev profile，真实 KMS/SM4 provider 生命周期操作待后续）
+  - [x] `POST /api/v1/encryption/keys/{key_id}/revoke`（当前为 local dev profile，revoked key 不再允许 seal 或 unseal-token）
 
 - [ ] `M1-SECRETS-A`：密钥管理 API
-  - `CRUD /api/v1/secrets`（KV 对，仅元数据可读，明文不返回）
-  - `POST /api/v1/secrets/{id}/bindings`（绑定到实例，注入为环境变量/文件挂载）
+  - [x] `CRUD /api/v1/secrets`（当前为 local dev profile，KV 值只在 adapter 内部保存，响应不返回明文）
+  - [x] `POST /api/v1/secrets/{id}/bindings`（当前为绑定意图记录，真实环境变量/文件挂载注入待 provider/controller）
   - 底层：K8s Secret，ANI RBAC 多租户隔离
 
 - [ ] `M1-REGISTRY-A`：镜像仓库 API

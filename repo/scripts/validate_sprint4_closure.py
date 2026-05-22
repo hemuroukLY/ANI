@@ -32,22 +32,6 @@ SPRINT4_BATCHES = {
 }
 
 DOC_REQUIRED_TOKENS = {
-    "CLAUDE.md": (
-        "SPEC-SPLIT-A",
-        "SPEC-CORE-BETA",
-        "SPEC-COMPAT-A",
-        "SDK-BETA-A",
-        "SDK-BETA-B",
-        "SDK-BETA-C",
-        "SDK-BETA-D",
-        "SDK-MOCK-SMOKE-A",
-        "SDK-MOCK-SMOKE-B",
-        "SDK-MOCK-SMOKE-C",
-        "SDK-MOCK-SMOKE-D",
-        "MOCK-A",
-        "DOC-API-A",
-        "SPRINT4-CLOSURE-A",
-    ),
     "ANI-DOCS-INDEX.md": (
         "SPEC-SPLIT-A",
         "SPEC-CORE-BETA",
@@ -134,7 +118,6 @@ def load_yaml(path: str) -> dict[str, Any]:
 
 def validate_docs() -> None:
     docs = {
-        "CLAUDE.md": read_doc("CLAUDE.md"),
         "ANI-DOCS-INDEX.md": read_doc("ANI-DOCS-INDEX.md"),
         "ANI-06-开发计划.md": read_doc("ANI-06-开发计划.md"),
         "CURRENT-SPRINT.md": read_repo("CURRENT-SPRINT.md"),
@@ -146,7 +129,8 @@ def validate_docs() -> None:
         for token in DOC_REQUIRED_TOKENS[path]:
             if token not in content:
                 fail(f"{path} missing {token}")
-    if "Phase 2" not in docs["CLAUDE.md"] or "当前不是 Phase 2" not in docs["CLAUDE.md"]:
+    claude = read_doc("CLAUDE.md")
+    if "Phase 2" not in claude or "当前不是 Phase 2" not in claude:
         fail("CLAUDE.md must keep Phase 2 deferral boundary")
 
 

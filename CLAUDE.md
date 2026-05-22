@@ -9,15 +9,14 @@ This file provides mandatory guidance for Claude Code / Codex / Cursor / GPT cod
 ## 0. 当前状态
 
 ```text
-当前阶段：Phase 1 / Sprint 4 收尾
-当前状态：开发与验收完成，待提交 GitHub；提交后再切换下一 Sprint
+当前阶段：以 repo/CURRENT-SPRINT.md 为准；当前为 Phase 1 / Sprint 5 收敛中
 当前不是 Phase 2：Phase 2 是 2026-10 以后延期能力
 下一步入口：repo/CURRENT-SPRINT.md
 文档导航：ANI-DOCS-INDEX.md
 首个正式版本目标：v1.0.0，2026-09-30
 ```
 
-当前 Sprint 4 已完成并需保持可追溯的批次标记：`SPEC-SPLIT-A`、`SPEC-CORE-BETA`、`SPEC-COMPAT-A`、`SDK-BETA-A`、`SDK-BETA-B`、`SDK-BETA-C`、`SDK-BETA-D`、`SDK-MOCK-SMOKE-A`、`SDK-MOCK-SMOKE-B`、`SDK-MOCK-SMOKE-C`、`SDK-MOCK-SMOKE-D`、`MOCK-A`、`DOC-API-A`、`SPRINT4-CLOSURE-A`。批次细节以 `repo/CURRENT-SPRINT.md` 和 `repo/development-records/README.md` 为准。
+本文只维护稳定规则、读取顺序和不可破坏的工程边界。当前 Sprint 的详细完成项、未完成项、验收命令和下一步，只允许维护在 `repo/CURRENT-SPRINT.md`、`ANI-06-开发计划.md` Section 零和 `repo/development-records/README.md`。
 
 ---
 
@@ -58,8 +57,8 @@ This file provides mandatory guidance for Claude Code / Codex / Cursor / GPT cod
 
 ## 3. 强制架构边界
 
-1. ANI 分为 ANI Core 和 ANI Services 两层。ANI Core 只负责基础设施平台能力，只输出 REST API、SDK、CLI；不得包含模型推理、RAG、PaaS 业务逻辑。
-2. ANI Services 只能通过 Core REST API / SDK 调用 Core；禁止 import Core 代码包或直接操作底层组件。
+1. ANI 分为 ANI Core 和 ANI Services 两层。ANI Core 只负责基础设施平台能力，跨层控制面契约只输出 Core OpenAPI REST API、Core SDK、CLI；不得包含模型推理、RAG、PaaS 业务逻辑。
+2. ANI Services 只能通过 Core OpenAPI REST API / Core SDK 调用 Core；禁止 import Core 代码包、直接调用 Core 内部 gRPC service 或直接操作底层组件。
 3. `repo/services/model-service/` 和 `repo/services/kb-service/` 逻辑属于 ANI Services，暂存于 monorepo。Core 服务禁止调用它们。
 4. Services 业务资源如 `models`、`inference-services`、`knowledge-bases` 必须维护在 `repo/api/openapi/services/v1.yaml`，不得回流到 Core API。
 5. `CORE-DEV-PROFILE-A` 是 Core dev/local profile，不是 Services 业务 mock。Services 团队如需业务 mock，应在 Services 层自行建设。
@@ -68,9 +67,9 @@ This file provides mandatory guidance for Claude Code / Codex / Cursor / GPT cod
 
 ## 4. API 与 SDK 强制规则
 
-1. `repo/api/openapi/v1.yaml` 是 ANI Core 对外 REST API 的唯一真实来源；所有新 Core API 必须先改 API 契约，再写实现、测试和 SDK。
+1. `repo/api/openapi/v1.yaml` 是 ANI Core 对外 REST API 和 Core/Services 跨层控制面契约的唯一真实来源；所有新 Core API 必须先改 API 契约，再写实现、测试和 SDK。
 2. Core API `servers[0].url` 必须为 `https://{host}/api/v1`；Services API `servers[0].url` 必须为 `https://{host}/api/v1/svc`。
-3. Proto 是内部 gRPC 实现细节；当 Proto 与 REST schema 描述同一资源冲突时，以 API 契约为准。
+3. gRPC/Proto 用于 Core 内部高效通信和实现组织，不作为 Services 绕过 Core OpenAPI 的跨层产品契约；当 Proto 与 REST schema 描述同一资源冲突时，以 OpenAPI 契约为准。
 4. Core API v1 允许新增可选 request 字段、response 字段、端点和枚举值；删除字段、改字段类型、删除端点、修改 HTTP 方法、修改错误语义均属于破坏性变更。
 5. 所有 POST 创建和有副作用的 PUT/PATCH 必须支持 `idempotency_key`；客户端重试必须复用同一个 key。
 6. Core SDK 来源是 `repo/api/openapi/v1.yaml`；Services SDK 来源是 `repo/api/openapi/services/v1.yaml`。SDK 不得包含对方层资源类型。
@@ -96,7 +95,10 @@ This file provides mandatory guidance for Claude Code / Codex / Cursor / GPT cod
 2. 每个批次完成时，必须通过当前批次验收命令、`make test`、`make validate-architecture`、`git diff --check`。
 3. 每个批次完成时，必须更新 `repo/development-records/{批次名}.md`、`repo/development-records/README.md`、`repo/CURRENT-SPRINT.md`、`ANI-06-开发计划.md`。
 4. Sprint 切换时，必须同步 `ANI-06-开发计划.md`、`repo/CURRENT-SPRINT.md`、`ANI-DOCS-INDEX.md`。
-5. 当前 Sprint 4 尚未提交 GitHub 前，不得把当前执行入口切换到 Sprint 5。
+5. 进度文档必须以当前工作区真实代码、API 契约和测试为准；云端开发或 GitHub 推送状态不明时，不得把未落地能力标记为完成。
+6. 从 Sprint 5 起，涉及 K8s、Kube-OVN、KubeVirt、vCluster、KMS/SM4、K8s Secret 注入等真实底座组件的能力，必须并行建设真实环境门禁；`REAL-K8S-LAB-A` 和 `make validate-real-k8s-profile` 是当前真实底座验证入口。local profile 只能证明 API/SDK/状态机/调用边界，不能标记为 real-provider、runtime ready 或 production ready。
+7. `CLAUDE.md` 是轻量入口和稳定强制规则文件，禁止写入单批次完成清单、API path 长列表、文件级变更清单、每日开发流水账或历史归档。动态进度必须写入 `repo/CURRENT-SPRINT.md`、`ANI-06-开发计划.md` Section 零或 `repo/development-records/*.md`。
+8. 修改文档入口后必须运行 `make validate-doc-entrypoints`，防止 `CLAUDE.md` 再次膨胀或与文档职责矩阵冲突。
 
 ---
 

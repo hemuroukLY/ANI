@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import json
+import re
 
 import yaml
 
@@ -41,6 +42,26 @@ def expected_core_idempotency_operations(matrix: dict[str, Any]) -> list[str]:
     return sorted(set(operations))
 
 
+def expected_idempotency_operations_from_spec(spec: dict[str, Any]) -> list[str]:
+    schemas = spec.get("components", {}).get("schemas", {})
+    operations: list[str] = []
+    for path, path_item in spec.get("paths", {}).items():
+        if not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if method not in {"post", "put", "patch"} or not isinstance(operation, dict):
+                continue
+            schema = operation.get("requestBody", {}).get("content", {}).get("application/json", {}).get("schema", {})
+            ref = schema.get("$ref", "")
+            if not ref:
+                continue
+            schema_name = ref.rsplit("/", 1)[-1]
+            required = set(schemas.get(schema_name, {}).get("required", []))
+            if "idempotency_key" in required:
+                operations.append(operation.get("operationId") or fallback_operation_id(method, path))
+    return sorted(set(operations))
+
+
 def expected_cursor_pagination_operations(spec: dict[str, Any]) -> list[str]:
     operations: list[str] = []
     for path_item in spec.get("paths", {}).values():
@@ -53,6 +74,11 @@ def expected_cursor_pagination_operations(spec: dict[str, Any]) -> list[str]:
         if {"limit", "cursor"}.issubset(parameter_names):
             operations.append(get.get("operationId", ""))
     return sorted(operation for operation in operations if operation)
+
+
+def fallback_operation_id(method: str, path: str) -> str:
+    tokens = re.sub(r"[^a-zA-Z0-9]+", " ", path).title().replace(" ", "")
+    return method.lower() + tokens
 
 
 def expected_error_codes(spec: dict[str, Any]) -> list[str]:
@@ -92,7 +118,7 @@ def expected_error_codes(spec: dict[str, Any]) -> list[str]:
 def validate_metadata(matrix: dict[str, Any], spec: dict[str, Any]) -> None:
     core_metadata = json.loads((ROOT / "sdks/core/sdk-metadata.json").read_text(encoding="utf-8"))
     services_metadata = json.loads((ROOT / "sdks/services/sdk-metadata.json").read_text(encoding="utf-8"))
-    expected_core = expected_core_idempotency_operations(matrix)
+    expected_core = expected_idempotency_operations_from_spec(spec)
     actual_core = sorted(core_metadata.get("idempotencyOperations", []))
     if actual_core != expected_core:
         fail(f"Core SDK idempotencyOperations mismatch: got {actual_core}, want {expected_core}")
@@ -146,7 +172,7 @@ def validate_examples() -> None:
 
 def validate_docs() -> None:
     required = {
-        "CLAUDE.md": read(DOC_ROOT / "CLAUDE.md"),
+        "ANI-DOCS-INDEX.md": read(DOC_ROOT / "ANI-DOCS-INDEX.md"),
         "ANI-06-开发计划.md": read(DOC_ROOT / "ANI-06-开发计划.md"),
         "CURRENT-SPRINT.md": read(ROOT / "CURRENT-SPRINT.md"),
         "development-records/README.md": read(ROOT / "development-records/README.md"),

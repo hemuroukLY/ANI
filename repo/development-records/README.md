@@ -6,13 +6,31 @@
 > - **当前冲刺任务** → `repo/CURRENT-SPRINT.md`（每冲刺更新）
 > - **已完成批次详情** → 本文件（每批次完成后追加）
 
-> 当前执行处于 **Sprint 4 收尾**：开发与验收已完成，待提交 GitHub。本文只做已完成批次归档，不作为当前任务清单使用。
+> 当前执行处于 **Sprint 5 收敛中**：本地真实代码已完成 M1-K8S-A/B 的 CRUD+kubeconfig+proxy local profile、M1-ENCRYPT-A/B 的 keys+seal/unseal-token+rotate+revoke local profile、M1-SECRETS-A 的 Secret CRUD+bindings local profile、M1-RECONCILE-A 的 background controller adapter/capability 与默认关闭的 bootstrap opt-in 运行剖面、REAL-K8S-LAB-A 真实底座 contract gate；完整 vCluster 生命周期、真实 proxy 转发、controller leader election/指标/退避、真实 KMS/SM4 provider 和真实 K8s Secret 注入尚未完成。本文只做已完成批次归档，不作为当前任务清单使用。
 > 2026-05-20 提交前闭环审查：Sprint 2 代码实现、OpenAPI 契约、冻结矩阵、校验脚本和批次记录已对齐；Sprint 3 当前优先项已切换为 `CORE-DEV-PROFILE-A`（原 `MOCK-DEV-A`，已收窄为 Core dev/local profile，不包含 Services 业务 mock）。
 > 2026-05-21 Sprint 3 闭环门禁已通过，当前执行切换到 **Sprint 4**；`SPEC-SPLIT-A` 已完成，`SPEC-CORE-BETA` 已完成 Beta 准备矩阵、Core API v1 兼容性基线、SDK/Mock/API 文档加固、四语言 SDK-Mock 联动烟测和提交前审查。当前状态：开发与验收完成，待提交 GitHub；提交完成后再切换下一 Sprint。
 
 ---
 
 ## 已完成批次（按完成时间排列）
+
+### Sprint 5 Delivery（2026-05）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| M1-K8S-A | K8s 集群 create/get/list/delete + kubeconfig API + local dev profile + idempotency + tenant isolation；不含 proxy/真实 vCluster provider | m1-k8s-a-core-api-dev-profile.md |
+| M1-K8S-B | K8s 集群 proxy Core API 契约 + local dev profile；method/path/query/body 请求边界、幂等 key、路径 allowlist 和 SDK/docs 生成；不含真实 vCluster API 转发 | m1-k8s-b-api-proxy-dev-profile.md |
+| REAL-K8S-LAB-A | 真实底座验证门禁：定义三台云 VM K8s/Kube-OVN/KubeVirt/vCluster lab profile、`make validate-real-k8s-profile` 和 live kubectl 检查入口；不代表真实环境已经部署完成 | real-k8s-lab-a-validation-gate.md |
+| M1-ENCRYPT-A | Encryption keys create/get/list/delete + seal + unseal-token API + local dev profile + idempotency + tenant isolation；不含真实 KMS/SM4 provider | m1-encrypt-a-core-api-dev-profile.md |
+| M1-ENCRYPT-B | Encryption key rotate/revoke API + local dev profile + idempotency + state guard；不含真实 KMS/SM4 provider 生命周期操作 | m1-encrypt-b-key-rotation-revoke-local-profile.md |
+| M1-SECRETS-A | Secret create/get/list/delete + bindings API + local dev profile + idempotency + tenant isolation；响应不返回明文，不含真实 K8s Secret 注入 | m1-secrets-a-core-api-dev-profile.md |
+| M1-RECONCILE-A | WorkloadReconcileController adapter + bootstrap capability + opt-in 后台运行；扫描 reconcile target、观察 provider 状态、回写 instance 状态；不含 leader election/指标/退避 | m1-reconcile-a-background-controller.md |
+
+### Sprint 5 Kickoff（2026-05）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SPRINT5-KICKOFF-A | Sprint 5 启动：执行入口切换与三份主文档状态对齐 | sprint5-kickoff-a.md |
 
 ### Sprint 4 API Beta Preparation（2026-05）
 

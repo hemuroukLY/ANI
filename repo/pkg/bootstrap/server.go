@@ -35,6 +35,12 @@ type Config struct {
 	KubernetesAPIHost              string
 	KubernetesBearerToken          string
 	KubernetesProviderFieldManager string
+
+	WorkloadReconcileControllerEnabled bool
+	WorkloadReconcileNormalInterval    int
+	WorkloadReconcileActiveInterval    int
+	WorkloadReconcileStaleThreshold    int
+	WorkloadReconcileMaxBatch          int
 }
 
 // MustConnect initializes all dependencies. Exits the process if any connection fails.
@@ -60,7 +66,8 @@ func MustConnect(cfg Config) *Deps {
 		os.Exit(1)
 	}
 
-	ports, err := NewCapabilitiesWithConfig(db, js, rdb, cfg.withEnvironmentOverrides())
+	cfg = cfg.withEnvironmentOverrides()
+	ports, err := NewCapabilitiesWithConfig(db, js, rdb, cfg)
 	if err != nil {
 		logger.Error("failed to initialize capability adapters", "err", err)
 		os.Exit(1)
@@ -75,6 +82,8 @@ func MustConnect(cfg Config) *Deps {
 		Logger:      logger,
 		ServiceName: cfg.ServiceName,
 		HealthPort:  cfg.HealthPort,
+
+		WorkloadReconcileControllerEnabled: cfg.WorkloadReconcileControllerEnabled,
 	}
 }
 
@@ -108,6 +117,21 @@ func (c Config) withEnvironmentOverrides() Config {
 	}
 	if value := os.Getenv("KUBERNETES_PROVIDER_FIELD_MANAGER"); value != "" {
 		c.KubernetesProviderFieldManager = value
+	}
+	if value := os.Getenv("WORKLOAD_RECONCILE_CONTROLLER_ENABLED"); value != "" {
+		c.WorkloadReconcileControllerEnabled = parseBool(value)
+	}
+	if value := os.Getenv("WORKLOAD_RECONCILE_NORMAL_INTERVAL_SECONDS"); value != "" {
+		c.WorkloadReconcileNormalInterval = parseInt(value, c.WorkloadReconcileNormalInterval)
+	}
+	if value := os.Getenv("WORKLOAD_RECONCILE_ACTIVE_INTERVAL_SECONDS"); value != "" {
+		c.WorkloadReconcileActiveInterval = parseInt(value, c.WorkloadReconcileActiveInterval)
+	}
+	if value := os.Getenv("WORKLOAD_RECONCILE_STALE_THRESHOLD_SECONDS"); value != "" {
+		c.WorkloadReconcileStaleThreshold = parseInt(value, c.WorkloadReconcileStaleThreshold)
+	}
+	if value := os.Getenv("WORKLOAD_RECONCILE_MAX_BATCH"); value != "" {
+		c.WorkloadReconcileMaxBatch = parseInt(value, c.WorkloadReconcileMaxBatch)
 	}
 	return c
 }
@@ -174,6 +198,7 @@ func RunGRPC(port int, register func(*grpc.Server), deps *Deps) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	startWorkloadReconcileController(ctx, deps)
 	<-ctx.Done()
 
 	deps.Logger.Info("shutting down gRPC server gracefully")
@@ -186,6 +211,23 @@ func RunGRPC(port int, register func(*grpc.Server), deps *Deps) {
 	}
 	srv.GracefulStop()
 	deps.Logger.Info("gRPC server stopped")
+}
+
+func startWorkloadReconcileController(ctx context.Context, deps *Deps) bool {
+	if deps == nil || !deps.WorkloadReconcileControllerEnabled || deps.Ports.WorkloadController == nil {
+		return false
+	}
+	logger := deps.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	go func() {
+		logger.InfoContext(ctx, "workload reconcile controller starting")
+		if err := deps.Ports.WorkloadController.Start(ctx); err != nil {
+			logger.ErrorContext(ctx, "workload reconcile controller stopped with error", "err", err)
+		}
+	}()
+	return true
 }
 
 // loggingUnaryInterceptor logs every gRPC call with duration and status.

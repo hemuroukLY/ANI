@@ -5,8 +5,8 @@
 ## 当前状态
 
 ```text
-当前阶段：Phase 1 / Sprint 2
-当前优先级：SPEC-CORE-ALPHA → M1-INSTANCE-U → M1-INSTANCE-V
+当前阶段：以 ../ANI-DOCS-INDEX.md、../ANI-06-开发计划.md Section 零和 CURRENT-SPRINT.md 为准
+当前执行：Phase 1 / Sprint 5 收敛中
 当前执行入口：CURRENT-SPRINT.md
 全局计划入口：../ANI-06-开发计划.md
 文档导航：../ANI-DOCS-INDEX.md
@@ -16,14 +16,15 @@
 
 ```
 repo/
-├── services/                   # Go 微服务（平台层）
-│   ├── ani-gateway/            # 统一 Web Server 层（Hertz + gRPC-Gateway）
-│   ├── model-service/          # 模型管理服务（仓库/加解密/导入）
-│   ├── kb-service/             # 知识库管理服务
-│   ├── auth-service/           # 认证授权服务（JWT/RBAC）
-│   └── metering-service/       # 计量采集服务
+├── services/                   # Go 服务（Core + Services 暂存于同一 monorepo）
+│   ├── ani-gateway/            # 统一 HTTP 入口（Core API / Services API 路由）
+│   ├── auth-service/           # Core 认证授权服务（JWT/RBAC/OIDC/API Key）
+│   ├── task-service/           # Core 异步任务/outbox/worker mutation
+│   ├── model-service/          # ANI Services 早期逻辑，不属于 Core；6.15-6.20 后按新定义删除或覆盖
+│   ├── kb-service/             # ANI Services 空骨架，不属于 Core；6.15-6.20 后按新定义建设
+│   └── metering-service/       # 平台计量服务骨架
 │
-├── ai/                         # Python AI 应用层
+├── ai/                         # Services 早期原型/未来方向；不是最终边界定义
 │   ├── rag-engine/             # RAG 引擎（LangChain + Milvus）
 │   ├── doc-parser/             # 文档解析服务（Docling + PaddleOCR）
 │   └── whisper-service/        # 语音转写服务（Faster-Whisper）
@@ -32,7 +33,7 @@ repo/
 │   ├── inference-operator/     # InferenceService CRD Controller
 │   └── upgrade-operator/       # ANIPatch CRD Controller（在线升级）
 │
-├── frontends/                  # TypeScript 前端（Monorepo）
+├── frontends/                  # TypeScript 前端（需拆 Core client 与 Services client）
 │   ├── console/                # 用户控制台（React 18 + TDesign）
 │   └── boss/                   # 运营运维后台（React 18 + TDesign）
 │
@@ -40,8 +41,17 @@ repo/
 ├── installer/ani-installer/    # Go 安装程序（bubbletea TUI）
 │
 ├── api/
-│   ├── openapi/                # API 契约（v1.yaml 为 Core 唯一真实来源）
+│   ├── openapi/                # API 契约（v1.yaml 为 Core；services/v1.yaml 为 Services）
 │   └── proto/                  # Protobuf 定义（内部 gRPC）
+│
+├── pkg/
+│   ├── ports/                  # ANI 产品能力抽象，不是 TCP/IP 端口
+│   ├── adapters/               # 默认组件适配器与 local profile
+│   └── bootstrap/              # 能力装配与服务启动配置
+│
+├── sdks/
+│   ├── core/                   # Core 四语言 SDK
+│   └── services/               # Services 四语言 SDK
 │
 ├── deploy/
 │   ├── helm/                   # ANI 平台 Helm Charts
@@ -57,9 +67,9 @@ repo/
 
 ```bash
 # 进入仓库后先做基础验证
-make build
 make test
 make validate-architecture
+make validate-doc-entrypoints
 
 # 当前冲刺任务和更细的启动方式见 CURRENT-SPRINT.md
 ```
@@ -74,10 +84,11 @@ make validate-architecture
 2. `../CLAUDE.md`
 3. `CURRENT-SPRINT.md`
 4. `../ANI-06-开发计划.md` Section 零和当前 Sprint
-5. `api/openapi/v1.yaml`
+5. `../ANI-05-系统架构设计.md`
+6. `api/openapi/v1.yaml` 和 `api/openapi/services/v1.yaml`
 
 版本管理：
 - 策略文档：`../ANI-12-版本管理策略.md`
 - 当前阶段：`v0.x` 开发期
 - 首个正式版本目标：`v1.0.0`，2026-09-30
-- 发布前至少执行：`make gen-proto && make test && make build`
+- 提交前至少执行：`make test && make validate-architecture && git diff --check`

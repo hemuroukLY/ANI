@@ -2,6 +2,8 @@
 
 > 版本 V1 | 广州常青云科技有限公司 | 内部工程治理文件
 
+> 本文定义版本和兼容性治理，不作为当前开发进度来源。当前阶段以 `ANI-DOCS-INDEX.md`、`ANI-06-开发计划.md` Section 零和 `repo/CURRENT-SPRINT.md` 为准。
+
 ---
 
 ## 一、适用范围
@@ -84,7 +86,8 @@ v1.0.0
 ### 5.1 API / SDK
 
 - REST API 以 API 契约（OpenAPI 3.1 YAML）为唯一来源。
-- gRPC API 以 Protobuf 为唯一契约来源。
+- Core/Services 跨层控制面契约以 Core OpenAPI REST API 和 Core SDK 为准；REST API 不只是给网页前端使用，也供后端 Services、CLI、自动化和第三方系统通过 SDK/HTTP 调用。
+- 内部 gRPC API 以 Protobuf 为实现契约，只服务 Core 内部通信、Gateway 内部转发或被 SDK transport adapter 隐藏的实现细节；不得替代 OpenAPI 成为 Services 绕过 Core API 的产品契约。
 - `MINOR` 和 `PATCH` 不允许破坏已发布字段、枚举值、HTTP 状态语义和错误码语义。
 - 删除字段必须至少经历一个 `MINOR` 版本的 deprecated 周期。
 - 破坏性 API 变更必须升级 MAJOR，或新增 `/api/v2` 并保留 `/api/v1`。
@@ -194,5 +197,5 @@ make build
 
 当前状态：
 - 当前代码仍处于 `v0.x` 开发期。
-- 当前实现位置是 `M2.1-TASK-A/B` completed，下一步 `M2.1-TASK-C`。
+- 当前 Sprint、实现位置、下一步和验收命令只以 `repo/CURRENT-SPRINT.md` 与 `ANI-06-开发计划.md` Section 零为准；版本策略文档不维护动态批次状态。
 - 尚未进入 `v1.0.0-rc` 阶段。

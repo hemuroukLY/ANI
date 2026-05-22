@@ -22,7 +22,7 @@ Included baseline:
 
 Deferred to later M1 slices:
 
-- RKE2 bootstrap automation.
+- Native Kubernetes bootstrap automation.
 - KubeOVN VPC/Subnet CRs.
 - CloudNativePG, MinIO, Milvus, NATS, Redis, Harbor Helm dependencies.
 - GPU Operator, HAMi, Volcano, Prometheus/Grafana dashboards.

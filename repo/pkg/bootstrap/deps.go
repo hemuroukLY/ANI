@@ -40,6 +40,7 @@ type Capabilities struct {
 	WorkloadDryRun       ports.WorkloadProviderDryRun
 	WorkloadApply        ports.WorkloadProviderApply
 	WorkloadReconcile    ports.WorkloadStatusReconciler
+	WorkloadController   ports.WorkloadReconcileController
 	WorkloadStatus       ports.WorkloadProviderStatusReader
 	WorkloadInstances    ports.WorkloadInstanceOrchestrator
 	WorkloadStore        ports.WorkloadInstanceStore
@@ -75,6 +76,8 @@ type Deps struct {
 
 	ServiceName string
 	HealthPort  int
+
+	WorkloadReconcileControllerEnabled bool
 }
 
 func NewCapabilities(db *pgxpool.Pool, js nats.JetStreamContext, redisClient *redis.Client) Capabilities {
@@ -105,6 +108,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	}
 	reconciler := runtimeadapter.NewLocalStatusReconciler()
 	instanceStore := runtimeadapter.NewMetadataInstanceStore(metadata)
+	reconcileController := runtimeadapter.NewLocalWorkloadReconcileController(instanceStore, instanceStore, statusReader, reconciler, reconcileControllerConfig(cfg))
 	operationStore := runtimeadapter.NewMetadataOperationStore(metadata)
 	workloadIdentity := runtimeadapter.NewMetadataWorkloadIdentityService(metadata)
 	networkStore := runtimeadapter.NewMetadataNetworkStore(metadata)
@@ -140,6 +144,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		WorkloadDryRun:       dryRun,
 		WorkloadApply:        apply,
 		WorkloadReconcile:    reconciler,
+		WorkloadController:   reconcileController,
 		WorkloadStatus:       statusReader,
 		WorkloadStore:        instanceStore,
 		WorkloadOperations:   operationStore,
@@ -169,6 +174,15 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		StorageReconcile: runtimeadapter.NewLocalStorageStatusReconciler(storageStore),
 		StorageResources: runtimeadapter.NewLocalStorageService(runtimeadapter.WithStorageResourceStore(storageStore)),
 	}, nil
+}
+
+func reconcileControllerConfig(cfg Config) ports.ReconcileControllerConfig {
+	return ports.ReconcileControllerConfig{
+		NormalIntervalSeconds:   cfg.WorkloadReconcileNormalInterval,
+		ActiveIntervalSeconds:   cfg.WorkloadReconcileActiveInterval,
+		StaleThresholdSeconds:   cfg.WorkloadReconcileStaleThreshold,
+		MaxConcurrentReconciles: cfg.WorkloadReconcileMaxBatch,
+	}
 }
 
 func workloadProviderAdapters(cfg Config) (ports.WorkloadProviderDryRun, ports.WorkloadProviderApply, ports.WorkloadProviderStatusReader, *runtimeadapter.KubernetesRESTClient, error) {

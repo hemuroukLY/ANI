@@ -5,7 +5,7 @@
         tools-proto gen-api gen-proto gen-core-sdk gen-api-docs \
         build build-gateway build-auth-service build-model-service build-task-service \
         test test-go test-python test-cover \
-        validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-auth-contract validate-auth-dex-smoke validate-architecture \
+        validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-architecture \
         lint lint-go lint-python lint-ts \
         dev-gateway dev-console dev-core-mock \
         image image-gateway \
@@ -63,6 +63,7 @@ help:
 	@echo "    make validate-kubernetes-lifecycle-execution 校验 M1-INSTANCE-Q Kubernetes lifecycle execution"
 	@echo "    make validate-kubernetes-ops-execution 校验 M1-INSTANCE-R Kubernetes visual ops execution"
 	@echo "    make validate-m1-real-provider-profile 校验 M1-E2E-B real provider 回归剖面"
+	@echo "    make validate-real-k8s-profile 校验 Sprint 5 REAL-K8S-LAB-A 真实底座门禁"
 	@echo "    make validate-demo-instances 校验阶段性实例 Demo API"
 	@echo "    make validate-core-alpha 校验 Sprint 2 Core API Alpha 契约"
 	@echo "    make validate-network-alpha 校验 Sprint 3 网络资源 Core API 契约"
@@ -80,6 +81,7 @@ help:
 	@echo "    make validate-core-api-compatibility 校验 Sprint 4 Core API v1 兼容性基线"
 	@echo "    make validate-mock-a 校验 Sprint 4 Core Mock Server 覆盖"
 	@echo "    make validate-doc-api 校验 Sprint 4 静态 API 文档"
+	@echo "    make validate-doc-entrypoints 校验 CLAUDE.md/文档入口职责边界"
 	@echo "    make validate-auth-contract 校验 M2.2 Auth Gateway/API 契约一致性"
 	@echo "    make validate-auth-dex-smoke 校验 M2.2 Docker Dex OIDC auth-code flow（需 Docker）"
 	@echo "    make validate-architecture 校验 ports/adapters 组件边界"
@@ -412,6 +414,11 @@ validate-m1-real-provider-profile:
 	GOCACHE=/private/tmp/ani-go-build GOMODCACHE=$(CURDIR)/.cache/gomod go test ./pkg/adapters/runtime -run TestM1RealProviderProfile -v
 	@echo "✅ M1 real provider integration regression profile valid"
 
+validate-real-k8s-profile:
+	@echo "→ 校验 Sprint 5 REAL-K8S-LAB-A 真实底座门禁..."
+	python scripts/validate_real_k8s_profile.py
+	@echo "✅ REAL-K8S-LAB-A real provider lab gate valid"
+
 validate-demo-instances:
 	@echo "→ 校验阶段性 VM/container/GPU container Demo API..."
 	$(GO_CACHE_ENV) go test ./services/ani-gateway/internal/router -run TestDemoInstance -v
@@ -517,6 +524,11 @@ validate-doc-api:
 	@echo "→ 校验 Sprint 4 DOC-API-A 静态 API 文档..."
 	python scripts/validate_api_docs_contract.py
 	@echo "✅ DOC-API-A static API docs valid"
+
+validate-doc-entrypoints:
+	@echo "→ 校验文档入口职责边界..."
+	python scripts/validate_doc_entrypoints.py
+	@echo "✅ document entrypoints valid"
 
 validate-auth-contract:
 	@echo "→ 校验 M2.2 Auth Gateway/API 契约..."

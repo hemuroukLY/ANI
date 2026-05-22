@@ -1,7 +1,9 @@
 # KuberCloud ANI · 产品路线图
 
 > 版本 V1.1 | 广州常青云科技有限公司 | 内部产品规划文件
-> 最后更新：2026-05-19（补充 Core/Services 解锁节奏）
+> 最后更新：2026-05-23（对齐 Sprint 5 与 Services 重定义门禁）
+
+> 本文定义路线图节奏，不作为当前开发任务清单。当前阶段、已完成项和下一步以 `ANI-DOCS-INDEX.md`、`ANI-06-开发计划.md` Section 零和 `repo/CURRENT-SPRINT.md` 为准。
 
 ---
 
@@ -34,11 +36,11 @@ Phase 与版本号关系：
 
 ### 当前开发节奏（与 ANI-06 对齐）
 
-当前执行阶段是 **Phase 1 / Sprint 2**，不是 Phase 2。Phase 1 内部拆成两个交付对象：
+当前执行阶段以 `ANI-06-开发计划.md` Section 零和 `repo/CURRENT-SPRINT.md` 为准；截至 2026-05-23，项目处于 **Phase 1 / Sprint 5 收敛中**，不是 Phase 2。Phase 1 内部拆成两个交付对象：
 
 | 交付对象 | 关键门禁 | 说明 |
 |---|---|---|
-| ANI Services 开发团队 | 2026-06-10 Core API Alpha Freeze；2026-06-30 Core Dev Profile Ready + SDK Alpha | 先让 Services 能基于稳定 API/SDK 开发 |
+| ANI Services 开发团队 | 2026-06-10 Core API Alpha Freeze；2026-06-15 至 2026-06-20 Services 功能与接口定义；2026-06-30 Core Dev Profile Ready + SDK Alpha | 先让 Services 能基于稳定 API/SDK 开发，并用新定义删除或覆盖 Repo 中陈旧 Services 逻辑 |
 | 最终客户 v1.0.0 | 2026-09-30 | ANI Core v1.0.0 + ANI Services P0 可交付 |
 
 路线图只定义 Phase 1/2/3 的产品阶段；当前 Sprint、批次状态和验收命令以 `ANI-06-开发计划.md` 和 `repo/CURRENT-SPRINT.md` 为准。
@@ -56,7 +58,7 @@ Phase 与版本号关系：
 | 模块 | 功能 | 优先级 |
 |---|---|---|
 | GPU 算力管理 | GPU 纳管、利用率监控、资源配额（HAMi + Volcano）| P0 |
-| 模型管理平台 | 模型导入（离线包 + HuggingFace/ModelScope）、一键部署、动态加载 | P0 |
+| Services 首批 AI 能力 | 模型导入（离线包 + HuggingFace/ModelScope）、一键部署、动态加载；这是 Services 的首批切片，不代表 Services 全部 | P0 |
 | 模型加解密 | 国密 SM4 对称加密，推理时 Init Container 内存解密（Secret volume 非 env）| P0 |
 | 企业知识库问答 | 文档上传解析、RAG 问答（混合检索）、来源引用、幂等解析 | P0 |
 | 基础安全管控 | RBAC 权限、AD/LDAP 集成、审计日志、RLS fail-closed | P0 |

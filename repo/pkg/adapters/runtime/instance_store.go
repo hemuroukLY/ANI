@@ -198,6 +198,51 @@ func (s *MetadataInstanceStore) List(ctx context.Context, tenantID string, kind 
 	return records, nil
 }
 
+func (s *MetadataInstanceStore) ListReconcileTargets(ctx context.Context, request ports.ReconcileTargetListRequest) ([]ports.ReconcileTarget, error) {
+	if s.store == nil {
+		return nil, ports.ErrNotConfigured
+	}
+	limit := request.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	staleBefore := request.StaleBefore
+	if staleBefore.IsZero() {
+		staleBefore = s.now().UTC().Add(-2 * time.Minute)
+	}
+
+	var targets []ports.ReconcileTarget
+	err := s.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT tenant_id::text, instance_id, workload_kind, state, COALESCE(provider, ''), updated_at
+			FROM workload_instances
+			WHERE state NOT IN ('stopped', 'failed', 'deleted') OR updated_at < $1
+			ORDER BY updated_at ASC
+			LIMIT $2
+		`, staleBefore.UTC(), limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var target ports.ReconcileTarget
+			var kind string
+			var state string
+			if err := rows.Scan(&target.TenantID, &target.InstanceID, &kind, &state, &target.Provider, &target.LastObservedAt); err != nil {
+				return err
+			}
+			target.Kind = ports.WorkloadKind(kind)
+			target.State = ports.WorkloadState(state)
+			targets = append(targets, target)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return targets, nil
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -291,6 +336,7 @@ func scanWorkloadInstance(row scanner, record *ports.WorkloadInstanceRecord) err
 }
 
 var _ ports.WorkloadInstanceStore = (*MetadataInstanceStore)(nil)
+var _ ports.ReconcileTargetLister = (*MetadataInstanceStore)(nil)
 
 func firstNonNilSSH(ssh *ports.VMSSHConnectionInfo) any {
 	if ssh == nil {

@@ -1,6 +1,9 @@
 # KuberCloud ANI · 技术栈设计
 
-> 版本 V1 | 广州常青云科技有限公司 | 内部产品规划文件
+> 版本 V1.1 | 广州常青云科技有限公司 | 内部产品规划文件
+> 最后更新：2026-05-23（对齐 Core/Services 分层与真实底座验证口径）
+
+> 本文描述技术选型基线，不作为当前开发阶段事实来源。当前阶段以 `ANI-DOCS-INDEX.md`、`ANI-06-开发计划.md` Section 零和 `repo/CURRENT-SPRINT.md` 为准；系统架构图以 `ANI-05-系统架构设计.md` 为准。
 
 ---
 
@@ -10,6 +13,7 @@
 2. **与公司现有产品栈对齐**：公司已有 K8s 容器平台能力，ANI 在此基础上向上叠加 AI 层，不另起炉灶。
 3. **信创可替换性**：底层组件选型时优先考虑是否有国产/信创替代路径（如 NVIDIA GPU → 昇腾 NPU 的抽象层设计）。
 4. **语言统一，降低协作成本**：平台层统一用 Go，减少跨语言 RPC 开销和团队认知分裂。
+5. **开源组件准入闭环**：默认组件必须具备健康的 GitHub 社区热度、稳定 release、丰富源码和文档、可观测运维能力、离线部署能力和替换路径；不得为了追新把维护不确定的新项目放入 P0 主链路。
 
 ---
 
@@ -17,17 +21,17 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  应用层（Python + TypeScript）                                     │
-│  RAG引擎 / 文档解析 / 语音转写 / 视频处理 / 前端 Web UI            │
+│  ANI Services / 应用层（Python + TypeScript + Go）                  │
+│  模型服务 / 推理服务 / RAG / 文档解析 / 前端 Web UI                 │
 ├─────────────────────────────────────────────────────────────────┤
-│  平台层（Go）                                                      │
-│  模型管理 API  ·  推理网关  ·  知识库服务  ·  Auth/RBAC  ·  审计    │
+│  ANI Core 平台层（Go）                                             │
+│  实例 / 网络 / 存储 / K8s集群 / 加密 / Secret / Auth/RBAC / 审计    │
 ├─────────────────────────────────────────────────────────────────┤
 │  AI 推理服务（Python）                                              │
 │  vLLM  ·  Triton Inference Server  ·  Whisper（语音）              │
 ├─────────────────────────────────────────────────────────────────┤
 │  调度与编排层（Go — Kubernetes 生态）                               │
-│  Kubernetes 1.36  ·  Volcano  ·  HAMi  ·  GPU Operator            │
+│  Kubernetes 目标验证基线  ·  Volcano  ·  HAMi  ·  GPU Operator     │
 ├─────────────────────────────────────────────────────────────────┤
 │  网络层（Go — KubeOVN）                                            │
 │  KubeOVN 1.13+  ·  OVN/OVS  ·  VPC 隔离  ·  网络策略              │
@@ -44,11 +48,11 @@
 
 ## 三、各层技术选型详解
 
-### 3.1 容器编排层 — Kubernetes 1.36
+### 3.1 容器编排层 — Kubernetes 目标验证基线
 
-**选型：Kubernetes 1.36（当前最新稳定版，2026年4月发布）**
+**选型：Kubernetes 1.36 作为 Sprint 5 真实底座验证目标基线。**
 
-K8s 1.36 关键特性：
+K8s 目标版本的关键关注点：
 - **Sidecar Container GA**：推理服务的辅助容器（日志、安全代理）生命周期管理更可靠
 - **In-place Pod Resource Resizing GA**：无需重启 Pod 即可调整推理服务的 CPU/内存配额，减少服务中断
 - **Dynamic Resource Allocation（DRA）Beta**：更灵活的 GPU 资源分配模型，支持细粒度 GPU 切片
@@ -212,8 +216,8 @@ AI/ML 生态几乎全是 Python，不存在能替代的选项。Go/Rust 调用 P
 
 | 组件 | 版本 | 说明 |
 |---|---|---|
-| Kubernetes | **1.36** | 当前最新稳定版 |
-| KubeOVN | **1.13+** | 与 K8s 1.36 兼容的最新版 |
+| Kubernetes | **1.36 目标基线** | Sprint 5 真实底座验证版本，后续以实际 lab profile 和部署验证记录为准 |
+| KubeOVN | **1.13+** | 需与目标 K8s 基线兼容，最终以真实环境验证为准 |
 | containerd | **2.1+** | 主流容器运行时 |
 | Volcano | **1.10+** | AI 批调度 |
 | HAMi | **2.4+** | 异构 GPU 虚拟化 |
@@ -223,7 +227,7 @@ AI/ML 生态几乎全是 Python，不存在能替代的选项。Go/Rust 调用 P
 | 组件 | 版本 | 说明 |
 |---|---|---|
 | Hertz | **0.9+** | 统一 Web Server 框架（CloudWeGo） |
-| grpc-gateway | **2.x** | REST ↔ gRPC 协议转译 |
+| grpc-gateway | **2.x** | Core 内部 REST ↔ gRPC 协议转译；不得替代 OpenAPI 作为 Core/Services 跨层控制面契约 |
 | buf | **1.x** | Protobuf 管理与 lint |
 | oapi-codegen | **2.x** | OpenAPI → Go Server/Client 代码生成 |
 | NATS JetStream | **2.10+** | 异步任务队列 |

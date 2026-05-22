@@ -55,7 +55,7 @@ In scope:
 - Add validation that remains useful without a live cluster.
 
 Out of scope:
-- RKE2 node installation.
+- Native Kubernetes node installation.
 - KubeOVN VPC/Subnet CR implementation.
 - GPU Operator, HAMi, Volcano, DCGM, Prometheus, Grafana.
 - Actual Helm dependency downloads from public chart repositories unless explicitly approved.

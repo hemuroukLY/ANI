@@ -16,7 +16,7 @@ data:
   storage.object.bucket.kbDocs: "ani-kb-docs"
   postgresql.requiredRLS: "true"
   nats.jetstream.required: "true"
-  install.mode.supported: "rke2,attach-k8s,karmada"
+  install.mode.supported: "native-k8s,attach-k8s,karmada"
 ---
 apiVersion: v1
 kind: Secret

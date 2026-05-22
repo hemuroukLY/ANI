@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>52</dd></div>
-          <div><dt>Schemas</dt><dd>59</dd></div>
+          <div><dt>Operations</dt><dd>71</dd></div>
+          <div><dt>Schemas</dt><dd>80</dd></div>
         </dl>
       </section>
 
@@ -222,6 +222,70 @@
           <td>获取平台品牌配置</td>
           <td><code></code></td>
           <td>200</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/encryption/keys</code></td>
+          <td><code>listEncryptionKeys</code></td>
+          <td>列出加密密钥</td>
+          <td><code>scope:encryption:read</code></td>
+          <td>200</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/encryption/keys</code></td>
+          <td><code>createEncryptionKey</code></td>
+          <td>创建加密密钥</td>
+          <td><code>scope:encryption:create</code></td>
+          <td>201</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/encryption/keys/{key_id}</code></td>
+          <td><code>deleteEncryptionKey</code></td>
+          <td>删除加密密钥</td>
+          <td><code>scope:encryption:delete</code></td>
+          <td>200</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/encryption/keys/{key_id}</code></td>
+          <td><code>getEncryptionKey</code></td>
+          <td>查询加密密钥</td>
+          <td><code>scope:encryption:read</code></td>
+          <td>200</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/encryption/keys/{key_id}/revoke</code></td>
+          <td><code>revokeEncryptionKey</code></td>
+          <td>吊销加密密钥</td>
+          <td><code>scope:encryption:manage</code></td>
+          <td>200, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/encryption/keys/{key_id}/rotate</code></td>
+          <td><code>rotateEncryptionKey</code></td>
+          <td>轮换加密密钥</td>
+          <td><code>scope:encryption:manage</code></td>
+          <td>200, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/encryption/seal</code></td>
+          <td><code>sealEncryptionObject</code></td>
+          <td>加密对象路径并生成解封令牌</td>
+          <td><code>scope:encryption:use</code></td>
+          <td>200, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/encryption/unseal-token</code></td>
+          <td><code>createEncryptionUnsealToken</code></td>
+          <td>生成对象解封令牌</td>
+          <td><code>scope:encryption:use</code></td>
+          <td>200, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -318,6 +382,54 @@
           <td>查询实例操作历史</td>
           <td><code>scope:instances:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/k8s-clusters</code></td>
+          <td><code>listK8sClusters</code></td>
+          <td>列出 K8s 集群</td>
+          <td><code>scope:k8s-clusters:read</code></td>
+          <td>200</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/k8s-clusters</code></td>
+          <td><code>createK8sCluster</code></td>
+          <td>创建 K8s 集群</td>
+          <td><code>scope:k8s-clusters:create</code></td>
+          <td>201</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/k8s-clusters/{cluster_id}</code></td>
+          <td><code>deleteK8sCluster</code></td>
+          <td>删除 K8s 集群</td>
+          <td><code>scope:k8s-clusters:delete</code></td>
+          <td>200</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/k8s-clusters/{cluster_id}</code></td>
+          <td><code>getK8sCluster</code></td>
+          <td>查询 K8s 集群</td>
+          <td><code>scope:k8s-clusters:read</code></td>
+          <td>200</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/k8s-clusters/{cluster_id}/kubeconfig</code></td>
+          <td><code>getK8sClusterKubeconfig</code></td>
+          <td>获取 K8s 集群 kubeconfig</td>
+          <td><code>scope:k8s-clusters:read</code></td>
+          <td>200, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/k8s-clusters/{cluster_id}/proxy</code></td>
+          <td><code>proxyK8sClusterAPI</code></td>
+          <td>代理访问 K8s 集群原生 API</td>
+          <td><code>scope:k8s-clusters:proxy</code></td>
+          <td>200, 400, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -497,6 +609,46 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/secrets</code></td>
+          <td><code>listSecrets</code></td>
+          <td>列出 Secret</td>
+          <td><code>scope:secrets:read</code></td>
+          <td>200</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/secrets</code></td>
+          <td><code>createSecret</code></td>
+          <td>创建 Secret</td>
+          <td><code>scope:secrets:create</code></td>
+          <td>201</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/secrets/{secret_id}</code></td>
+          <td><code>deleteSecret</code></td>
+          <td>删除 Secret</td>
+          <td><code>scope:secrets:delete</code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/secrets/{secret_id}</code></td>
+          <td><code>getSecret</code></td>
+          <td>查询 Secret 元数据</td>
+          <td><code>scope:secrets:read</code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/secrets/{secret_id}/bindings</code></td>
+          <td><code>bindSecret</code></td>
+          <td>绑定 Secret 到工作负载</td>
+          <td><code>scope:secrets:bind</code></td>
+          <td>201, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/tasks/{task_id}</code></td>
           <td><code>getTasksTaskId</code></td>
           <td>查询异步任务状态</td>
@@ -602,6 +754,16 @@
         <li><code>CreateStorageVolumeRequest</code></li>
         <li><code>CreateVectorStoreRequest</code></li>
         <li><code>CursorPage</code></li>
+        <li><code>EncryptionKey</code></li>
+        <li><code>EncryptionKeyCreateRequest</code></li>
+        <li><code>EncryptionKeyListResponse</code></li>
+        <li><code>EncryptionKeyRevokeRequest</code></li>
+        <li><code>EncryptionKeyRotateRequest</code></li>
+        <li><code>EncryptionKeyRotationResponse</code></li>
+        <li><code>EncryptionSealRequest</code></li>
+        <li><code>EncryptionSealResponse</code></li>
+        <li><code>EncryptionUnsealTokenRequest</code></li>
+        <li><code>EncryptionUnsealTokenResponse</code></li>
         <li><code>ErrorResponse</code></li>
         <li><code>HealthCheck</code></li>
         <li><code>InstanceConsoleSession</code></li>
@@ -610,6 +772,12 @@
         <li><code>InstanceListResponse</code></li>
         <li><code>InstanceOperation</code></li>
         <li><code>InstanceRecord</code></li>
+        <li><code>K8sCluster</code></li>
+        <li><code>K8sClusterCreateRequest</code></li>
+        <li><code>K8sClusterKubeconfig</code></li>
+        <li><code>K8sClusterListResponse</code></li>
+        <li><code>K8sClusterProxyRequest</code></li>
+        <li><code>K8sClusterProxyResponse</code></li>
         <li><code>ListAPIKeysResponse</code></li>
         <li><code>LogoutRequest</code></li>
         <li><code>NetworkLoadBalancer</code></li>
@@ -626,6 +794,11 @@
         <li><code>RefreshAccessTokenRequest</code></li>
         <li><code>RefreshAccessTokenResponse</code></li>
         <li><code>RevokeStatusResponse</code></li>
+        <li><code>Secret</code></li>
+        <li><code>SecretBinding</code></li>
+        <li><code>SecretBindingRequest</code></li>
+        <li><code>SecretCreateRequest</code></li>
+        <li><code>SecretListResponse</code></li>
         <li><code>StorageFilesystem</code></li>
         <li><code>StorageFilesystemListResponse</code></li>
         <li><code>StorageObject</code></li>

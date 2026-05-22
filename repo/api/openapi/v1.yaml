@@ -61,6 +61,217 @@ components:
 # ── 公共 Schema ───────────────────────────────────────────────────────────────
   schemas:
 
+    K8sClusterCreateRequest:
+      type: object
+      properties:
+        idempotency_key: { type: string }
+        name:            { type: string }
+        version:         { type: string }
+      required: [idempotency_key, name]
+    K8sCluster:
+      type: object
+      properties:
+        id:         { type: string }
+        tenant_id:  { type: string }
+        name:       { type: string }
+        version:    { type: string }
+        state:      { type: string, enum: [provisioning, running, deleting] }
+        reason:     { type: string }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    K8sClusterListResponse:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/K8sCluster" } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+    K8sClusterKubeconfig:
+      type: object
+      properties:
+        cluster_id: { type: string }
+        tenant_id:  { type: string }
+        server:     { type: string }
+        namespace:  { type: string }
+        ca_data:    { type: string }
+        token:      { type: string }
+        kubeconfig: { type: string }
+        expires_at: { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+    K8sClusterProxyRequest:
+      type: object
+      properties:
+        idempotency_key: { type: string }
+        method:
+          type: string
+          enum: [GET, POST, PUT, PATCH, DELETE]
+        path:
+          type: string
+          description: 原生 Kubernetes API path，仅允许 /api/、/apis/、/healthz、/livez、/readyz、/version 范围。
+        query:
+          type: object
+          additionalProperties: { type: string }
+        body:
+          type: object
+          additionalProperties: true
+      required: [idempotency_key, method, path]
+    K8sClusterProxyResponse:
+      type: object
+      properties:
+        cluster_id: { type: string }
+        tenant_id:  { type: string }
+        method:     { type: string }
+        path:       { type: string }
+        query:
+          type: object
+          additionalProperties: { type: string }
+        status_code: { type: integer }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+        body:
+          type: object
+          additionalProperties: true
+        proxied_at: { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    EncryptionKeyCreateRequest:
+      type: object
+      properties:
+        idempotency_key: { type: string }
+        name:            { type: string }
+        algorithm:       { type: string, enum: [SM4, AES256] }
+      required: [idempotency_key, name]
+    EncryptionKey:
+      type: object
+      properties:
+        id:         { type: string }
+        tenant_id:  { type: string }
+        name:       { type: string }
+        algorithm:  { type: string }
+        state:      { type: string, enum: [active, rotated, revoked, deleted] }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    EncryptionKeyListResponse:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/EncryptionKey" } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+    EncryptionKeyRotateRequest:
+      type: object
+      properties:
+        idempotency_key: { type: string }
+      required: [idempotency_key]
+    EncryptionKeyRevokeRequest:
+      type: object
+      properties:
+        idempotency_key: { type: string }
+        reason:          { type: string }
+      required: [idempotency_key]
+    EncryptionKeyRotationResponse:
+      type: object
+      properties:
+        rotation_id:     { type: string }
+        tenant_id:       { type: string }
+        previous_key_id: { type: string }
+        rotated_key:
+          $ref: "#/components/schemas/EncryptionKey"
+        rotated_at: { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+    EncryptionSealRequest:
+      type: object
+      properties:
+        idempotency_key: { type: string }
+        key_id:          { type: string }
+        object_uri:      { type: string }
+      required: [idempotency_key, key_id, object_uri]
+    EncryptionSealResponse:
+      type: object
+      properties:
+        key_id:            { type: string }
+        tenant_id:         { type: string }
+        object_uri:        { type: string }
+        sealed_object_uri: { type: string }
+        unseal_token:      { type: string }
+        expires_at:        { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+    EncryptionUnsealTokenRequest:
+      type: object
+      properties:
+        key_id:            { type: string }
+        sealed_object_uri: { type: string }
+      required: [key_id, sealed_object_uri]
+    EncryptionUnsealTokenResponse:
+      type: object
+      properties:
+        key_id:            { type: string }
+        tenant_id:         { type: string }
+        sealed_object_uri: { type: string }
+        unseal_token:      { type: string }
+        expires_at:        { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    SecretCreateRequest:
+      type: object
+      properties:
+        idempotency_key: { type: string }
+        name:            { type: string }
+        type:            { type: string, enum: [opaque, dockerconfigjson, tls] }
+        data:
+          type: object
+          additionalProperties: { type: string }
+      required: [idempotency_key, name, data]
+    Secret:
+      type: object
+      properties:
+        id:         { type: string }
+        tenant_id:  { type: string }
+        name:       { type: string }
+        type:       { type: string }
+        keys:       { type: array, items: { type: string } }
+        state:      { type: string, enum: [active, deleted] }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SecretListResponse:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Secret" } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+    SecretBindingRequest:
+      type: object
+      properties:
+        target_type: { type: string, enum: [instance, k8s-cluster, service] }
+        target_id:   { type: string }
+        mount_path:  { type: string }
+        env_prefix:  { type: string }
+      required: [target_type, target_id]
+    SecretBinding:
+      type: object
+      properties:
+        id:          { type: string }
+        secret_id:   { type: string }
+        tenant_id:   { type: string }
+        target_type: { type: string }
+        target_id:   { type: string }
+        mount_path:  { type: string }
+        env_prefix:  { type: string }
+        state:       { type: string }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        created_at:  { type: string, format: date-time }
+
     # 所有错误响应的统一格式
     ErrorResponse:
       type: object
@@ -1881,6 +2092,370 @@ paths:
                         unit:           { type: string }
                         period:         { type: string }
 
+
+  /k8s-clusters:
+    get:
+      operationId: listK8sClusters
+      summary: 列出 K8s 集群
+      tags: [K8sClusters]
+      x-ani-rbac-scope: "scope:k8s-clusters:read"
+      parameters:
+        - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sClusterListResponse"
+    post:
+      operationId: createK8sCluster
+      summary: 创建 K8s 集群
+      tags: [K8sClusters]
+      x-ani-rbac-scope: "scope:k8s-clusters:create"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/K8sClusterCreateRequest"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sCluster"
+
+  /k8s-clusters/{cluster_id}:
+    get:
+      operationId: getK8sCluster
+      summary: 查询 K8s 集群
+      tags: [K8sClusters]
+      x-ani-rbac-scope: "scope:k8s-clusters:read"
+      parameters:
+        - { name: cluster_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sCluster"
+    delete:
+      operationId: deleteK8sCluster
+      summary: 删除 K8s 集群
+      tags: [K8sClusters]
+      x-ani-rbac-scope: "scope:k8s-clusters:delete"
+      parameters:
+        - { name: cluster_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sCluster"
+
+  /k8s-clusters/{cluster_id}/kubeconfig:
+    get:
+      operationId: getK8sClusterKubeconfig
+      summary: 获取 K8s 集群 kubeconfig
+      description: Sprint 5 local dev profile 返回模拟 vCluster kubeconfig；真实 provider 接入后必须保持响应语义兼容。
+      tags: [K8sClusters]
+      x-ani-rbac-scope: "scope:k8s-clusters:read"
+      parameters:
+        - { name: cluster_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sClusterKubeconfig"
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /k8s-clusters/{cluster_id}/proxy:
+    post:
+      operationId: proxyK8sClusterAPI
+      summary: 代理访问 K8s 集群原生 API
+      description: Sprint 5 local dev profile 返回模拟 proxy 响应；真实 provider 接入后由 Core adapter 转发到租户 vCluster API Server，Gateway handler 不直接调用 K8s SDK。
+      tags: [K8sClusters]
+      x-ani-rbac-scope: "scope:k8s-clusters:proxy"
+      parameters:
+        - { name: cluster_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/K8sClusterProxyRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sClusterProxyResponse"
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /encryption/keys:
+    get:
+      operationId: listEncryptionKeys
+      summary: 列出加密密钥
+      tags: [Encryption]
+      x-ani-rbac-scope: "scope:encryption:read"
+      parameters:
+        - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncryptionKeyListResponse"
+    post:
+      operationId: createEncryptionKey
+      summary: 创建加密密钥
+      tags: [Encryption]
+      x-ani-rbac-scope: "scope:encryption:create"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EncryptionKeyCreateRequest"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncryptionKey"
+
+  /encryption/keys/{key_id}:
+    get:
+      operationId: getEncryptionKey
+      summary: 查询加密密钥
+      tags: [Encryption]
+      x-ani-rbac-scope: "scope:encryption:read"
+      parameters:
+        - { name: key_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncryptionKey"
+    delete:
+      operationId: deleteEncryptionKey
+      summary: 删除加密密钥
+      tags: [Encryption]
+      x-ani-rbac-scope: "scope:encryption:delete"
+      parameters:
+        - { name: key_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncryptionKey"
+
+  /encryption/keys/{key_id}/rotate:
+    post:
+      operationId: rotateEncryptionKey
+      summary: 轮换加密密钥
+      description: Sprint 5 local dev profile 返回新 active key，并将旧 key 标记为 rotated；真实 SM4/KMS provider 接入后必须保持响应语义兼容。
+      tags: [Encryption]
+      x-ani-rbac-scope: "scope:encryption:manage"
+      parameters:
+        - { name: key_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EncryptionKeyRotateRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncryptionKeyRotationResponse"
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /encryption/keys/{key_id}/revoke:
+    post:
+      operationId: revokeEncryptionKey
+      summary: 吊销加密密钥
+      description: Sprint 5 local dev profile 将 key 标记为 revoked；revoked key 不再允许 seal 或生成 unseal token。
+      tags: [Encryption]
+      x-ani-rbac-scope: "scope:encryption:manage"
+      parameters:
+        - { name: key_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EncryptionKeyRevokeRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncryptionKey"
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /encryption/seal:
+    post:
+      operationId: sealEncryptionObject
+      summary: 加密对象路径并生成解封令牌
+      description: Sprint 5 local dev profile 返回模拟 sealed object URI 和 unseal token；真实 SM4/KMS provider 接入后必须保持响应语义兼容。
+      tags: [Encryption]
+      x-ani-rbac-scope: "scope:encryption:use"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EncryptionSealRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncryptionSealResponse"
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /encryption/unseal-token:
+    post:
+      operationId: createEncryptionUnsealToken
+      summary: 生成对象解封令牌
+      description: 为 Init Container 或后续模型加载流程生成限时解封令牌；当前为 local dev profile 模拟令牌。
+      tags: [Encryption]
+      x-ani-rbac-scope: "scope:encryption:use"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EncryptionUnsealTokenRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncryptionUnsealTokenResponse"
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /secrets:
+    get:
+      operationId: listSecrets
+      summary: 列出 Secret
+      description: 只返回 Secret 元数据和 key 名称，不返回明文值。
+      tags: [Secrets]
+      x-ani-rbac-scope: "scope:secrets:read"
+      parameters:
+        - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretListResponse"
+    post:
+      operationId: createSecret
+      summary: 创建 Secret
+      description: Sprint 5 local dev profile 存储 Secret 明文仅限本地 adapter；API 响应只返回元数据和 key 名称。
+      tags: [Secrets]
+      x-ani-rbac-scope: "scope:secrets:create"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SecretCreateRequest"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Secret"
+
+  /secrets/{secret_id}:
+    get:
+      operationId: getSecret
+      summary: 查询 Secret 元数据
+      tags: [Secrets]
+      x-ani-rbac-scope: "scope:secrets:read"
+      parameters:
+        - { name: secret_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Secret"
+        "404":
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteSecret
+      summary: 删除 Secret
+      tags: [Secrets]
+      x-ani-rbac-scope: "scope:secrets:delete"
+      parameters:
+        - { name: secret_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Secret"
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /secrets/{secret_id}/bindings:
+    post:
+      operationId: bindSecret
+      summary: 绑定 Secret 到工作负载
+      description: 当前为 local dev profile 绑定记录；真实 K8s Secret 注入在 provider/controller 边界实现。
+      tags: [Secrets]
+      x-ani-rbac-scope: "scope:secrets:bind"
+      parameters:
+        - { name: secret_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SecretBindingRequest"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretBinding"
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
 # ── Tag 分组（Swagger UI 显示顺序）──────────────────────────────────────────
 tags:
   - { name: Health,         description: "健康检查（K8s liveness/readiness probe）" }
@@ -1891,12 +2466,12 @@ tags:
   - { name: Filesystems,    description: "文件存储（CephFS/NFS）" }
   - { name: ObjectStore,    description: "对象存储（S3兼容）" }
   - { name: VectorStore,    description: "向量存储（Milvus）" }
-  - { name: K8sClusters,    description: "K8s 集群生命周期 + 原生 API 代理" }
+  - { name: K8sClusters,    description: "K8s 集群管理" }
   - { name: BareMetalHosts, description: "裸金属硬件库存管理" }
   - { name: GPU,            description: "GPU 节点库存与调度" }
   - { name: DPU,            description: "DPU 加速节点库存" }
   - { name: Registry,       description: "镜像仓库" }
-  - { name: Encryption,     description: "国密加解密" }
+  - { name: Encryption,     description: "加密密钥管理" }
   - { name: Secrets,        description: "密钥管理与工作负载绑定" }
   - { name: Metering,       description: "用量计量" }
   - { name: Observability,  description: "指标查询与告警" }
