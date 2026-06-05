@@ -1,0 +1,127 @@
+scope: core
+version: sprint11
+phase: core-real-deployment-reboot-resilience-result
+batch: CORE-ROOK-CEPH-REBOOT-RESILIENCE-A
+live_execution_date: "2026-06-05"
+deployment_target: rook-ceph-kubevirt-rbd-reboot-resilience
+manual_approval_received: true
+data_safety_prerequisite_enforced: true
+live_reboot_resilience_executed: true
+real_server_mutation_performed: true
+server_reboot_performed: true
+simultaneous_reboot_performed: false
+destructive_disk_operations_directly_invoked_by_agent: false
+system_disk_touched: false
+manual_mount_performed: false
+fstab_mutation_performed: false
+data_disk_mount_or_fstab_mutation: false
+storageclass_default_switched: false
+existing_pvc_migration_performed: false
+actual_release: false
+production_release: false
+source_profiles:
+  - deploy/real-k8s-lab/sprint11-storage-disk-plan.yaml
+  - deploy/real-k8s-lab/sprint11-rook-ceph-formal-deployment.yaml
+  - deploy/real-k8s-lab/sprint11-rook-ceph-live-deployment-result.yaml
+  - deploy/real-k8s-lab/sprint11-rook-ceph-vm-storage-smoke-result.yaml
+preflight:
+  kubernetes_nodes_ready: 3
+  cephcluster_phase: Ready
+  ceph_health: HEALTH_OK
+  cephblockpool_phase: Ready
+  kubevirt_phase: Deployed
+  formal_storageclass: ani-rbd-ssd
+  formal_storageclass_reclaimPolicy: Retain
+  formal_storageclass_default: false
+execution_policy:
+  worker_nodes_first: true
+  control_plane_last: true
+  one_node_at_a_time: true
+  stop_on_unhealthy_gate: true
+  no_drain_performed: true
+  no_mount_or_fstab_change: true
+node_reboot_results:
+  - node: dev-phys-02
+    role: worker
+    reboot_executed: true
+    reboot_event_observed: true
+    node_ready_after_reboot: true
+    ceph_health_after_reboot: HEALTH_OK
+    osd_pods_on_node_recovered: 2
+    vm_pvc_baseline_before_reboot: true
+    vm_ready_after_reboot: true
+    pvc_bound_after_reboot: true
+    guest_rbd_block_device_visible_after_reboot: true
+    guest_block_write_attempted_after_reboot: true
+  - node: dev-phys-03
+    role: worker
+    reboot_executed: true
+    reboot_event_observed: true
+    node_ready_after_reboot: true
+    ceph_health_after_reboot: HEALTH_OK
+    osd_pods_on_node_recovered: 2
+    vm_pvc_baseline_before_reboot: true
+    vm_ready_after_reboot: true
+    pvc_bound_after_reboot: true
+    guest_rbd_block_device_visible_after_reboot: true
+    guest_block_write_attempted_after_reboot: true
+  - node: kubercloud
+    role: control-plane
+    reboot_executed: true
+    reboot_event_observed: true
+    node_ready_after_reboot: true
+    api_readyz_after_reboot: true
+    ceph_health_after_reboot: HEALTH_OK
+    mon_pod_on_node_recovered: true
+    mgr_pod_on_node_recovered: true
+    osd_pods_on_node_recovered: 1
+    worker_vm_pvc_observable_after_control_plane_reboot: true
+    worker_vm_ready_after_control_plane_reboot: true
+    worker_pvc_bound_after_control_plane_reboot: true
+    control_plane_recovery_required_extended_wait: true
+post_reboot_cluster:
+  kubernetes_nodes_ready: 3
+  cephcluster_phase: Ready
+  ceph_health: HEALTH_OK
+  clock_skew_warning_observed_after_reboot: true
+  clock_skew_warning_cleared: true
+  cephblockpool_phase: Ready
+  kubevirt_phase: Deployed
+  osd_count_running: 5
+  osd_topology:
+    kubercloud: 1
+    dev-phys-02: 2
+    dev-phys-03: 2
+  osd_restart_observed_after_reboot:
+    kubercloud: 1
+    dev-phys-02: 2
+    dev-phys-03: 2
+  formal_storageclass_reclaimPolicy: Retain
+  formal_storageclass_default: false
+time_sync_remediation:
+  remediation_performed: true
+  reason: ceph_mon_clock_skew_after_reboot
+  systemd_timesyncd_restarted: true
+  ntp_renegotiated_on_high_offset_node: true
+  final_ceph_health: HEALTH_OK
+cleanup_result:
+  temporary_worker_vm_namespaces_deleted: true
+  temporary_control_plane_observation_namespace_deleted: true
+  temporary_pvc_deleted: true
+  temporary_pv_deleted: true
+  temporary_storageclass_deleted: true
+  retained_test_pv_left: false
+  retained_test_storageclass_left: false
+safety_result:
+  root_filesystem_preserved: true
+  fstab_unchanged_by_sprint11: true
+  no_manual_mount_created: true
+  no_default_storageclass_switch: true
+  no_existing_pvc_migration: true
+  hdd_not_in_vm_primary_pool: true
+  storage_automation_uses_persistent_by_id: true
+verification:
+  - id: sprint11-rook-ceph-reboot-resilience
+    command: make validate-sprint11-rook-ceph-reboot-resilience
+  - id: sprint11-real-deployment
+    command: make validate-sprint11-real-deployment

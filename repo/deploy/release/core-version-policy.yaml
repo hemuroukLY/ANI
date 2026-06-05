@@ -1,0 +1,14 @@
+scope: core
+version: sprint10
+target_release: v1.0.0
+actual_release: false
+release_candidate: false
+production_release: false
+rc_cut: false
+rules:
+  - id: no-actual-v1-before-approval
+    description: Sprint 10 may complete release preparation, but must not mark actual v1.0.0 release before formal approval.
+  - id: no-rc-cut-before-approval
+    description: Sprint 10 may preserve RC readiness evidence, but must not mark a real RC cut in this workspace.
+  - id: docs-must-state-release-boundary
+    description: Entry documents must state that Sprint 10 completion is not the actual v1.0.0 release.

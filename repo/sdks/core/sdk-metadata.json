@@ -245,6 +245,12 @@
       "scope": "scope:k8s-clusters:manage"
     },
     {
+      "operationId": "reportTokenUsage",
+      "method": "POST",
+      "path": "/metering/token-usage",
+      "scope": "scope:metering:write"
+    },
+    {
       "operationId": "getMeteringUsage",
       "method": "GET",
       "path": "/metering/usage",
@@ -371,10 +377,94 @@
       "scope": "scope:objects:read"
     },
     {
+      "operationId": "listObservabilityAlertRules",
+      "method": "GET",
+      "path": "/observability/alert-rules",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "createObservabilityAlertRule",
+      "method": "POST",
+      "path": "/observability/alert-rules",
+      "scope": "scope:observability:write"
+    },
+    {
+      "operationId": "deleteObservabilityAlertRule",
+      "method": "DELETE",
+      "path": "/observability/alert-rules/{rule_id}",
+      "scope": "scope:observability:write"
+    },
+    {
+      "operationId": "getObservabilityAlertRule",
+      "method": "GET",
+      "path": "/observability/alert-rules/{rule_id}",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "updateObservabilityAlertRule",
+      "method": "PATCH",
+      "path": "/observability/alert-rules/{rule_id}",
+      "scope": "scope:observability:write"
+    },
+    {
+      "operationId": "queryObservability",
+      "method": "GET",
+      "path": "/observability/query",
+      "scope": "scope:observability:read"
+    },
+    {
       "operationId": "readiness",
       "method": "GET",
       "path": "/readyz",
       "scope": ""
+    },
+    {
+      "operationId": "getRegistryImageScanResult",
+      "method": "GET",
+      "path": "/registry/images/scan-result",
+      "scope": "scope:registry:read"
+    },
+    {
+      "operationId": "listRegistryProjects",
+      "method": "GET",
+      "path": "/registry/projects",
+      "scope": "scope:registry:read"
+    },
+    {
+      "operationId": "createRegistryProject",
+      "method": "POST",
+      "path": "/registry/projects",
+      "scope": "scope:registry:write"
+    },
+    {
+      "operationId": "createRegistryProjectPullSecret",
+      "method": "POST",
+      "path": "/registry/projects/{project}/pull-secret",
+      "scope": "scope:registry:write"
+    },
+    {
+      "operationId": "listRegistryRepositories",
+      "method": "GET",
+      "path": "/registry/projects/{project}/repositories",
+      "scope": "scope:registry:read"
+    },
+    {
+      "operationId": "listRegistryArtifacts",
+      "method": "GET",
+      "path": "/registry/projects/{project}/repositories/{repository}/artifacts",
+      "scope": "scope:registry:read"
+    },
+    {
+      "operationId": "setRegistryRepositoryPermission",
+      "method": "POST",
+      "path": "/registry/projects/{project}/repositories/{repository}/permissions",
+      "scope": "scope:registry:write"
+    },
+    {
+      "operationId": "getRegistryProjectScanReport",
+      "method": "GET",
+      "path": "/registry/projects/{project}/scan-report",
+      "scope": "scope:registry:read"
     },
     {
       "operationId": "listSecrets",
@@ -483,6 +573,9 @@
     "CreateNetworkSecurityGroupRequest",
     "CreateNetworkSubnetRequest",
     "CreateNetworkVPCRequest",
+    "CreateObservabilityAlertRuleRequest",
+    "CreateRegistryProjectRequest",
+    "CreateRegistryPullSecretRequest",
     "CreateStorageFilesystemRequest",
     "CreateStorageObjectRequest",
     "CreateStorageVolumeRequest",
@@ -520,6 +613,8 @@
     "K8sClusterUpgradeRequest",
     "ListAPIKeysResponse",
     "LogoutRequest",
+    "MeteringUsageRecord",
+    "MeteringUsageResponse",
     "NetworkLoadBalancer",
     "NetworkLoadBalancerListResponse",
     "NetworkLoadBalancerListener",
@@ -531,14 +626,32 @@
     "NetworkSubnetListResponse",
     "NetworkVPC",
     "NetworkVPCListResponse",
+    "ObservabilityAlertRule",
+    "ObservabilityAlertRuleListResponse",
+    "ObservabilityQueryResponse",
     "RefreshAccessTokenRequest",
     "RefreshAccessTokenResponse",
+    "RegistryArtifact",
+    "RegistryArtifactListResponse",
+    "RegistryPermission",
+    "RegistryProject",
+    "RegistryProjectListResponse",
+    "RegistryProjectScanReport",
+    "RegistryPullSecret",
+    "RegistryRepository",
+    "RegistryRepositoryListResponse",
+    "RegistryScanResult",
+    "ReportTokenUsageRequest",
     "RevokeStatusResponse",
+    "SandboxConfig",
+    "SandboxInstanceStatus",
+    "SandboxNetworkEgressPolicy",
     "Secret",
     "SecretBinding",
     "SecretBindingRequest",
     "SecretCreateRequest",
     "SecretListResponse",
+    "SetRegistryPermissionRequest",
     "StorageFilesystem",
     "StorageFilesystemListResponse",
     "StorageObject",
@@ -547,6 +660,8 @@
     "StorageVolume",
     "StorageVolumeListResponse",
     "TokenPairResponse",
+    "TokenUsageReport",
+    "UpdateObservabilityAlertRuleRequest",
     "VectorStore",
     "VectorStoreListResponse",
     "VectorStoreSearchHit",
@@ -568,11 +683,17 @@
     "updateK8sClusterNodePool",
     "proxyK8sClusterAPI",
     "upgradeK8sCluster",
+    "reportTokenUsage",
     "createNetworkLoadBalancer",
     "createNetworkSecurityGroup",
     "createNetworkSubnet",
     "createNetworkVPC",
     "createStorageObject",
+    "createObservabilityAlertRule",
+    "updateObservabilityAlertRule",
+    "createRegistryProject",
+    "createRegistryProjectPullSecret",
+    "setRegistryRepositoryPermission",
     "createSecret",
     "createVectorStore",
     "createStorageVolume"
@@ -588,6 +709,10 @@
     "listNetworkSubnets",
     "listNetworkVPCs",
     "listStorageObjects",
+    "listObservabilityAlertRules",
+    "listRegistryProjects",
+    "listRegistryRepositories",
+    "listRegistryArtifacts",
     "listSecrets",
     "listVectorStores",
     "listStorageVolumes"

@@ -1,0 +1,123 @@
+scope: core
+version: sprint11
+phase: core-real-deployment-validation
+intent: storage-preflight-for-real-deployment
+source: read-only-inventory-2026-06-04
+mutation_allowed: false
+destructive_operations_allowed: false
+real_server_mutation_performed: false
+disk_order_policy: do_not_align_sd_letters
+storage_device_identity_policy: persistent_device_id_required
+rook_ceph_policy:
+  osd_input_mode: raw-unmounted-devices
+  pre_mount_osd_devices: false
+  require_explicit_wipe_approval: true
+  require_no_filesystem_signature: true
+  require_no_mountpoint: true
+  require_no_partition_table: true
+  vm_primary_pool: ceph-rbd-ssd
+  hdd_policy: separate_class_or_exclude_initially
+  forbidden_device_selectors:
+    - /dev/sdX
+    - kernel_name_order
+  allowed_device_selectors:
+    - /dev/disk/by-id
+    - wwn
+    - serial
+nodes:
+  - node_id: ani1
+    role: control-plane
+    hostname_observed: ANI1
+    k8s_node_observed: kubercloud
+    system_disk:
+      kernel_name_observed: sdb
+      stable_by_id: /dev/disk/by-id/scsi-SBROADCOM_MR9560-16i_00250cd7d0de533931c9b8710ab26200
+      size: 893.8G
+      root_mounted: true
+      boot_mounted: true
+      efi_mounted: true
+    data_disks:
+      - slot: ssd-a
+        kernel_name_observed: sda
+        stable_by_id: /dev/disk/by-id/scsi-SNVMe_HWE6AP443T8L00LN_035HAXD9Q4012060
+        size: 3.5T
+        rotational: false
+        mounted: false
+        filesystem_observed: none
+        candidate_for_rook_osd: true
+  - node_id: ani2
+    role: worker
+    hostname_observed: ANI2
+    k8s_node_observed: dev-phys-02
+    system_disk:
+      kernel_name_observed: sdc
+      stable_by_id: /dev/disk/by-id/scsi-SBROADCOM_MR9560-16i_003b06e41d9f5eaa31c027e21eb26200
+      size: 893.8G
+      root_mounted: true
+      boot_mounted: true
+      efi_mounted: true
+    data_disks:
+      - slot: ssd-a
+        kernel_name_observed: sda
+        stable_by_id: /dev/disk/by-id/scsi-SNVMe_HWE6AP443T8L00LN_035HAXD9Q2003462
+        size: 3.5T
+        rotational: false
+        mounted: false
+        filesystem_observed: none
+        candidate_for_rook_osd: true
+      - slot: ssd-b
+        kernel_name_observed: sdb
+        stable_by_id: /dev/disk/by-id/scsi-SNVMe_HWE6AP443T8L00LN_035HAXD9Q2004028
+        size: 3.5T
+        rotational: false
+        mounted: false
+        filesystem_observed: none
+        candidate_for_rook_osd: true
+  - node_id: ani3
+    role: worker
+    hostname_observed: ANI3
+    k8s_node_observed: dev-phys-03
+    system_disk:
+      kernel_name_observed: sdd
+      stable_by_id: /dev/disk/by-id/scsi-SBROADCOM_MR9560-16i_00b39f0a1c3c63aa314069e01eb26200
+      size: 893.8G
+      root_mounted: true
+      boot_mounted: true
+      efi_mounted: true
+    data_disks:
+      - slot: ssd-a
+        kernel_name_observed: sda
+        stable_by_id: /dev/disk/by-id/scsi-SNVMe_HWE6AP443T8L00LN_035HAXD9Q2004023
+        size: 3.5T
+        rotational: false
+        mounted: false
+        filesystem_observed: none
+        candidate_for_rook_osd: true
+      - slot: ssd-b
+        kernel_name_observed: sdb
+        stable_by_id: /dev/disk/by-id/scsi-SNVMe_HWE6AP443T8L00LN_035HAXD9Q2004235
+        size: 3.5T
+        rotational: false
+        mounted: false
+        filesystem_observed: none
+        candidate_for_rook_osd: true
+      - slot: hdd-a
+        kernel_name_observed: sdc
+        stable_by_id: /dev/disk/by-id/scsi-SSEAGATE_ST4000NM0125_ZC119FL80000R7271R0L
+        size: 3.6T
+        rotational: true
+        mounted: false
+        filesystem_observed: none
+        candidate_for_rook_osd: false
+        reason: keep_hdd_out_of_initial_vm_ssd_pool
+risk_controls:
+  - never_change_boot_disk_order_for_alignment
+  - never_reference_osd_disks_by_sd_letter_in_automation
+  - fail_closed_if_filesystem_partition_lvm_or_mountpoint_is_detected
+  - require_human_approval_before_wipefs_sgdisk_mkfs_mount_or_fstab_change
+  - keep_hdd_in_separate_storage_class_or_exclude_from_initial_vm_pool
+verification:
+  - id: storage-disk-plan
+    command: make validate-sprint11-storage-disk-plan
+  - id: yaml-syntax
+    command: python scripts/validate_yaml.py deploy/real-k8s-lab/sprint11-storage-disk-plan.yaml

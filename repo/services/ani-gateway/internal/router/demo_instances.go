@@ -79,6 +79,7 @@ type demoInstanceAPI struct {
 
 type demoCreateInstanceRequest struct {
 	Kind                  string                     `json:"kind"`
+	InstanceType          string                     `json:"instance_type"`
 	Name                  string                     `json:"name"`
 	CPU                   string                     `json:"cpu"`
 	Memory                string                     `json:"memory"`
@@ -93,9 +94,16 @@ type demoCreateInstanceRequest struct {
 	Replicas              int                        `json:"replicas"`
 	AutoStart             *bool                      `json:"auto_start"`
 	TerminationProtection bool                       `json:"termination_protection"`
+	SandboxConfig         demoSandboxConfigRequest   `json:"sandbox_config"`
 	SecretBindings        []demoSecretBindingRequest `json:"secret_bindings"`
 	Description           string                     `json:"description"`
 	IdempotencyKey        string                     `json:"idempotency_key"`
+}
+
+type demoSandboxConfigRequest struct {
+	RuntimeClass        string `json:"runtime_class"`
+	SessionTimeout      string `json:"session_timeout"`
+	NetworkEgressPolicy string `json:"network_egress_policy"`
 }
 
 type demoSecretBindingRequest struct {
@@ -140,6 +148,7 @@ type demoInstanceResponse struct {
 	TenantID              string                 `json:"tenant_id"`
 	Name                  string                 `json:"name"`
 	Kind                  string                 `json:"kind"`
+	InstanceType          string                 `json:"instance_type"`
 	State                 string                 `json:"state"`
 	Status                string                 `json:"status"`
 	Provider              string                 `json:"provider"`
@@ -153,6 +162,7 @@ type demoInstanceResponse struct {
 	Snapshots             []demoSnapshot         `json:"snapshots,omitempty"`
 	Container             *demoContainer         `json:"container,omitempty"`
 	GPU                   *demoGPU               `json:"gpu,omitempty"`
+	Sandbox               *demoSandbox           `json:"sandbox,omitempty"`
 	WorkloadIdentity      *demoIdentity          `json:"workload_identity,omitempty"`
 	CreatedAt             string                 `json:"created_at"`
 	UpdatedAt             string                 `json:"updated_at"`
@@ -206,6 +216,14 @@ type demoGPU struct {
 	Count              int     `json:"count"`
 	SchedulingReason   string  `json:"scheduling_reason,omitempty"`
 	UtilizationPercent float64 `json:"utilization_percent"`
+}
+
+type demoSandbox struct {
+	RuntimeClass        string                 `json:"runtime_class"`
+	SessionTimeout      string                 `json:"session_timeout"`
+	NetworkEgressPolicy string                 `json:"network_egress_policy"`
+	SessionState        string                 `json:"session_state"`
+	DevProfile          coreDevProfileResponse `json:"dev_profile"`
 }
 
 type demoIdentity struct {
@@ -283,6 +301,7 @@ func newDemoInstanceAPI() *demoInstanceAPI {
 		runtimeadapter.NewLocalInstanceOpsGuard(runtimeadapter.WithInstanceOpsEnabled(true)),
 		runtimeadapter.WithOperationStore(operations),
 		runtimeadapter.WithWorkloadIdentityService(identity),
+		runtimeadapter.WithSandboxRuntime(runtimeadapter.NewLocalSandboxRuntime()),
 	)
 	return &demoInstanceAPI{service: service, operations: operations}
 }
@@ -665,7 +684,10 @@ func sanitizePathPart(value string) string {
 }
 
 func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.WorkloadSpec, error) {
-	kind := ports.WorkloadKind(strings.TrimSpace(req.Kind))
+	kind, err := demoInstanceKind(req)
+	if err != nil {
+		return ports.WorkloadSpec{}, err
+	}
 	if kind == "" {
 		kind = ports.WorkloadKindVM
 	}
@@ -728,10 +750,51 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 			PreferredModels:  []string{firstNonEmpty(req.GPU.Model, req.GPUModel, "A100")},
 			RequiredCount:    maxInt(firstNonZeroInt(req.GPU.Count, req.GPUCount), 1),
 		}
+	case ports.WorkloadKindSandbox:
+		sandboxConfig, err := demoSandboxConfigFromRequest(req.SandboxConfig)
+		if err != nil {
+			return ports.WorkloadSpec{}, err
+		}
+		spec.Storage = nil
+		spec.RuntimeClassName = sandboxConfig.RuntimeClass
+		spec.Sandbox = &sandboxConfig
+		spec.Annotations["ani.kubercloud.io/sandbox-runtime-class"] = sandboxConfig.RuntimeClass
+		spec.Annotations["ani.kubercloud.io/sandbox-network-egress-policy"] = string(sandboxConfig.NetworkEgressPolicy)
 	default:
 		return ports.WorkloadSpec{}, fmt.Errorf("unsupported demo instance kind %q", kind)
 	}
 	return spec, nil
+}
+
+func demoInstanceKind(req demoCreateInstanceRequest) (ports.WorkloadKind, error) {
+	kind := strings.TrimSpace(req.Kind)
+	instanceType := strings.TrimSpace(req.InstanceType)
+	if kind != "" && instanceType != "" && kind != instanceType {
+		return "", fmt.Errorf("kind and instance_type must match when both are provided")
+	}
+	return ports.WorkloadKind(firstNonEmpty(kind, instanceType)), nil
+}
+
+func demoSandboxConfigFromRequest(request demoSandboxConfigRequest) (ports.SandboxConfig, error) {
+	timeout := 30 * time.Minute
+	if strings.TrimSpace(request.SessionTimeout) != "" {
+		parsed, err := time.ParseDuration(strings.TrimSpace(request.SessionTimeout))
+		if err != nil || parsed <= 0 {
+			return ports.SandboxConfig{}, fmt.Errorf("sandbox_config.session_timeout must be a positive duration")
+		}
+		timeout = parsed
+	}
+	policy := ports.SandboxNetworkEgressPolicy(firstNonEmpty(strings.TrimSpace(request.NetworkEgressPolicy), string(ports.SandboxNetworkEgressDenyAll)))
+	switch policy {
+	case ports.SandboxNetworkEgressDenyAll, ports.SandboxNetworkEgressAllowlist, ports.SandboxNetworkEgressInternet:
+	default:
+		return ports.SandboxConfig{}, fmt.Errorf("sandbox_config.network_egress_policy must be deny_all, allowlist, or internet")
+	}
+	return ports.SandboxConfig{
+		RuntimeClass:        firstNonEmpty(strings.TrimSpace(request.RuntimeClass), "sandbox-kata"),
+		SessionTimeout:      timeout,
+		NetworkEgressPolicy: policy,
+	}, nil
 }
 
 func demoSecretBindingsFromRequest(request []demoSecretBindingRequest) []ports.WorkloadSecretBinding {
@@ -755,6 +818,7 @@ func demoInstanceFromRecord(record ports.WorkloadInstanceRecord) demoInstanceRes
 		TenantID:              record.TenantID,
 		Name:                  record.Name,
 		Kind:                  string(record.Kind),
+		InstanceType:          string(record.Kind),
 		State:                 string(record.Status.State),
 		Status:                string(record.Status.State),
 		Provider:              record.Provider,
@@ -768,6 +832,7 @@ func demoInstanceFromRecord(record ports.WorkloadInstanceRecord) demoInstanceRes
 		Snapshots:             demoSnapshotsFromRecord(record),
 		Container:             demoContainerFromRecord(record),
 		GPU:                   demoGPUFromRecord(record),
+		Sandbox:               demoSandboxFromRecord(record),
 		WorkloadIdentity:      demoIdentityFromRecord(record),
 		CreatedAt:             record.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:             record.UpdatedAt.Format(time.RFC3339),
@@ -837,6 +902,24 @@ func demoGPUFromRecord(record ports.WorkloadInstanceRecord) *demoGPU {
 		Count:              record.GPU.Count,
 		SchedulingReason:   record.GPU.SchedulingReason,
 		UtilizationPercent: record.GPU.UtilizationPercent,
+	}
+}
+
+func demoSandboxFromRecord(record ports.WorkloadInstanceRecord) *demoSandbox {
+	if record.Sandbox == nil {
+		return nil
+	}
+	return &demoSandbox{
+		RuntimeClass:        record.Sandbox.Config.RuntimeClass,
+		SessionTimeout:      record.Sandbox.Config.SessionTimeout.String(),
+		NetworkEgressPolicy: string(record.Sandbox.Config.NetworkEgressPolicy),
+		SessionState:        string(record.Sandbox.State),
+		DevProfile: coreDevProfileResponse{
+			Mode:         record.Sandbox.DevProfile.Mode,
+			Provider:     record.Sandbox.DevProfile.Provider,
+			RealProvider: record.Sandbox.DevProfile.RealProvider,
+			Reason:       record.Sandbox.DevProfile.Reason,
+		},
 	}
 }
 

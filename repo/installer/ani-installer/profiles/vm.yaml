@@ -1,0 +1,26 @@
+profile: core-vm
+mode: vm
+scope: core
+core_components:
+  - ani-gateway
+  - auth-service
+  - task-service
+  - reconcile-worker
+preflight:
+  required_commands:
+    - kubectl
+    - helm
+    - systemctl
+  required_paths:
+    - deploy/helm/ani-platform
+    - deploy/docker/docker-compose.yml
+plan:
+  phases:
+    - preflight
+    - render
+    - validate
+    - apply
+  evidence_output: development-records/live-evidence/core-installer-vm.json
+boundaries:
+  services_frozen: true
+  production_ready: false

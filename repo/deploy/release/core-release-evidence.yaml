@@ -1,0 +1,31 @@
+scope: core
+version: sprint9
+target_release: v1.0.0
+rc_readiness: true
+release_candidate: false
+production_release: false
+evidence:
+  - id: core-api-compatibility
+    command: make validate-core-api-compatibility
+    artifact: repo/api/core-v1-compatibility-baseline.yaml
+  - id: architecture-boundary
+    command: make validate-architecture
+    artifact: repo/architecture/component-import-allowlist.yaml
+  - id: doc-entrypoints
+    command: make validate-doc-entrypoints
+    artifact: ANI-DOCS-INDEX.md
+  - id: sdk-beta
+    command: make validate-sdk-beta
+    artifact: repo/sdks/core/sdk-metadata.json
+  - id: sdk-mock-smoke
+    command: make validate-sdk-mock-smoke
+    artifact: repo/sdks/core/
+  - id: sprint8-core-release
+    command: make validate-sprint8-core-release
+    artifact: repo/deploy/release/core-hardening.yaml
+  - id: core-offline-pack
+    command: make validate-core-offline-pack
+    artifact: repo/deploy/offline/core-package-lock.yaml
+  - id: core-cli-version
+    command: make validate-core-cli
+    artifact: repo/cli/ani/main.go

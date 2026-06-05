@@ -1,0 +1,77 @@
+scope: core
+version: sprint11
+phase: core-real-deployment-live-result
+batch: CORE-ROOK-CEPH-LIVE-DEPLOYMENT-A
+live_deployment_date: "2026-06-05"
+deployment_target: rook-ceph-vm-primary-block-storage
+manual_approval_received: true
+data_safety_prerequisite_enforced: true
+live_deployment_executed: true
+real_server_mutation_performed: true
+destructive_operations_directly_invoked_by_agent: false
+server_reboot_performed: false
+system_disk_touched: false
+data_disk_mount_or_fstab_mutation: false
+storageclass_default_switched: false
+actual_release: false
+production_release: false
+source_profiles:
+  - deploy/real-k8s-lab/sprint11-storage-disk-plan.yaml
+  - deploy/real-k8s-lab/sprint11-rook-ceph-formal-deployment.yaml
+operator_installation:
+  rook_operator_version: v1.20.0
+  ceph_image: quay.io/ceph/ceph:v19.2.3
+  csi_addons_version: v0.14.0
+  rook_crds_installed: true
+  rook_common_installed: true
+  csi_operator_installed: true
+  rook_operator_available: true
+  csi_addons_crds_installed: true
+  csi_addons_sidecars_running_after_crd_remediation: true
+cluster_result:
+  kubernetes_nodes_ready: 3
+  cephcluster_name: rook-ceph
+  cephcluster_namespace: rook-ceph
+  cephcluster_phase: Ready
+  ceph_health: HEALTH_OK
+  cephblockpool_name: ceph-rbd-ssd
+  cephblockpool_phase: Ready
+  mon_count_running: 3
+  mgr_count_running: 1
+  osd_count_running: 5
+  osd_prepare_jobs_completed: 3
+  osd_topology:
+    kubercloud: 1
+    dev-phys-02: 2
+    dev-phys-03: 2
+  ani3_ssd_candidate_count: 2
+  ani3_rotational_hdd_excluded: true
+storageclass_result:
+  name: ani-rbd-ssd
+  provisioner: rook-ceph.rbd.csi.ceph.com
+  reclaimPolicy: Retain
+  volumeBindingMode: WaitForFirstConsumer
+  allowVolumeExpansion: true
+  default_storageclass: false
+smoke_test:
+  executed: true
+  temporary_storageclass: ani-rbd-ssd-smoke-delete
+  temporary_storageclass_reclaimPolicy: Delete
+  pvc_bound: true
+  pod_ready: true
+  mounted_volume_write_read_marker: sprint11-rbd-smoke
+  temporary_resources_deleted: true
+  temporary_pv_deleted: true
+  retained_test_pv_left: false
+safety_result:
+  root_filesystem_preserved: true
+  fstab_unchanged_by_sprint11: true
+  no_server_reboot: true
+  no_manual_mount_created: true
+  hdd_not_in_vm_primary_pool: true
+  storage_automation_uses_persistent_by_id: true
+verification:
+  - id: sprint11-rook-ceph-live-deployment-result
+    command: make validate-sprint11-rook-ceph-live-deployment-result
+  - id: sprint11-real-deployment
+    command: make validate-sprint11-real-deployment

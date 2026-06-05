@@ -1,0 +1,25 @@
+profile: core-existing-k8s
+mode: existing-k8s
+scope: core
+core_components:
+  - ani-gateway
+  - auth-service
+  - task-service
+  - reconcile-worker
+preflight:
+  required_commands:
+    - kubectl
+    - helm
+  required_paths:
+    - deploy/helm/ani-platform
+    - deploy/real-k8s-lab/profile.yaml
+plan:
+  phases:
+    - preflight
+    - render
+    - validate
+    - apply
+  evidence_output: development-records/live-evidence/core-installer-existing-k8s.json
+boundaries:
+  services_frozen: true
+  production_ready: false

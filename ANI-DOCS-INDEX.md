@@ -1,6 +1,6 @@
 # KuberCloud ANI · 文档导航与一致性矩阵
 
-> 最后更新：2026-06-03
+> 最后更新：2026-06-05
 > 目的：让人类开发者和 AI 工具在 5 分钟内判断当前开发阶段、文档职责、下一步入口和闭环规则。
 
 ---
@@ -8,11 +8,23 @@
 ## 当前结论
 
 ```text
-当前阶段：Phase 1 / Sprint 5 真实验证完成
+当前阶段：Phase 1 / Sprint 11 / Core Real Deployment Validation 正式部署完成；Rook-Ceph 正式部署已完成
 当前不是 Phase 2：Phase 2 指 2026-10 以后延期能力
 当前入口：repo/CURRENT-SPRINT.md
 当前真实底座门禁：REAL-K8S-LAB-A / make validate-real-k8s-profile；Kube-OVN network resource 与 external LoadBalancer IP 可达性、KubeVirt VM lifecycle 与 console/VNC WebSocket session、vCluster Helm/kubeconfig/Core proxy、vCluster upgrade、Secret（含 VM guest Secret volume 可见性）、controller HA failover、KMS/SM4 provider streaming/objectstore round trip 与 node pool CAPK create/scale live evidence 已归档；GPU 调度依赖已在 ANI1/ANI2/ANI3 三台服务器跑通
 ```
+
+Sprint 11 / Core Real Deployment Validation 正式部署完成，当前把 Sprint 6-10 的 contract/local/release-prep 成果放到真实物理服务器上验证，并完成 Rook-Ceph VM 优先块存储 live 部署。真实服务器只读验证已完成；Rook-Ceph 正式部署已完成：`rook-ceph` CephCluster 为 `Ready/HEALTH_OK`，`ceph-rbd-ssd` pool 为 `Ready`，3 个 mon、1 个 mgr、5 个 SSD OSD 运行，`ani-rbd-ssd` StorageClass 已上线，受控 RBD PVC/Pod smoke test、KubeVirt VM RBD storage smoke 与逐节点 reboot resilience 已通过并清理临时资源；VM smoke 证明临时 KubeVirt VM 可挂载 RBD Block PVC，guest 可见块设备并完成写入尝试；reboot resilience 证明两个 worker 逐台重启后 VM/PVC 恢复，control-plane 最后重启后 API readyz、mon/mgr/OSD、Ceph 和 worker VM/PVC 观测恢复。Sprint 11 执行环境：正式部署执行环境，允许已审批的 Rook-Ceph operator、CSI operator、CSI-Addons CRD、CephCluster、OSD、CephBlockPool、StorageClass 部署、受控 RBD smoke test、KubeVirt VM RBD storage smoke 和逐节点 reboot resilience；未执行手工挂载、`/etc/fstab` 修改、系统盘变更、默认 StorageClass 切换或已有 PVC 迁移。磁盘策略已切到持久设备 ID：不得以 `/dev/sdX` 顺序作为自动化依据，不为“盘符对齐”调整启动盘或控制器枚举；ANI3 只有 2 块 SSD 候选盘，另 1 块 3.6T 盘为 HDD，已排除出 VM 优先 SSD pool。该结果不是实际 v1.0.0 发布，也不代表完整 production ready、备份/恢复演练、容量告警、故障注入、长期 soak 或业务迁移完成。
+
+Sprint 10 Core-only 代码开发已完成，交付 ANI Core artifact manifest、version policy、final readiness profile、CLI release metadata 和文档一致性 gate 的 contract/local validation。该状态是 release-prep readiness，不是实际 v1.0.0 发布，不代表 release tag、真实 artifact 签名、客户现场交付或 production ready。RAG、Console、BOSS、model-service、kb-service、ai、operators、frontends 均不在本仓库执行范围内。
+
+Sprint 9 Core-only 代码开发已完成，交付 ANI Core RC readiness profile、release evidence manifest、offline checksum contract、Core CLI version output 和文档一致性 gate 的 contract/local validation。该状态不代表实际 RC cut、真实离线包签名交付、CLI 正式发布或 production ready。RAG、Console、BOSS、model-service、kb-service、ai、operators、frontends 均不在本仓库执行范围内；外部 Services 团队的业务定义到位后，Core 只按 Core OpenAPI/SDK/CLI 缺口补齐支撑能力。
+
+Sprint 8 Core-only 代码开发已完成，交付 ANI Core release hardening profile、installer live-readiness contract、offline package lock、Core CLI-B 扩展和文档一致性 gate 的 contract/local validation。Sprint 8 继续作为 Sprint 9 RC readiness 的历史回归门禁保留。
+
+Sprint 7 已完成 ANI Core installer profile、离线包 manifest、Core CLI 最小行为和 Sprint 7 Core regression profile。后续 Sprint 继续保留 Sprint 7 的边界说明：installer/offline/CLI 当前结果不代表真实安装完成、离线包签名交付、CLI 发布或 production ready。
+
+Sprint 6 已完成 Core 平台支撑四个 local profile 批次：Sandbox、Observability、Metering、Registry。它们作为 Sprint 7 回归边界保留，但不代表 Kata、Prometheus/Alertmanager、metering/billing backend、Harbor 或 Trivy real-provider/production ready 已完成。
 
 Sprint 5 已完成 K8s、Kube-OVN、KubeVirt、vCluster、KMS/SM4、Kubernetes Secret 与 controller HA 的真实 provider 主链路验证，并已通过当前验收命令。local profile 只能证明 API、SDK、状态机和调用边界正确；真实运行能力必须由真实组件环境、固定验证命令或批次记录证明。
 

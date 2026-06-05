@@ -1,0 +1,26 @@
+profile: core-baremetal
+mode: baremetal
+scope: core
+core_components:
+  - ani-gateway
+  - auth-service
+  - task-service
+  - reconcile-worker
+preflight:
+  required_commands:
+    - kubectl
+    - helm
+    - containerd
+  required_paths:
+    - deploy/helm/ani-platform
+    - deploy/migrations
+plan:
+  phases:
+    - preflight
+    - render
+    - validate
+    - apply
+  evidence_output: development-records/live-evidence/core-installer-baremetal.json
+boundaries:
+  services_frozen: true
+  production_ready: false

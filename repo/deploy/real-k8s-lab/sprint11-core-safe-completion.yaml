@@ -1,0 +1,91 @@
+scope: core
+version: sprint11
+phase: core-real-deployment-validation
+safe_completion_complete: true
+safe_completion_date: "2026-06-05"
+sprint_final_safe_complete: true
+real_deployment_validation_safe_complete: true
+execution_environment:
+  entered: true
+  name: sprint11-core-real-deployment-validation
+  scope: read_only_validation
+  data_safety_prerequisite_enforced: true
+  server_mutation_allowed: false
+  storage_mutation_allowed: false
+  production_storage_deployment_allowed: false
+  allowed_operation_classes:
+    - local_contract_validation
+    - read_only_real_environment_inventory
+    - documentation_consistency_validation
+  forbidden_operation_classes:
+    - disk_partition_or_filesystem_mutation
+    - data_disk_mount_or_fstab_mutation
+    - rook_ceph_install_or_osd_claim
+    - storageclass_default_switch
+    - server_reboot
+real_storage_deployment_complete: false
+rook_ceph_installed: false
+rook_ceph_osd_claimed: false
+data_disk_mounting_complete: false
+actual_release: false
+release_candidate: false
+production_release: false
+mutation_allowed: false
+destructive_operations_allowed: false
+real_server_mutation_performed: false
+server_reboot_performed: false
+data_loss_risk_accepted: false
+open_source_principles:
+  - upstream_kubernetes_apis_first
+  - rook_ceph_raw_unmounted_osd_devices
+  - persistent_device_identity_over_kernel_sd_letter
+  - fail_closed_before_destructive_disk_operations
+  - reproducible_read_only_validation_before_mutation
+  - document_human_approval_before_state_change
+safe_completion_evidence:
+  read_only_inventory_performed: true
+  k8s_nodes_ready: 3
+  kubevirt_phase: Deployed
+  storageclass_count: 0
+  pending_pvc_count: 2
+  data_disks_unmounted: true
+  system_disks_mounted: true
+  stable_device_ids_recorded: true
+  no_fstab_change: true
+  no_partition_change: true
+  no_filesystem_creation: true
+  no_rook_ceph_change: true
+required_profiles:
+  - deploy/real-k8s-lab/sprint11-storage-disk-plan.yaml
+  - deploy/real-k8s-lab/sprint11-core-real-deployment.yaml
+  - deploy/real-k8s-lab/sprint11-rook-ceph-formal-deployment.yaml
+completion_gates:
+  - id: sprint11-storage-disk-plan
+    category: storage-risk
+    command: make validate-sprint11-storage-disk-plan
+  - id: sprint11-core-real-deployment
+    category: real-deployment-validation
+    command: make validate-sprint11-core-real-deployment
+  - id: sprint11-rook-ceph-formal-deployment
+    category: approval-gated-formal-deployment-code
+    command: make validate-sprint11-rook-ceph-formal-deployment
+  - id: sprint11-doc-consistency
+    category: documentation
+    command: make validate-sprint11-core-doc-consistency
+  - id: sprint11-safe-completion
+    category: safety
+    command: make validate-sprint11-safe-completion
+  - id: sprint10-release-prep
+    category: historical-core-release-prep
+    command: make validate-sprint10-release-prep
+manual_approval_required_before:
+  - wipefs
+  - sgdisk
+  - mkfs
+  - mount
+  - fstab_update
+  - reboot_for_storage
+  - rook_ceph_cluster_install
+  - rook_ceph_osd_claim
+  - storageclass_default_switch
+  - existing_pv_migration

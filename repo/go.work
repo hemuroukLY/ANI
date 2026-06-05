@@ -1,6 +1,7 @@
 go 1.23
 
 use (
+	./cli/ani
 	./pkg
 	./services/ani-gateway
 	./services/auth-service
@@ -15,5 +16,4 @@ use (
 // ./services/metering-service
 // ./operators/inference-operator
 // ./operators/upgrade-operator
-// ./cli/ani
 // ./installer/ani-installer

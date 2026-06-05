@@ -1,0 +1,21 @@
+scope: core
+package: ani-core-offline
+version: v0.1.0-sprint7
+images:
+  - name: ani-gateway
+    image: harbor.ani.internal/ani/ani-gateway@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - name: auth-service
+    image: harbor.ani.internal/ani/auth-service@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  - name: task-service
+    image: harbor.ani.internal/ani/task-service@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  - name: reconcile-worker
+    image: harbor.ani.internal/ani/reconcile-worker@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+charts:
+  - name: ani-platform
+    path: deploy/helm/ani-platform
+scripts:
+  - path: scripts/validate_core_installer.py
+  - path: scripts/validate_core_offline.py
+boundaries:
+  services_images_included: false
+  production_ready: false

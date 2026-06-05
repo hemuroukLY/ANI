@@ -6,13 +6,121 @@
 > - **当前冲刺任务** → `repo/CURRENT-SPRINT.md`（每冲刺更新）
 > - **已完成批次详情** → 本文件（每批次完成后追加）
 
-> 当前执行：**Sprint 5 真实验证完成**。功能批次索引见下方 Sprint 5 表格；guard 微批次完整索引见 [guard-series/REAL-K8S-LAB-guard-index.md](guard-series/REAL-K8S-LAB-guard-index.md)（最新 ID：M1-REAL-LAB-KX）。Kube-OVN network live gate（含 external LoadBalancer IP 可达性）、KubeVirt VM lifecycle 与 console/VNC WebSocket session live gate、vCluster Helm/kubeconfig/Core proxy live gate、vCluster upgrade live gate、Secret live gate（含 VM guest Secret volume 可见性）、controller HA failover live gate、KMS/SM4 provider streaming/objectstore round trip live gate 与 node pool CAPK create/scale live gate 已在真实 lab 执行并归档 evidence；GPU 调度依赖已由 [m1-k8s-live-k-gpu-scheduling-real-lab-progress.md](m1-k8s-live-k-gpu-scheduling-real-lab-progress.md) 证明。本文只做已完成批次归档，不作为当前任务清单使用。
-> 2026-05-20 提交前闭环审查：Sprint 2 代码实现、OpenAPI 契约、冻结矩阵、校验脚本和批次记录已对齐；Sprint 3 当前优先项已切换为 `CORE-DEV-PROFILE-A`（原 `MOCK-DEV-A`，已收窄为 Core dev/local profile，不包含 Services 业务 mock）。
-> 2026-05-21 Sprint 3 闭环门禁已通过，当前执行切换到 **Sprint 4**；`SPEC-SPLIT-A` 已完成，`SPEC-CORE-BETA` 已完成 Beta 准备矩阵、Core API v1 兼容性基线、SDK/Mock/API 文档加固、四语言 SDK-Mock 联动烟测和提交前审查。当前状态：开发与验收完成，待提交 GitHub；提交完成后再切换下一 Sprint。
+> 当前执行：**Sprint 11 / Core Real Deployment Validation 正式部署完成；Rook-Ceph 正式部署已完成**，当前把 Sprint 6-10 的 contract/local/release-prep 成果放到真实物理服务器上验证，并完成 VM 优先块存储 live 部署。真实服务器只读验证已完成；Rook-Ceph 正式部署已完成；`rook-ceph` CephCluster 为 `Ready/HEALTH_OK`，`ceph-rbd-ssd` pool 为 `Ready`，5 个 SSD OSD 运行，`ani-rbd-ssd` StorageClass 已上线，受控 RBD smoke test、KubeVirt VM RBD storage smoke 与逐节点 reboot resilience 已通过并清理临时资源。Sprint 11 执行环境：正式部署执行环境；未执行手工挂载、`/etc/fstab` 修改、系统盘变更、默认 StorageClass 切换或已有 PVC 迁移。Sprint 9 Core-only 代码开发已完成，Sprint 10 Core-only 代码开发已完成；两者的 release-prep gates 仍作为历史回归边界保留。Sprint 5 真实 live gate evidence、Sprint 6 Core 平台支撑批次、Sprint 7 installer/offline/CLI/regression contract、Sprint 8 release hardening/offline/CLI/doc consistency gates 仍作为历史回归边界保留；guard 微批次完整索引见 [guard-series/REAL-K8S-LAB-guard-index.md](guard-series/REAL-K8S-LAB-guard-index.md)（最新 ID：M1-REAL-LAB-KX）。本文只做已完成批次归档，不作为当前任务清单使用。
+> 历史校准记录（2026-05-20/2026-05-21）：Sprint 2/3/4 的 API、SDK、Mock、Docs 与记录闭环已归档；这些记录只解释历史切换，不代表当前执行阶段。
 
 ---
 
 ## 已完成批次（按完成时间排列）
+
+### Sprint 11 Kickoff（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SPRINT11-KICKOFF-A | Sprint 11 入口切换：当前仓库进入 Core Real Deployment Validation 阶段，只做 ANI Core 真实物理服务器只读验证、风险建模和门禁闭环 | sprint11-kickoff-a-core-real-deployment.md |
+
+### Sprint 11 Delivery（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| CORE-STORAGE-DISK-RISK-A | Core 存储盘风险计划：记录三台物理服务器系统盘/数据盘、稳定 `/dev/disk/by-id` 映射、Rook-Ceph OSD 风险策略；禁止依赖 `/dev/sdX` 顺序和未审批写操作 | core-storage-disk-risk-a.md |
+| CORE-REAL-DEPLOY-A | Core 真实部署验证 profile：聚合 Sprint 10 release-prep、REAL-K8S-LAB profile、K8s/KubeVirt/storage 只读验证和 Sprint 11 文档一致性门禁；不执行服务器写操作 | core-real-deploy-a.md |
+| CORE-ROOK-CEPH-FORMAL-DEPLOYMENT-A | Rook-Ceph 正式部署代码包：新增 `CephCluster`、`CephBlockPool`、`ani-rbd-ssd` StorageClass 和 validator；只使用 `/dev/disk/by-id` SSD 候选盘，排除 HDD；后续 live 结果见 `CORE-ROOK-CEPH-LIVE-DEPLOYMENT-A` | core-rook-ceph-formal-deployment-a.md |
+| CORE-ROOK-CEPH-LIVE-DEPLOYMENT-A | Rook-Ceph 真实部署结果：安装 Rook `v1.20.0`、Ceph `v19.2.3`、CSI operator/CSI-Addons CRD，CephCluster `Ready/HEALTH_OK`，5 个 SSD OSD 运行，`ani-rbd-ssd` StorageClass 和 RBD smoke test 通过 | core-rook-ceph-live-deployment-a.md |
+| CORE-ROOK-CEPH-VM-STORAGE-SMOKE-A | KubeVirt VM RBD storage smoke：临时 VM 挂载 Rook-Ceph RBD Block PVC，guest 看到块设备并完成写入尝试；临时 VM/PVC/PV/StorageClass 已清理 | core-rook-ceph-vm-storage-smoke-a.md |
+| CORE-ROOK-CEPH-REBOOT-RESILIENCE-A | Rook-Ceph reboot resilience：两个 worker 和一个 control-plane 逐台重启，节点、Ceph、OSD、API readyz 与 VM/PVC 观测恢复；未并发重启 | core-rook-ceph-reboot-resilience-a.md |
+| CORE-SAFE-COMPLETION-A | Core 安全完成 profile：固定上游 Kubernetes/Rook-Ceph 最佳实践、只读验证、无服务器写操作、无重启、无数据丢失风险接受和人工审批前禁止状态变更 | core-safe-completion-a.md |
+| CORE-REAL-DEPLOY-DOC-CONSISTENCY-A | Sprint 11 Core 文档一致性 gate：校验入口文档、Makefile targets 和 records 与 Sprint 11 当前状态一致 | core-real-deploy-doc-consistency-a.md |
+
+### Sprint 11 Safe Closure（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SPRINT11-SAFE-CLOSURE-A | Sprint 11 正式部署完成：部署前安全证据、Rook-Ceph live result、文档一致性和聚合门禁通过；不是实际 v1.0.0 发布或完整 production ready | sprint11-safe-closure-a-core-real-deployment.md |
+
+### Sprint 10 Delivery（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| CORE-ARTIFACT-MANIFEST-A | Core artifact manifest：新增 Core OpenAPI、Core SDK metadata、CLI source、offline lock、release evidence 的 SHA256 清单和 validator；不代表真实 release tarball 或镜像签名交付 | core-artifact-manifest-a.md |
+| CORE-VERSION-POLICY-A | Core version policy：新增版本策略 manifest 和 validator，确保 Sprint 10 只完成 release-prep，`actual_release` / `release_candidate` / `production_release` 保持 false；不是实际 v1.0.0 发布 | core-version-policy-a.md |
+| CORE-FINAL-READINESS-A | Sprint 10 final readiness profile：新增 release-prep 聚合 profile 和 validator，串联 Sprint 9 RC gate、artifact manifest、version policy、CLI build、SDK/API/doc gates | core-final-readiness-a.md |
+| CORE-CLI-RELEASE-METADATA-A | ANI Core CLI release metadata：`ani --version --version-format json` 输出机器可读 name/scope/version/build_time，用于 release evidence 和现场排障 | core-cli-release-metadata-a.md |
+| CORE-FINAL-DOC-CONSISTENCY-A | Sprint 10 Core 文档一致性 gate：校验三份入口文档、Makefile targets 和 development records 与 Sprint 10 状态一致，并要求明确不是实际 v1.0.0 发布 | core-final-doc-consistency-a.md |
+
+### Sprint 10 Closure（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SPRINT10-CLOSURE-A | Sprint 10 Core-only 收敛：artifact manifest、version policy、final readiness、CLI release metadata 和 doc consistency gates 完成；入口文档切换到 Sprint 10 completed / Core release-prep completed 状态 | sprint10-closure-a-contract.md |
+
+### Sprint 9 Delivery（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| CORE-RC-GATE-A | Sprint 9 Core RC readiness profile：新增 `sprint9-core-rc.yaml` 和 validator，聚合 Core API 兼容、架构、文档、SDK、Sprint 8 release、release evidence、offline pack 与 CLI version gates；不代表实际 RC cut 或 production release | core-rc-gate-a.md |
+| CORE-RELEASE-EVIDENCE-A | Core release evidence manifest：新增 Sprint 9 evidence 清单和 validator，固定可复跑命令与无敏感信息 artifact 引用；不记录 token、password、credential 或真实客户凭据 | core-release-evidence-a.md |
+| CORE-OFFLINE-CHECKSUM-A | Core offline checksum contract：将 offline package lock 从占位 checksum 改为可复算的 source manifest checksum，并让 validator 拒绝占位值和不一致值；不代表真实离线包签名交付 | core-offline-checksum-a.md |
+| CORE-CLI-VERSION-A | ANI Core CLI version：新增 `ani --version`，支持 Makefile `-ldflags` 注入版本和构建时间；不新增 Services 命令 | core-cli-version-a.md |
+| CORE-RC-DOC-CONSISTENCY-A | Sprint 9 Core 文档一致性 gate：校验三份入口文档、Makefile targets 和 development records 与 Sprint 9 状态一致 | core-rc-doc-consistency-a.md |
+
+### Sprint 9 Closure（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SPRINT9-CLOSURE-A | Sprint 9 Core-only 收敛：RC readiness profile、release evidence、offline checksum、CLI version 和 doc consistency gates 完成；入口文档切换到 Sprint 9 completed / Sprint 10 prep 状态 | sprint9-closure-a-contract.md |
+
+### Sprint 8 Delivery（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| CORE-HARDEN-A | Core release hardening contract：新增 release hardening gate profile 和 validator，覆盖 Core API 兼容、架构、文档、SDK、CLI、installer/offline gates；不纳入 Services/前端 | core-harden-a.md |
+| CORE-INSTALLER-LIVE-A | Core installer live-readiness contract：新增三种 installer mode 的 evidence 入口和 validator；仅证明 live-readiness contract，不宣称真实安装或 production ready | core-installer-live-a.md |
+| CORE-OFFLINE-PACK-A | Core offline package lock：新增离线包 artifact/checksum/verification lock 和 validator；不代表真实离线包已制作、签名或客户现场交付 | core-offline-pack-a.md |
+| CORE-CLI-B | ANI Core CLI 扩展：新增 network/storage/vector/encryption/observability 只读命令；继续拒绝 model/kb/inference 等 Services 资源 | core-cli-b.md |
+| CORE-DOC-CONSISTENCY-A | Core 文档一致性 gate：校验三份入口文档、Makefile targets 和 development records 与 Sprint 8 状态一致 | core-doc-consistency-a.md |
+
+### Sprint 8 Closure（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SPRINT8-CLOSURE-A | Sprint 8 Core-only 收敛：release hardening、installer live readiness、offline package lock、CLI-B 和 doc consistency gates 完成；入口文档切换到 Sprint 8 completed / Sprint 9 prep 状态 | sprint8-closure-a-contract.md |
+
+### Sprint 7 Kickoff（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SPRINT7-KICKOFF-A | Sprint 7 入口切换：当前仓库进入 Core-only 代码开发阶段，执行范围收窄为 Core installer、离线包、Core CLI 与真实回归门禁；RAG/Console/Services/frontends 不在本仓库推进 | sprint7-kickoff-a-core-only.md |
+
+### Sprint 7 Delivery（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| CORE-INSTALLER-A | Core installer profile contract：新增 baremetal/VM/existing-k8s 三种 Core-only profile 和 validator；仅证明 contract/local validation，不代表真实安装或 production ready | core-installer-a.md |
+| CORE-OFFLINE-A | Core offline package manifest contract：新增 Core 镜像/Helm chart/script manifest 和 validator；仅证明 manifest contract，不代表离线包已制作或可交付 | core-offline-a.md |
+| CORE-CLI-A | ANI Core CLI minimal contract：新增 `cli/ani` Go CLI、Core-only 资源请求和 Services 资源拒绝；仅证明最小 CLI 行为，不代表全资源覆盖或发布包 | core-cli-a.md |
+| CORE-REGRESSION-A | Sprint 7 Core regression profile：新增 installer/offline/CLI/history regression 组合门禁；不新增 REAL-K8S-LAB guard，不执行 live mode | core-regression-a.md |
+
+### Sprint 7 Closure（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SPRINT7-CLOSURE-A | Sprint 7 Core-only 收敛：installer、offline、CLI、regression 四个 Core contract 批次完成；入口文档切换到 Sprint 7 completed / Sprint 8 prep 状态 | sprint7-closure-a-contract.md |
+
+### Sprint 6 Delivery（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| M1-SANDBOX-A | Sandbox 实例类型 local profile：Core OpenAPI 新增 `sandbox`/`sandbox_config`/响应摘要，新增 `SandboxRuntime` port、local adapter、Gateway `/instances` 映射和分层测试；仅证明 local profile 状态机，不代表真实 Kata provider 或 production ready | m1-sandbox-a.md |
+| M1-OBS-A | 可观测性 API local profile：新增 PromQL 代理查询、告警规则 CRUD OpenAPI/port/local adapter/Gateway 路由和分层测试；仅证明 local profile，不代表 Prometheus/Alertmanager real provider | m1-obs-a.md |
+| M1-METER-A | 计量 API local profile：补齐 usage 查询响应并新增 token usage 上报 OpenAPI/port/local adapter/Gateway 路由和分层测试；仅证明 local profile，不代表真实 metering/billing backend | m1-meter-a.md |
+| M1-REGISTRY-A | 镜像仓库 API local profile：新增 registry projects/repositories/artifacts/permissions/pull-secret/scan-report/scan-result OpenAPI/port/local adapter/Gateway 路由和分层测试；仅证明 local profile，不代表 Harbor/Trivy real provider | m1-registry-a.md |
+
+### Sprint 6 Closure（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SPRINT6-CLOSURE-A | Sprint 6 收敛：Sandbox、Observability、Metering、Registry 四个 Core API/local profile 批次全部完成并通过完整门禁；入口文档切换到 Sprint 6 completed / Sprint 7 kickoff 状态 | sprint6-closure-a-contract.md |
 
 ### Sprint 5 Delivery（2026-05）
 

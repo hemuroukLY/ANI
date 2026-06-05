@@ -1,0 +1,38 @@
+scope: core
+version: sprint10
+target_release: v1.0.0
+release_preparation_complete: true
+actual_release: false
+release_candidate: false
+production_release: false
+gates:
+  - id: core-api-compatibility
+    category: api-compatibility
+    command: make validate-core-api-compatibility
+  - id: architecture-boundary
+    category: architecture
+    command: make validate-architecture
+  - id: doc-entrypoints
+    category: documentation
+    command: make validate-doc-entrypoints
+  - id: sdk-beta
+    category: sdk
+    command: make validate-sdk-beta
+  - id: sdk-mock-smoke
+    category: sdk
+    command: make validate-sdk-mock-smoke
+  - id: sprint9-rc
+    category: historical-release-gate
+    command: make validate-sprint9-rc
+  - id: core-artifact-manifest
+    category: release-artifacts
+    command: make validate-core-artifact-manifest
+  - id: core-version-policy
+    category: version-policy
+    command: make validate-core-version-policy
+  - id: core-cli-build
+    category: cli
+    command: make build-cli
+  - id: sprint10-doc-consistency
+    category: documentation
+    command: make validate-sprint10-core-doc-consistency

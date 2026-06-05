@@ -13,7 +13,8 @@ const (
 	WorkloadKindGPUContainer WorkloadKind = "gpu_container"
 	WorkloadKindInference    WorkloadKind = "inference"
 	WorkloadKindNotebook     WorkloadKind = "notebook"
-	WorkloadKindAgentSandbox WorkloadKind = "agent_sandbox"
+	WorkloadKindSandbox      WorkloadKind = "sandbox"
+	WorkloadKindAgentSandbox WorkloadKind = WorkloadKindSandbox
 	WorkloadKindBatchJob     WorkloadKind = "batch_job"
 )
 
@@ -219,6 +220,7 @@ type WorkloadSpec struct {
 	RuntimeClassName   string
 	SchedulerName      string
 	ServiceAccountName string
+	Sandbox            *SandboxConfig
 	Identity           *WorkloadIdentityBinding
 	SecretBindings     []WorkloadSecretBinding
 	TTL                time.Duration
@@ -468,6 +470,7 @@ type WorkloadInstanceRecord struct {
 	Snapshots    []VMInstanceSnapshot
 	Container    *ContainerInstanceStatus
 	GPU          *GPUInstanceStatus
+	Sandbox      *SandboxInstanceStatus
 	Identity     *WorkloadIdentityBinding
 	ResourceRefs []string
 	Status       WorkloadStatus

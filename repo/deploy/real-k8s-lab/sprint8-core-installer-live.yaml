@@ -1,0 +1,20 @@
+scope: core
+evidence_level: contract-local
+production_ready: false
+description: Sprint 8 Core installer live-readiness contract. This profile defines evidence collection entrypoints and does not claim a production-ready installation.
+targets:
+  - id: core-installer-baremetal-readiness
+    mode: baremetal
+    profile: installer/ani-installer/profiles/baremetal.yaml
+    command: make validate-core-installer
+    evidence_output: development-records/live-evidence/sprint8-core-installer-baremetal.json
+  - id: core-installer-vm-readiness
+    mode: vm
+    profile: installer/ani-installer/profiles/vm.yaml
+    command: make validate-core-installer
+    evidence_output: development-records/live-evidence/sprint8-core-installer-vm.json
+  - id: core-installer-existing-k8s-readiness
+    mode: existing-k8s
+    profile: installer/ani-installer/profiles/existing-k8s.yaml
+    command: make validate-core-installer
+    evidence_output: development-records/live-evidence/sprint8-core-installer-existing-k8s.json

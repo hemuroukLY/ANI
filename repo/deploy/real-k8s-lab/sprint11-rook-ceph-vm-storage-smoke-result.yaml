@@ -1,0 +1,81 @@
+scope: core
+version: sprint11
+phase: core-real-deployment-vm-storage-smoke-result
+batch: CORE-ROOK-CEPH-VM-STORAGE-SMOKE-A
+live_execution_date: "2026-06-05"
+deployment_target: kubevirt-vm-with-rook-ceph-rbd-block-pvc
+manual_approval_received: true
+data_safety_prerequisite_enforced: true
+live_vm_storage_smoke_executed: true
+real_server_mutation_performed: true
+destructive_operations_directly_invoked_by_agent: false
+server_reboot_performed: false
+system_disk_touched: false
+manual_mount_performed: false
+fstab_mutation_performed: false
+data_disk_mount_or_fstab_mutation: false
+storageclass_default_switched: false
+existing_pvc_migration_performed: false
+actual_release: false
+production_release: false
+source_profiles:
+  - deploy/real-k8s-lab/sprint11-storage-disk-plan.yaml
+  - deploy/real-k8s-lab/sprint11-rook-ceph-formal-deployment.yaml
+  - deploy/real-k8s-lab/sprint11-rook-ceph-live-deployment-result.yaml
+storageclass_result:
+  formal_storageclass: ani-rbd-ssd
+  formal_storageclass_reclaimPolicy: Retain
+  formal_storageclass_default: false
+  temporary_storageclass: ani-rbd-ssd-vm-smoke-delete
+  temporary_storageclass_reclaimPolicy: Delete
+  provisioner: rook-ceph.rbd.csi.ceph.com
+  pool: ceph-rbd-ssd
+  volumeBindingMode: WaitForFirstConsumer
+  allowVolumeExpansion: true
+pvc_result:
+  namespace: ani-sprint11-vm-storage-smoke
+  pvc_name: ani-vm-rbd-data
+  volumeMode: Block
+  requested_storage: 1Gi
+  pvc_bound: true
+  pv_name_observed: pvc-415ea907-896f-4a22-9ed8-7e3f01ea9437
+  pv_reclaimPolicy: Delete
+  csi_driver: rook-ceph.rbd.csi.ceph.com
+vm_result:
+  vm_name: ani-vm-rbd-smoke
+  kubevirt_vm_ready: true
+  kubevirt_vm_printableStatus: Running
+  kubevirt_vmi_phase: Running
+  virt_launcher_pod_running: true
+  node_observed: dev-phys-03
+  rbd_block_device_visible_in_guest: true
+  guest_block_device_observed: /dev/vdb
+  guest_block_write_attempted: true
+  guest_probe_completed: true
+cleanup_result:
+  temporary_vm_deleted: true
+  temporary_vmi_deleted: true
+  temporary_pvc_deleted: true
+  temporary_pv_deleted: true
+  temporary_storageclass_deleted: true
+  temporary_namespace_delete_requested: true
+  retained_test_pv_left: false
+  retained_test_storageclass_left: false
+cluster_after_cleanup:
+  cephcluster_phase: Ready
+  ceph_health: HEALTH_OK
+  cephblockpool_phase: Ready
+safety_result:
+  root_filesystem_preserved: true
+  fstab_unchanged_by_sprint11: true
+  no_server_reboot: true
+  no_manual_mount_created: true
+  no_default_storageclass_switch: true
+  no_existing_pvc_migration: true
+  hdd_not_in_vm_primary_pool: true
+  storage_automation_uses_persistent_by_id: true
+verification:
+  - id: sprint11-rook-ceph-vm-storage-smoke
+    command: make validate-sprint11-rook-ceph-vm-storage-smoke
+  - id: sprint11-real-deployment
+    command: make validate-sprint11-real-deployment

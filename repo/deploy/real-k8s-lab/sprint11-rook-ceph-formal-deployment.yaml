@@ -1,0 +1,150 @@
+scope: core
+version: sprint11
+phase: core-formal-deployment-code
+batch: CORE-ROOK-CEPH-FORMAL-DEPLOYMENT-A
+formal_deployment_code_complete: true
+formal_deployment_date: "2026-06-05"
+deployment_target: rook-ceph-vm-primary-block-storage
+deployment_mode: approval_gated_manifest_bundle
+rook_operator_version: v1.20.0
+live_deployment_executed: false
+real_server_mutation_performed: false
+mutation_allowed_without_approval: false
+data_safety_prerequisite_enforced: true
+production_storage_deployment_complete: false
+rook_ceph_cluster_installed: false
+rook_ceph_osd_claimed: false
+storageclass_default_switched: false
+source_profiles:
+  - deploy/real-k8s-lab/sprint11-storage-disk-plan.yaml
+  - deploy/real-k8s-lab/sprint11-core-safe-completion.yaml
+upstream_references:
+  - https://rook.io/docs/rook/latest/CRDs/Cluster/host-cluster/
+  - https://rook.io/docs/rook/latest/CRDs/Cluster/ceph-cluster-crd/
+device_selection_policy:
+  selector: explicit_persistent_by_id
+  require_all_devices_from_storage_disk_plan: true
+  reject_kernel_sd_names: true
+  reject_rotational_hdd_initial_pool: true
+  reject_mounted_or_formatted_devices: true
+  reject_unapproved_wipe: true
+operator_prerequisites:
+  rook_operator_required_before_apply: true
+  rook_crds_required_before_apply: true
+  operator_install_included_in_this_bundle: false
+  reason: keep_sprint11_core_bundle_focused_on_cluster_storage_manifest_after_operator_approval
+approval_gate:
+  required: true
+  approval_token_name: SPRINT11_ROOK_CEPH_FORMAL_DEPLOYMENT_APPROVAL
+  approval_must_confirm:
+    - exact_by_id_devices_match_current_read_only_inventory
+    - every_selected_device_is_unmounted
+    - every_selected_device_has_no_filesystem_partition_lvm_or_mountpoint
+    - rollback_and_recovery_window_is_approved
+    - rook_operator_version_is_approved
+forbidden_without_approval:
+  - kubectl_apply
+  - wipefs
+  - sgdisk
+  - mkfs
+  - mount
+  - fstab_update
+  - rook_ceph_cluster_install
+  - rook_ceph_osd_claim
+  - storageclass_default_switch
+  - server_reboot
+manifests:
+  - id: rook-ceph-namespace
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: rook-ceph
+      labels:
+        app.kubernetes.io/part-of: ani-core
+        ani.kubercloud.io/sprint: "11"
+        ani.kubercloud.io/safety: approval-required
+  - id: rook-ceph-cluster
+    apiVersion: ceph.rook.io/v1
+    kind: CephCluster
+    metadata:
+      name: rook-ceph
+      namespace: rook-ceph
+      labels:
+        app.kubernetes.io/part-of: ani-core
+        ani.kubercloud.io/sprint: "11"
+    spec:
+      cephVersion:
+        image: quay.io/ceph/ceph:v19.2.3
+      dataDirHostPath: /var/lib/rook
+      mon:
+        count: 3
+        allowMultiplePerNode: false
+      dashboard:
+        enabled: true
+      crashCollector:
+        disable: false
+      placement:
+        all:
+          tolerations:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+              effect: NoSchedule
+      storage:
+        useAllNodes: false
+        useAllDevices: false
+        nodes:
+          - name: kubercloud
+            devices:
+              - name: /dev/disk/by-id/scsi-SNVMe_HWE6AP443T8L00LN_035HAXD9Q4012060
+          - name: dev-phys-02
+            devices:
+              - name: /dev/disk/by-id/scsi-SNVMe_HWE6AP443T8L00LN_035HAXD9Q2003462
+              - name: /dev/disk/by-id/scsi-SNVMe_HWE6AP443T8L00LN_035HAXD9Q2004028
+          - name: dev-phys-03
+            devices:
+              - name: /dev/disk/by-id/scsi-SNVMe_HWE6AP443T8L00LN_035HAXD9Q2004023
+              - name: /dev/disk/by-id/scsi-SNVMe_HWE6AP443T8L00LN_035HAXD9Q2004235
+  - id: ceph-rbd-ssd-pool
+    apiVersion: ceph.rook.io/v1
+    kind: CephBlockPool
+    metadata:
+      name: ceph-rbd-ssd
+      namespace: rook-ceph
+      labels:
+        app.kubernetes.io/part-of: ani-core
+        ani.kubercloud.io/sprint: "11"
+    spec:
+      failureDomain: host
+      replicated:
+        size: 3
+        requireSafeReplicaSize: true
+  - id: ani-rbd-ssd-storageclass
+    apiVersion: storage.k8s.io/v1
+    kind: StorageClass
+    metadata:
+      name: ani-rbd-ssd
+      annotations:
+        storageclass.kubernetes.io/is-default-class: "false"
+      labels:
+        app.kubernetes.io/part-of: ani-core
+        ani.kubercloud.io/sprint: "11"
+    provisioner: rook-ceph.rbd.csi.ceph.com
+    parameters:
+      clusterID: rook-ceph
+      pool: ceph-rbd-ssd
+      imageFormat: "2"
+      imageFeatures: layering
+      csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
+      csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
+      csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
+      csi.storage.k8s.io/controller-expand-secret-namespace: rook-ceph
+      csi.storage.k8s.io/node-stage-secret-name: rook-csi-rbd-node
+      csi.storage.k8s.io/node-stage-secret-namespace: rook-ceph
+    reclaimPolicy: Retain
+    allowVolumeExpansion: true
+    volumeBindingMode: WaitForFirstConsumer
+verification:
+  - id: rook-ceph-formal-deployment
+    command: make validate-sprint11-rook-ceph-formal-deployment
+  - id: sprint11-real-deployment
+    command: make validate-sprint11-real-deployment

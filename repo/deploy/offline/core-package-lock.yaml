@@ -1,0 +1,14 @@
+scope: core
+source_manifest: deploy/offline/core-package.yaml
+source_manifest_sha256: d5e8099b3b2fce967e297c3b9ee42f7331fa184453fff89ceec56ddabb0382db
+artifact:
+  name: ani-core-offline-bundle.tar.zst
+  sha256: d5e8099b3b2fce967e297c3b9ee42f7331fa184453fff89ceec56ddabb0382db
+  signature_profile: sprint9-local-contract
+verification:
+  - id: offline-contract
+    command: make validate-core-offline
+  - id: offline-pack-contract
+    command: make validate-core-offline-pack
+  - id: cli-contract
+    command: make validate-core-cli

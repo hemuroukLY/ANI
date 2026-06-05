@@ -85,6 +85,75 @@ func TestDemoSpecFromRequestMapsSecretBindings(t *testing.T) {
 	}
 }
 
+func TestDemoSpecFromRequestMapsSandboxConfig(t *testing.T) {
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind: "sandbox",
+		Name: "agent-session",
+		SandboxConfig: demoSandboxConfigRequest{
+			RuntimeClass:        "sandbox-kata",
+			SessionTimeout:      "45m",
+			NetworkEgressPolicy: "deny_all",
+		},
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+	if spec.Kind != ports.WorkloadKindSandbox {
+		t.Fatalf("kind = %s, want sandbox", spec.Kind)
+	}
+	if spec.RuntimeClassName != "sandbox-kata" {
+		t.Fatalf("runtime class = %q, want sandbox-kata", spec.RuntimeClassName)
+	}
+	if spec.Sandbox == nil {
+		t.Fatalf("sandbox config is nil")
+	}
+	if spec.Sandbox.SessionTimeout != 45*time.Minute || spec.Sandbox.NetworkEgressPolicy != ports.SandboxNetworkEgressDenyAll {
+		t.Fatalf("sandbox = %+v, want 45m deny_all", spec.Sandbox)
+	}
+}
+
+func TestDemoInstanceServiceSandboxResponseIncludesLocalProfile(t *testing.T) {
+	api := newDemoInstanceAPI()
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind: "sandbox",
+		Name: "agent-session",
+		SandboxConfig: demoSandboxConfigRequest{
+			RuntimeClass:        "sandbox-kata",
+			SessionTimeout:      "45m",
+			NetworkEgressPolicy: "deny_all",
+		},
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+	created, err := api.service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		Spec:            spec,
+		UserID:          "user-a",
+		PermissionProof: "demo:test",
+		RequestedAt:     time.Unix(2100, 0),
+	})
+	if err != nil {
+		t.Fatalf("Create error = %v", err)
+	}
+	record, err := api.service.Get(context.Background(), ports.WorkloadInstanceGetRequest{
+		TenantID:   "tenant-a",
+		InstanceID: created.Ref.InstanceID,
+	})
+	if err != nil {
+		t.Fatalf("Get error = %v", err)
+	}
+	response := demoInstanceFromRecord(record)
+	if response.Sandbox == nil {
+		t.Fatalf("response sandbox is nil")
+	}
+	if response.Sandbox.RuntimeClass != "sandbox-kata" || response.Sandbox.SessionState != "running" {
+		t.Fatalf("sandbox = %+v, want sandbox-kata/running", response.Sandbox)
+	}
+	if response.Sandbox.DevProfile.Mode != "local" || response.Sandbox.DevProfile.RealProvider {
+		t.Fatalf("sandbox dev profile = %+v, want local non-real marker", response.Sandbox.DevProfile)
+	}
+}
+
 func TestDemoInstanceServiceLifecycleAndOps(t *testing.T) {
 	api := newDemoInstanceAPI()
 	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{Kind: "container", Name: "demo-app"}, "tenant-a")

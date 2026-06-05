@@ -1,0 +1,27 @@
+scope: core
+version: sprint8
+gates:
+  - id: core-api-compatibility
+    category: api-compatibility
+    command: make validate-core-api-compatibility
+  - id: architecture-boundary
+    category: architecture
+    command: make validate-architecture
+  - id: doc-entrypoints
+    category: documentation
+    command: make validate-doc-entrypoints
+  - id: sdk-beta
+    category: sdk
+    command: make validate-sdk-beta
+  - id: sdk-mock-smoke
+    category: sdk
+    command: make validate-sdk-mock-smoke
+  - id: core-cli
+    category: cli
+    command: make validate-core-cli
+  - id: core-installer
+    category: installer
+    command: make validate-core-installer
+  - id: core-offline
+    category: offline
+    command: make validate-core-offline

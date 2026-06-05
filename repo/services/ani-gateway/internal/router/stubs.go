@@ -74,22 +74,6 @@ func registerTasks(v1 *route.RouterGroup) {
 	v1.DELETE("/tasks/:task_id", notImplemented) // cancel
 }
 
-// ── Metering ──────────────────────────────────────────────────────────────────
-
-func registerMetering(v1 *route.RouterGroup) {
-	v1.GET("/metering/usage", notImplemented)
-	v1.GET("/metering/summary", notImplemented)
-}
-
-// ── Harbor Proxy ──────────────────────────────────────────────────────────────
-
-func registerHarbor(v1 *route.RouterGroup) {
-	// Proxy requests to Harbor API; harbor-proxy module will forward with auth header
-	v1.GET("/registry/projects", notImplemented)
-	v1.GET("/registry/projects/:project/repositories", notImplemented)
-	v1.GET("/registry/projects/:project/repositories/:repo/artifacts", notImplemented)
-}
-
 // ── OpenAI-Compatible Inference Proxy ─────────────────────────────────────────
 
 // inferenceProxy routes /v1/chat/completions to the correct vLLM service

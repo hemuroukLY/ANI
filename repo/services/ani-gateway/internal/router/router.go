@@ -28,6 +28,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerBranding(v1)
 	registerTasks(v1)
 	registerAuth(v1)
+	registerObservability(v1)
 	registerMetering(v1)
 	registerHarbor(v1)
 	registerDemoInstances(v1)

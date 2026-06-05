@@ -197,7 +197,7 @@ def main() -> None:
     require(infra_config, 'install.mode.supported: "native-k8s,attach-k8s,karmada"', infra_config_path)
     require(infra_readme, "Native Kubernetes bootstrap automation", infra_readme_path)
 
-    require(repo_readme, "Phase 1 / Sprint 5 收敛中", repo_readme_path)
+    require(repo_readme, "Phase 1 / Sprint 11 / Core Real Deployment Validation 正式部署完成", repo_readme_path)
     require(repo_readme, "model-service/          # ANI Services", repo_readme_path)
     require(repo_readme, "6.15-6.20 后按新定义", repo_readme_path)
     require(repo_readme, "services/v1.yaml 为 Services", repo_readme_path)

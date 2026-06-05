@@ -3,9 +3,9 @@
 
 .PHONY: help deps deps-down deps-status deps-clean \
         tools-proto gen-api gen-proto gen-core-sdk gen-api-docs \
-        build build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker \
+        build build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker build-cli \
         test test-go test-python test-cover \
-        validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-architecture \
+        validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-architecture \
         lint lint-go lint-python lint-ts \
         dev-gateway dev-console dev-core-mock \
         image image-gateway \
@@ -36,6 +36,7 @@ help:
 	@echo "    make build-model-service  仅构建 Model Service"
 	@echo "    make build-task-service   仅构建 Task Service"
 	@echo "    make build-reconcile-worker  仅构建 Reconcile Worker"
+	@echo "    make build-cli     仅构建 ANI Core CLI"
 	@echo ""
 	@echo "  测试:"
 	@echo "    make test           运行所有测试（Go + Python）"
@@ -73,6 +74,33 @@ help:
 	@echo "    make validate-reconcile-ha-live-gate 校验 Sprint 5 M1-RECONCILE-LIVE-A controller HA live 验证门禁"
 	@echo "    make validate-kms-sm4-live-gate 校验 Sprint 5 M1-ENCRYPT-LIVE-A KMS/SM4 live 验证门禁"
 	@echo "    make validate-secrets-live-gate 校验 Sprint 5 M1-SECRETS-LIVE-A Secret live 验证门禁"
+	@echo "    make validate-core-installer 校验 Sprint 7 Core installer profile"
+	@echo "    make validate-core-offline 校验 Sprint 7 Core offline package manifest"
+	@echo "    make validate-core-cli 校验 Sprint 7/8 Core CLI"
+	@echo "    make validate-sprint7-core-regression 校验 Sprint 7 Core regression profile"
+	@echo "    make validate-core-release-hardening 校验 Sprint 8 Core release hardening profile"
+	@echo "    make validate-core-installer-live 校验 Sprint 8 Core installer live readiness profile"
+	@echo "    make validate-core-offline-pack 校验 Sprint 8 Core offline package lock"
+	@echo "    make validate-core-doc-consistency 校验 Sprint 8 Core 文档一致性"
+	@echo "    make validate-sprint8-core-release 校验 Sprint 8 Core release 聚合门禁"
+	@echo "    make validate-core-release-evidence 校验 Sprint 9 Core release evidence manifest"
+	@echo "    make validate-sprint9-core-rc 校验 Sprint 9 Core RC readiness profile"
+	@echo "    make validate-sprint9-core-doc-consistency 校验 Sprint 9 Core 文档一致性"
+	@echo "    make validate-sprint9-rc 校验 Sprint 9 Core RC readiness 聚合门禁"
+	@echo "    make validate-core-artifact-manifest 校验 Sprint 10 Core artifact manifest"
+	@echo "    make validate-core-version-policy 校验 Sprint 10 Core version policy"
+	@echo "    make validate-sprint10-final-readiness 校验 Sprint 10 Core release-prep readiness profile"
+	@echo "    make validate-sprint10-core-doc-consistency 校验 Sprint 10 Core 文档一致性"
+	@echo "    make validate-sprint10-release-prep 校验 Sprint 10 Core release-prep 聚合门禁"
+	@echo "    make validate-sprint11-storage-disk-plan 校验 Sprint 11 Core 真实部署存储盘风险计划"
+	@echo "    make validate-sprint11-core-real-deployment 校验 Sprint 11 Core 真实部署验证 profile"
+	@echo "    make validate-sprint11-rook-ceph-formal-deployment 校验 Sprint 11 Rook-Ceph 正式部署代码包"
+	@echo "    make validate-sprint11-rook-ceph-live-deployment-result 校验 Sprint 11 Rook-Ceph 真实部署结果"
+	@echo "    make validate-sprint11-rook-ceph-vm-storage-smoke 校验 Sprint 11 KubeVirt VM RBD 存储 smoke 结果"
+	@echo "    make validate-sprint11-rook-ceph-reboot-resilience 校验 Sprint 11 Rook-Ceph 逐节点重启恢复结果"
+	@echo "    make validate-sprint11-safe-completion 校验 Sprint 11 Core 安全完成 profile"
+	@echo "    make validate-sprint11-core-doc-consistency 校验 Sprint 11 Core 文档一致性"
+	@echo "    make validate-sprint11-real-deployment 校验 Sprint 11 Core 真实部署验证聚合门禁"
 	@echo "    make validate-demo-instances 校验阶段性实例 Demo API"
 	@echo "    make validate-core-alpha 校验 Sprint 2 Core API Alpha 契约"
 	@echo "    make validate-network-alpha 校验 Sprint 3 网络资源 Core API 契约"
@@ -172,7 +200,7 @@ gen-core-api-compat-baseline:
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS = -X main.Version=$(VERSION) -X main.BuildTime=$(shell date -u +%Y%m%dT%H%M%SZ)
 
-build: build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker
+build: build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker build-cli
 
 build-gateway:
 	@echo "→ 构建 ANI Gateway..."
@@ -208,6 +236,13 @@ build-reconcile-worker:
 	cd services/reconcile-worker && \
 		$(GO_CACHE_ENV) CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o ../../bin/reconcile-worker .
 	@echo "✅ bin/reconcile-worker"
+
+build-cli:
+	@echo "→ 构建 ANI Core CLI..."
+	@mkdir -p bin
+	cd cli/ani && \
+		$(GO_CACHE_ENV) CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o ../../bin/ani .
+	@echo "✅ bin/ani"
 
 # ── 测试 ──────────────────────────────────────────────────────────────────────
 test: validate-architecture validate-auth-contract test-go test-python
@@ -483,6 +518,160 @@ validate-secrets-live-gate:
 	python scripts/validate_secrets_live_gate.py
 	python scripts/validate_secrets_live_gate_test.py
 	@echo "✅ M1-SECRETS-LIVE-A Secret live validation gate valid"
+
+validate-core-installer:
+	@echo "→ 校验 Sprint 7 CORE-INSTALLER-A Core installer profile..."
+	python scripts/validate_core_installer.py
+	python scripts/validate_core_installer_test.py
+	@echo "✅ Sprint 7 Core installer profile valid"
+
+validate-core-offline:
+	@echo "→ 校验 Sprint 7 CORE-OFFLINE-A Core offline package manifest..."
+	python scripts/validate_core_offline.py
+	python scripts/validate_core_offline_test.py
+	@echo "✅ Sprint 7 Core offline package manifest valid"
+
+validate-core-cli:
+	@echo "→ 校验 Sprint 7/8 Core CLI..."
+	$(GO_CACHE_ENV) go test ./cli/ani -v
+	@echo "✅ Sprint 7/8 Core CLI valid"
+
+validate-sprint7-core-regression:
+	@echo "→ 校验 Sprint 7 CORE-REGRESSION-A Core regression profile..."
+	python scripts/validate_sprint7_core_regression.py
+	python scripts/validate_sprint7_core_regression_test.py
+	@echo "✅ Sprint 7 Core regression profile valid"
+
+validate-core-release-hardening:
+	@echo "→ 校验 Sprint 8 CORE-HARDEN-A Core release hardening profile..."
+	python scripts/validate_core_release_hardening.py
+	python scripts/validate_core_release_hardening_test.py
+	@echo "✅ Sprint 8 Core release hardening profile valid"
+
+validate-core-installer-live:
+	@echo "→ 校验 Sprint 8 CORE-INSTALLER-LIVE-A Core installer live readiness profile..."
+	python scripts/validate_core_installer_live.py
+	python scripts/validate_core_installer_live_test.py
+	@echo "✅ Sprint 8 Core installer live readiness profile valid"
+
+validate-core-offline-pack:
+	@echo "→ 校验 Sprint 8 CORE-OFFLINE-PACK-A Core offline package lock..."
+	python scripts/validate_core_offline_pack.py
+	python scripts/validate_core_offline_pack_test.py
+	@echo "✅ Sprint 8 Core offline package lock valid"
+
+validate-core-doc-consistency:
+	@echo "→ 校验 Sprint 8 CORE-DOC-CONSISTENCY-A Core 文档一致性..."
+	python scripts/validate_core_doc_consistency.py
+	python scripts/validate_core_doc_consistency_test.py
+	@echo "✅ Sprint 8 Core documentation consistency valid"
+
+validate-sprint8-core-release: validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-cli validate-core-doc-consistency
+	@echo "✅ Sprint 8 Core release gates valid"
+
+validate-core-release-evidence:
+	@echo "→ 校验 Sprint 9 CORE-RELEASE-EVIDENCE-A Core release evidence manifest..."
+	python scripts/validate_core_release_evidence.py
+	python scripts/validate_core_release_evidence_test.py
+	@echo "✅ Sprint 9 Core release evidence manifest valid"
+
+validate-sprint9-core-rc:
+	@echo "→ 校验 Sprint 9 CORE-RC-GATE-A Core RC readiness profile..."
+	python scripts/validate_sprint9_core_rc.py
+	python scripts/validate_sprint9_core_rc_test.py
+	@echo "✅ Sprint 9 Core RC readiness profile valid"
+
+validate-sprint9-core-doc-consistency:
+	@echo "→ 校验 Sprint 9 CORE-RC-DOC-CONSISTENCY-A Core 文档一致性..."
+	python scripts/validate_sprint9_core_doc_consistency.py
+	python scripts/validate_sprint9_core_doc_consistency_test.py
+	@echo "✅ Sprint 9 Core documentation consistency valid"
+
+validate-sprint9-rc: validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-core-offline-pack validate-core-cli validate-sprint9-core-doc-consistency
+	@echo "✅ Sprint 9 Core RC readiness gates valid"
+
+validate-core-artifact-manifest:
+	@echo "→ 校验 Sprint 10 CORE-ARTIFACT-MANIFEST-A Core artifact manifest..."
+	python scripts/validate_core_artifact_manifest.py
+	python scripts/validate_core_artifact_manifest_test.py
+	@echo "✅ Sprint 10 Core artifact manifest valid"
+
+validate-core-version-policy:
+	@echo "→ 校验 Sprint 10 CORE-VERSION-POLICY-A Core version policy..."
+	python scripts/validate_core_version_policy.py
+	python scripts/validate_core_version_policy_test.py
+	@echo "✅ Sprint 10 Core version policy valid"
+
+validate-sprint10-final-readiness:
+	@echo "→ 校验 Sprint 10 CORE-FINAL-READINESS-A Core release-prep readiness profile..."
+	python scripts/validate_sprint10_final_readiness.py
+	python scripts/validate_sprint10_final_readiness_test.py
+	@echo "✅ Sprint 10 Core release-prep readiness profile valid"
+
+validate-sprint10-core-doc-consistency:
+	@echo "→ 校验 Sprint 10 CORE-FINAL-DOC-CONSISTENCY-A Core 文档一致性..."
+	python scripts/validate_sprint10_core_doc_consistency.py
+	python scripts/validate_sprint10_core_doc_consistency_test.py
+	@echo "✅ Sprint 10 Core documentation consistency valid"
+
+validate-sprint10-release-prep: validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-core-cli validate-sprint10-core-doc-consistency
+	@echo "✅ Sprint 10 Core release-prep gates valid"
+
+validate-sprint11-storage-disk-plan:
+	@echo "→ 校验 Sprint 11 CORE-STORAGE-DISK-RISK-A Core 存储盘风险计划..."
+	python scripts/validate_sprint11_storage_disk_plan.py
+	python scripts/validate_sprint11_storage_disk_plan_test.py
+	@echo "✅ Sprint 11 Core storage disk risk plan valid"
+
+validate-sprint11-core-real-deployment:
+	@echo "→ 校验 Sprint 11 CORE-REAL-DEPLOY-A Core 真实部署验证 profile..."
+	python scripts/validate_sprint11_core_real_deployment.py
+	python scripts/validate_sprint11_core_real_deployment_test.py
+	@echo "✅ Sprint 11 Core real deployment validation profile valid"
+
+validate-sprint11-rook-ceph-formal-deployment:
+	@echo "→ 校验 Sprint 11 CORE-ROOK-CEPH-FORMAL-DEPLOYMENT-A Rook-Ceph 正式部署代码包..."
+	python scripts/validate_sprint11_rook_ceph_formal_deployment.py
+	python scripts/validate_sprint11_rook_ceph_formal_deployment_test.py
+	python scripts/validate_yaml.py deploy/real-k8s-lab/sprint11-rook-ceph-formal-deployment.yaml
+	@echo "✅ Sprint 11 Rook-Ceph formal deployment bundle valid"
+
+validate-sprint11-rook-ceph-live-deployment-result:
+	@echo "→ 校验 Sprint 11 CORE-ROOK-CEPH-LIVE-DEPLOYMENT-A Rook-Ceph 真实部署结果..."
+	python scripts/validate_sprint11_rook_ceph_live_deployment_result.py
+	python scripts/validate_sprint11_rook_ceph_live_deployment_result_test.py
+	python scripts/validate_yaml.py deploy/real-k8s-lab/sprint11-rook-ceph-live-deployment-result.yaml
+	@echo "✅ Sprint 11 Rook-Ceph live deployment result valid"
+
+validate-sprint11-rook-ceph-vm-storage-smoke:
+	@echo "→ 校验 Sprint 11 CORE-ROOK-CEPH-VM-STORAGE-SMOKE-A KubeVirt VM RBD 存储 smoke 结果..."
+	python scripts/validate_sprint11_rook_ceph_vm_storage_smoke.py
+	python scripts/validate_sprint11_rook_ceph_vm_storage_smoke_test.py
+	python scripts/validate_yaml.py deploy/real-k8s-lab/sprint11-rook-ceph-vm-storage-smoke-result.yaml
+	@echo "✅ Sprint 11 KubeVirt VM RBD storage smoke result valid"
+
+validate-sprint11-rook-ceph-reboot-resilience:
+	@echo "→ 校验 Sprint 11 CORE-ROOK-CEPH-REBOOT-RESILIENCE-A 逐节点重启恢复结果..."
+	python scripts/validate_sprint11_rook_ceph_reboot_resilience.py
+	python scripts/validate_sprint11_rook_ceph_reboot_resilience_test.py
+	python scripts/validate_yaml.py deploy/real-k8s-lab/sprint11-rook-ceph-reboot-resilience-result.yaml
+	@echo "✅ Sprint 11 Rook-Ceph reboot resilience result valid"
+
+validate-sprint11-safe-completion:
+	@echo "→ 校验 Sprint 11 CORE-SAFE-COMPLETION-A Core 安全完成 profile..."
+	python scripts/validate_sprint11_safe_completion.py
+	python scripts/validate_sprint11_safe_completion_test.py
+	python scripts/validate_yaml.py deploy/real-k8s-lab/sprint11-core-safe-completion.yaml
+	@echo "✅ Sprint 11 Core safe completion profile valid"
+
+validate-sprint11-core-doc-consistency:
+	@echo "→ 校验 Sprint 11 CORE-REAL-DEPLOY-DOC-CONSISTENCY-A Core 文档一致性..."
+	python scripts/validate_sprint11_core_doc_consistency.py
+	python scripts/validate_sprint11_core_doc_consistency_test.py
+	@echo "✅ Sprint 11 Core real deployment documentation consistency valid"
+
+validate-sprint11-real-deployment: validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-real-k8s-profile validate-sprint11-core-doc-consistency
+	@echo "✅ Sprint 11 Core real deployment validation gates valid"
 
 validate-demo-instances:
 	@echo "→ 校验阶段性 VM/container/GPU container Demo API..."

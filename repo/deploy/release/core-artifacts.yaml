@@ -1,0 +1,26 @@
+scope: core
+version: sprint10
+target_release: v1.0.0
+actual_release: false
+artifacts:
+  - id: core-openapi
+    path: api/openapi/v1.yaml
+    sha256: 5fd1481e6e992f655967d31246115e98866fc139d1c3cd312464c54a2ff7a7da
+  - id: core-sdk-metadata
+    path: sdks/core/sdk-metadata.json
+    sha256: 8dbe5e78b3606731a11f317832063de84bf0cd8980e5f995e0c3ec3e41e213c8
+  - id: core-cli-source
+    path: cli/ani/main.go
+    sha256: 79f4815a6dd105ea8739c39c9c1ec98000be4667b2a8e8cf7a4d9ca128f63828
+  - id: core-offline-lock
+    path: deploy/offline/core-package-lock.yaml
+    sha256: ff515b7b14f27003198faa08737e20bc36eb041cd0357a84c6df442be5705dea
+  - id: core-release-evidence
+    path: deploy/release/core-release-evidence.yaml
+    sha256: bf14762e53d79c6f77b32b695ab47fd3679b4681831085414ea1e1657415b4ad
+verification:
+  - command: make validate-core-api-compatibility
+  - command: make validate-sdk-beta
+  - command: make validate-core-cli
+  - command: make validate-core-offline-pack
+  - command: make validate-core-release-evidence

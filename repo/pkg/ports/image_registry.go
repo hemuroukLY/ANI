@@ -1,6 +1,9 @@
 package ports
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type ImageRef struct {
 	Registry   string
@@ -24,8 +27,194 @@ type ImageScanStatus struct {
 	ProviderID string
 }
 
+type RegistryPermissionAction string
+
+const (
+	RegistryPermissionPull   RegistryPermissionAction = "pull"
+	RegistryPermissionPush   RegistryPermissionAction = "push"
+	RegistryPermissionDelete RegistryPermissionAction = "delete"
+	RegistryPermissionScan   RegistryPermissionAction = "scan"
+)
+
+type RegistryPermissionState string
+
+const (
+	RegistryPermissionActive    RegistryPermissionState = "active"
+	RegistryPermissionDuplicate RegistryPermissionState = "duplicate"
+)
+
+type RegistryScanState string
+
+const (
+	RegistryScanNotScanned RegistryScanState = "not_scanned"
+	RegistryScanPending    RegistryScanState = "pending"
+	RegistryScanRunning    RegistryScanState = "running"
+	RegistryScanComplete   RegistryScanState = "complete"
+	RegistryScanFailed     RegistryScanState = "failed"
+)
+
+type RegistryProjectListRequest struct {
+	TenantID string
+	Limit    int
+	Cursor   string
+}
+
+type RegistryProjectRequest struct {
+	TenantID       string
+	IdempotencyKey string
+	Name           string
+	Public         bool
+}
+
+type RegistryProject struct {
+	ID         string
+	TenantID   string
+	Name       string
+	Public     bool
+	DevProfile DevProfileInfo
+	CreatedAt  time.Time
+}
+
+type RegistryProjectListResult struct {
+	Items      []RegistryProject
+	NextCursor string
+	DevProfile DevProfileInfo
+}
+
+type RegistryRepositoryListRequest struct {
+	TenantID string
+	Project  string
+	Limit    int
+	Cursor   string
+}
+
+type RegistryRepository struct {
+	Project       string
+	Name          string
+	ArtifactCount int
+	PullCount     int
+	Permission    *RegistryPermission
+	DevProfile    DevProfileInfo
+}
+
+type RegistryRepositoryListResult struct {
+	Items      []RegistryRepository
+	NextCursor string
+	DevProfile DevProfileInfo
+}
+
+type RegistryArtifactListRequest struct {
+	TenantID   string
+	Project    string
+	Repository string
+	Limit      int
+	Cursor     string
+}
+
+type RegistryArtifact struct {
+	Project    string
+	Repository string
+	Digest     string
+	Tags       []string
+	MediaType  string
+	SizeBytes  int64
+	PushedAt   time.Time
+	ScanStatus RegistryScanResult
+	DevProfile DevProfileInfo
+}
+
+type RegistryArtifactListResult struct {
+	Items      []RegistryArtifact
+	NextCursor string
+	DevProfile DevProfileInfo
+}
+
+type RegistryPermissionRequest struct {
+	TenantID       string
+	Project        string
+	Repository     string
+	IdempotencyKey string
+	Subject        string
+	Actions        []RegistryPermissionAction
+}
+
+type RegistryPermission struct {
+	Project    string
+	Repository string
+	Subject    string
+	Actions    []RegistryPermissionAction
+	State      RegistryPermissionState
+	DevProfile DevProfileInfo
+	UpdatedAt  time.Time
+}
+
+type RegistryScanResultRequest struct {
+	TenantID string
+	Image    string
+}
+
+type RegistryScanResult struct {
+	Image      string
+	Status     RegistryScanState
+	Critical   int
+	High       int
+	Medium     int
+	Low        int
+	ReportURL  string
+	ProviderID string
+	DevProfile DevProfileInfo
+	ScannedAt  time.Time
+}
+
+type RegistryPullSecretRequest struct {
+	TenantID       string
+	Project        string
+	IdempotencyKey string
+	Name           string
+	Namespace      string
+}
+
+type RegistryPullSecret struct {
+	Project    string
+	Name       string
+	SecretRef  string
+	Registry   string
+	Username   string
+	Namespace  string
+	State      RegistryPermissionState
+	DevProfile DevProfileInfo
+	CreatedAt  time.Time
+}
+
+type RegistryProjectScanReportRequest struct {
+	TenantID string
+	Project  string
+}
+
+type RegistryProjectScanReport struct {
+	Project          string
+	Status           RegistryScanState
+	Critical         int
+	High             int
+	Medium           int
+	Low              int
+	ArtifactsTotal   int
+	ScannedArtifacts int
+	ProviderID       string
+	DevProfile       DevProfileInfo
+	ScannedAt        time.Time
+}
+
 type ImageRegistry interface {
 	EnsureProject(ctx context.Context, tenantID string) error
 	ListTags(ctx context.Context, repository string) ([]ImageTag, error)
 	GetScanStatus(ctx context.Context, ref ImageRef) (ImageScanStatus, error)
+	CreateProject(ctx context.Context, request RegistryProjectRequest) (RegistryProject, error)
+	ListProjects(ctx context.Context, request RegistryProjectListRequest) (RegistryProjectListResult, error)
+	ListRepositories(ctx context.Context, request RegistryRepositoryListRequest) (RegistryRepositoryListResult, error)
+	ListArtifacts(ctx context.Context, request RegistryArtifactListRequest) (RegistryArtifactListResult, error)
+	SetRepositoryPermission(ctx context.Context, request RegistryPermissionRequest) (RegistryPermission, error)
+	GetScanResult(ctx context.Context, request RegistryScanResultRequest) (RegistryScanResult, error)
+	CreatePullSecret(ctx context.Context, request RegistryPullSecretRequest) (RegistryPullSecret, error)
+	GetProjectScanReport(ctx context.Context, request RegistryProjectScanReportRequest) (RegistryProjectScanReport, error)
 }

@@ -1,0 +1,36 @@
+scope: core
+version: sprint9
+rc_readiness: true
+release_candidate: false
+production_release: false
+gates:
+  - id: core-api-compatibility
+    category: api-compatibility
+    command: make validate-core-api-compatibility
+  - id: architecture-boundary
+    category: architecture
+    command: make validate-architecture
+  - id: doc-entrypoints
+    category: documentation
+    command: make validate-doc-entrypoints
+  - id: sdk-beta
+    category: sdk
+    command: make validate-sdk-beta
+  - id: sdk-mock-smoke
+    category: sdk
+    command: make validate-sdk-mock-smoke
+  - id: sprint8-core-release
+    category: historical-release-gate
+    command: make validate-sprint8-core-release
+  - id: core-release-evidence
+    category: release-evidence
+    command: make validate-core-release-evidence
+  - id: core-offline-pack
+    category: offline
+    command: make validate-core-offline-pack
+  - id: core-cli-version
+    category: cli
+    command: make validate-core-cli
+  - id: sprint9-doc-consistency
+    category: documentation
+    command: make validate-sprint9-core-doc-consistency

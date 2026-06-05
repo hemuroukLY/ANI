@@ -204,7 +204,7 @@ func TestLocalInstanceServiceRejectsUnsupportedCreateKind(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Create() error = nil, want unsupported kind")
 	}
-	if !strings.Contains(err.Error(), "vm, container, and gpu_container") {
+	if !strings.Contains(err.Error(), "vm, container, gpu_container, and sandbox") {
 		t.Fatalf("error = %q, want supported kind list", err)
 	}
 }

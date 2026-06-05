@@ -17,6 +17,7 @@ type LocalInstanceService struct {
 	operations   ports.WorkloadOperationStore
 	lifecycle    ports.WorkloadInstanceLifecycleExecutor
 	identity     ports.WorkloadIdentityService
+	sandbox      ports.SandboxRuntime
 	ops          ports.WorkloadInstanceOps
 }
 
@@ -37,6 +38,12 @@ func WithOperationStore(operations ports.WorkloadOperationStore) InstanceService
 func WithWorkloadIdentityService(identity ports.WorkloadIdentityService) InstanceServiceOption {
 	return func(service *LocalInstanceService) {
 		service.identity = identity
+	}
+}
+
+func WithSandboxRuntime(sandbox ports.SandboxRuntime) InstanceServiceOption {
+	return func(service *LocalInstanceService) {
+		service.sandbox = sandbox
 	}
 }
 
@@ -65,8 +72,9 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 	}
 	if request.Spec.Kind != ports.WorkloadKindVM &&
 		request.Spec.Kind != ports.WorkloadKindContainer &&
-		request.Spec.Kind != ports.WorkloadKindGPUContainer {
-		return ports.WorkloadInstanceCreateResult{}, fmt.Errorf("%w: instance service supports vm, container, and gpu_container create", ports.ErrUnsupported)
+		request.Spec.Kind != ports.WorkloadKindGPUContainer &&
+		request.Spec.Kind != ports.WorkloadKindSandbox {
+		return ports.WorkloadInstanceCreateResult{}, fmt.Errorf("%w: instance service supports vm, container, gpu_container, and sandbox create", ports.ErrUnsupported)
 	}
 	if strings.TrimSpace(request.UserID) == "" {
 		return ports.WorkloadInstanceCreateResult{}, fmt.Errorf("%w: user id is required", ports.ErrInvalid)
@@ -108,6 +116,9 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 			}, nil
 		}
 		preRecorded = true
+	}
+	if request.Spec.Kind == ports.WorkloadKindSandbox {
+		return s.createSandbox(ctx, request, operation, preRecorded)
 	}
 	result, err := s.orchestrator.Create(ctx, request)
 	if err != nil {
@@ -190,6 +201,98 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 		UpdatedAt:    firstNonZeroTime(result.FinalStatus.UpdatedAt, request.RequestedAt),
 	}); err != nil {
 		return ports.WorkloadInstanceCreateResult{}, err
+	}
+	return result, nil
+}
+
+func (s *LocalInstanceService) createSandbox(ctx context.Context, request ports.WorkloadInstanceCreateRequest, operation ports.WorkloadOperationRecord, preRecorded bool) (ports.WorkloadInstanceCreateResult, error) {
+	if s.sandbox == nil {
+		return ports.WorkloadInstanceCreateResult{}, ports.ErrNotConfigured
+	}
+	if s.store == nil {
+		return ports.WorkloadInstanceCreateResult{}, ports.ErrNotConfigured
+	}
+	instance, err := s.sandbox.Create(ctx, ports.SandboxCreateRequest{
+		TenantID:  request.Spec.TenantID,
+		Name:      request.Spec.Name,
+		Image:     request.Spec.Image,
+		Config:    firstNonNilSandboxConfig(request.Spec.Sandbox),
+		AutoStart: request.Spec.Lifecycle.AutoStart,
+		CreatedAt: request.RequestedAt,
+	})
+	if err != nil {
+		if preRecorded {
+			_, _ = s.operations.UpdateOperation(ctx, operation.ID, ports.WorkloadOperationUpdate{
+				Status:         ports.WorkloadOperationFailed,
+				FailureReason:  "sandbox_create_failed",
+				FailureMessage: err.Error(),
+				RetryEligible:  true,
+				UpdatedAt:      firstNonZeroTime(request.RequestedAt),
+			})
+		}
+		return ports.WorkloadInstanceCreateResult{}, err
+	}
+	ref := ports.WorkloadRef{
+		TenantID:   instance.TenantID,
+		InstanceID: instance.InstanceID,
+		Kind:       ports.WorkloadKindSandbox,
+		ProviderID: instance.Provider + "/" + instance.InstanceID,
+	}
+	status := ports.WorkloadStatus{
+		Ref:       ref,
+		State:     workloadStateFromSandboxState(instance.State),
+		Reason:    string(instance.State),
+		UpdatedAt: instance.UpdatedAt,
+	}
+	record := ports.WorkloadInstanceRecord{
+		TenantID:     instance.TenantID,
+		InstanceID:   instance.InstanceID,
+		Name:         instance.Name,
+		Kind:         ports.WorkloadKindSandbox,
+		Provider:     instance.Provider,
+		Lifecycle:    request.Spec.Lifecycle,
+		Sandbox:      &instance,
+		ResourceRefs: []string{"sandbox/local/" + instance.InstanceID},
+		Status:       status,
+		CreatedAt:    instance.CreatedAt,
+		UpdatedAt:    instance.UpdatedAt,
+	}
+	if preRecorded {
+		record.OperationID = operation.ID
+	}
+	if err := s.store.UpsertStatus(ctx, record); err != nil {
+		return ports.WorkloadInstanceCreateResult{}, err
+	}
+
+	result := ports.WorkloadInstanceCreateResult{
+		Ref:         ref,
+		OperationID: record.OperationID,
+		AuditID:     "sandbox_local_" + instance.InstanceID,
+		Apply: ports.WorkloadProviderApplyResult{
+			Applied:      true,
+			Reason:       "local sandbox profile created",
+			ResourceRefs: record.ResourceRefs,
+			AppliedAt:    instance.UpdatedAt,
+		},
+		FinalStatus:  status,
+		Orchestrated: true,
+	}
+	if preRecorded {
+		if _, err := s.operations.AddOperationStep(ctx, operation.ID, ports.WorkloadOperationStep{
+			StepName: "sandbox_runtime_create",
+			Status:   ports.WorkloadOperationStepSucceeded,
+			Message:  "local sandbox runtime accepted Kata profile intent",
+		}); err != nil {
+			return ports.WorkloadInstanceCreateResult{}, err
+		}
+		if _, err := s.operations.UpdateOperation(ctx, operation.ID, ports.WorkloadOperationUpdate{
+			InstanceID:   instance.InstanceID,
+			Status:       ports.WorkloadOperationSucceeded,
+			ProviderRefs: record.ResourceRefs,
+			UpdatedAt:    instance.UpdatedAt,
+		}); err != nil {
+			return ports.WorkloadInstanceCreateResult{}, err
+		}
 	}
 	return result, nil
 }
@@ -594,7 +697,7 @@ func applyStepStatus(applied bool) ports.WorkloadOperationStepStatus {
 }
 
 func workloadSpecSummary(spec ports.WorkloadSpec) map[string]any {
-	return map[string]any{
+	summary := map[string]any{
 		"tenant_id":              spec.TenantID,
 		"name":                   spec.Name,
 		"kind":                   string(spec.Kind),
@@ -602,7 +705,32 @@ func workloadSpecSummary(spec ports.WorkloadSpec) map[string]any {
 		"cpu":                    spec.Resources.CPU,
 		"memory":                 spec.Resources.Memory,
 		"gpu_count":              spec.Resources.GPU.RequiredCount,
+		"runtime_class":          spec.RuntimeClassName,
 		"termination_protection": spec.Lifecycle.TerminationProtection,
+	}
+	if spec.Sandbox != nil {
+		summary["sandbox_runtime_class"] = spec.Sandbox.RuntimeClass
+		summary["sandbox_session_timeout"] = spec.Sandbox.SessionTimeout.String()
+		summary["sandbox_network_egress_policy"] = string(spec.Sandbox.NetworkEgressPolicy)
+	}
+	return summary
+}
+
+func firstNonNilSandboxConfig(config *ports.SandboxConfig) ports.SandboxConfig {
+	if config == nil {
+		return ports.SandboxConfig{}
+	}
+	return *config
+}
+
+func workloadStateFromSandboxState(state ports.SandboxState) ports.WorkloadState {
+	switch state {
+	case ports.SandboxStateRunning:
+		return ports.WorkloadStateRunning
+	case ports.SandboxStateExpired, ports.SandboxStateStopped:
+		return ports.WorkloadStateStopped
+	default:
+		return ports.WorkloadStatePending
 	}
 }
 

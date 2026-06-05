@@ -1,0 +1,67 @@
+scope: core
+version: sprint11
+phase: core-real-deployment-validation
+real_deployment_validation_started: true
+real_deployment_validation_complete: true
+formal_deployment_code_complete: true
+mutation_allowed: false
+destructive_operations_allowed: false
+real_server_mutation_performed: false
+target_release: v1.0.0
+actual_release: false
+release_candidate: false
+production_release: false
+cluster_observed:
+  date: "2026-06-04"
+  kubernetes_version: v1.36.1
+  nodes_ready: 3
+  kubevirt_phase: Deployed
+  storageclass_count: 0
+  pending_pvc_count: 2
+  rook_ceph_namespace_present: false
+validation_boundaries:
+  - sprint11_may_run_read_only_inventory
+  - sprint11_may_validate_existing_core_contracts
+  - sprint11_must_not_partition_format_mount_or_edit_fstab
+  - sprint11_must_not_install_rook_ceph_without_disk_plan_approval
+  - sprint11_must_not_claim_production_ready_or_actual_release
+  - sprint11_safe_completion_requires_no_server_mutation
+gates:
+  - id: sprint10-release-prep
+    category: historical-core-release-prep
+    command: make validate-sprint10-release-prep
+  - id: real-k8s-profile
+    category: historical-real-lab-profile
+    command: make validate-real-k8s-profile
+  - id: k8s-read-only-inventory
+    category: real-environment-read-only
+    command: ssh ANI1 kubectl get nodes -o wide
+  - id: kubevirt-vm-readiness
+    category: real-environment-read-only
+    command: ssh ANI1 kubectl get vm,vmi -A
+  - id: storageclass-readiness
+    category: real-environment-read-only
+    command: ssh ANI1 kubectl get storageclass,pv,pvc -A
+  - id: storage-disk-plan
+    category: storage-risk
+    command: make validate-sprint11-storage-disk-plan
+  - id: rook-ceph-formal-deployment
+    category: approval-gated-formal-deployment-code
+    command: make validate-sprint11-rook-ceph-formal-deployment
+  - id: sprint11-doc-consistency
+    category: documentation
+    command: make validate-sprint11-core-doc-consistency
+  - id: sprint11-safe-completion
+    category: safety
+    command: make validate-sprint11-safe-completion
+  - id: yaml-syntax
+    category: syntax
+    command: python scripts/validate_yaml.py deploy/real-k8s-lab/sprint11-core-real-deployment.yaml deploy/real-k8s-lab/sprint11-storage-disk-plan.yaml
+next_manual_approval_required_for:
+  - wipefs
+  - sgdisk
+  - mkfs
+  - mount
+  - fstab_update
+  - rook_ceph_cluster_install
+  - rook_ceph_osd_claim

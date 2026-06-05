@@ -1,0 +1,21 @@
+scope: core
+profile: SPRINT7-CORE-REGRESSION-A
+targets:
+  - id: core-installer-contract
+    command: make validate-core-installer
+    category: sprint7-core
+  - id: core-offline-contract
+    command: make validate-core-offline
+    category: sprint7-core
+  - id: core-cli-contract
+    command: make validate-core-cli
+    category: sprint7-core
+  - id: real-k8s-profile-contract
+    command: make validate-real-k8s-profile
+    category: sprint5-regression
+  - id: sdk-mock-smoke
+    command: make validate-sdk-mock-smoke
+    category: sprint4-regression
+boundaries:
+  adds_real_lab_guard: false
+  services_scope: excluded
