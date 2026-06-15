@@ -53,6 +53,8 @@
 
 **闭环的关键**：Phase 3 输出的两份任务清单（TASK 块）是机器可读格式——每个 TASK 包含"需改哪些文件 + handler 逻辑说明 + 验收命令"，可以直接作为 AI coding agent 的输入，不需要人再次翻译。
 
+**任务清单位置规则**：Phase 3 产生的 `repo/docs/CORE-TEAM-TASKS.md`、`repo/docs/SERVICES-TEAM-TASKS.md` 和 `repo/docs/TASK-DEPENDENCY-MAP.md` 是当前协作和执行入口；`repo/development-records/` 只记录完成后的历史批次、验证证据和追溯信息。不要把当前任务清单同时维护在两个目录，避免人类和 AI 读取到冲突状态。
+
 ---
 
 ## 架构约束（所有 Phase 必须遵守）
@@ -499,15 +501,25 @@ TASK 内容：
 
 ## 文档产出物位置约定
 
+### `repo/docs/` 与 `repo/development-records/` 边界
+
+`repo/docs/` 保存当前仍在使用的协作执行文档：任务清单、依赖图、GAP 报告和生成后的 API 静态文档。AI coding agent 和人工开发者领取任务时，以这里的 `CORE-TEAM-TASKS.md`、`SERVICES-TEAM-TASKS.md` 和 `TASK-DEPENDENCY-MAP.md` 为准。
+
+`repo/development-records/` 保存已经完成的历史批次归档：每个批次做了什么、改了哪些关键文件、运行了哪些验证命令、留下了哪些证据。它不维护当前待办状态，也不作为团队任务清单入口。
+
+如果历史上存在 `repo/development-records/CORE-TEAM-TASKS.md`、`repo/development-records/SERVICES-TEAM-TASKS.md` 或 `repo/development-records/TASK-DEPENDENCY-MAP.md`，它们只能视为旧快照或迁移前参考。新的 Phase 3 输出必须写入 `repo/docs/`；完成单个 TASK 后，再按批次记录规则把结果归档到 `repo/development-records/`，不得反向在归档目录继续维护待办清单。
+
 | 产出物 | 存放位置 | 生命周期 |
 |---|---|---|
-| GAP REPORT | `repo/docs/gap-report-{YYYY-MM-DD}.md` | 每次对齐一份，历史保留 |
+| GAP REPORT | `repo/docs/gap-report-{YYYY-MM-DD}.md` | 当前对齐分析输入；新一轮对齐可新增一份 |
 | 对齐后的 HTML | `repo/services/ani-services.html`（原地修改） | 持续维护 |
 | 扩充后的 Core YAML | `repo/api/openapi/v1.yaml`（原地修改） | 唯一真实来源 |
 | 扩充后的 Services YAML | `repo/api/openapi/services/v1.yaml`（原地修改） | 唯一真实来源 |
-| Core 团队任务清单 | `repo/docs/CORE-TEAM-TASKS.md` | 持续追踪，完成打✅ |
-| Services 团队任务清单 | `repo/docs/SERVICES-TEAM-TASKS.md` | 持续追踪，完成打✅ |
-| 依赖关系图 | `repo/docs/TASK-DEPENDENCY-MAP.md` | 每次 Phase 3 后更新 |
+| Core 团队任务清单 | `repo/docs/CORE-TEAM-TASKS.md` | 当前执行入口，持续追踪，完成打✅ |
+| Services 团队任务清单 | `repo/docs/SERVICES-TEAM-TASKS.md` | 当前执行入口，持续追踪，完成打✅ |
+| 依赖关系图 | `repo/docs/TASK-DEPENDENCY-MAP.md` | 当前跨团队依赖入口，每次 Phase 3 后更新 |
+| 批次完成记录 | `repo/development-records/{batch-id}.md` | TASK 完成后的历史归档，不维护当前待办 |
+| 批次归档索引 | `repo/development-records/README.md` | 已完成批次索引，不作为当前任务清单 |
 
 ---
 

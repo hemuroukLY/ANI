@@ -88,10 +88,10 @@
 /repo/frontends/                                                   @viccao-yue @e92nf872rp
 /repo/operators/inference-operator/                                @viccao-yue @e92nf872rp
 
-# ── 团队任务与开发记录 ─────────────────────────────────────────────────────
+# ── 当前团队任务入口 ───────────────────────────────────────────────────────
 /repo/docs/CORE-TEAM-TASKS.md                                      @e92nf872rp
 /repo/docs/SERVICES-TEAM-TASKS.md                                  @e92nf872rp @viccao-yue
 /repo/docs/TASK-DEPENDENCY-MAP.md                                  @e92nf872rp @viccao-yue
-/repo/development-records/CORE-TEAM-TASKS.md                       @e92nf872rp
-/repo/development-records/SERVICES-TEAM-TASKS.md                   @e92nf872rp @viccao-yue
+
+# ── 历史归档（Services 相关记录双团队可见）──────────────────────────────────
 /repo/development-records/SERVICES-*.md                            @e92nf872rp @viccao-yue

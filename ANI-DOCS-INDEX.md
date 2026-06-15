@@ -1,6 +1,6 @@
 # KuberCloud ANI · 文档导航与一致性矩阵
 
-> 最后更新：2026-06-05
+> 最后更新：2026-06-15
 > 目的：让人类开发者和 AI 工具在 5 分钟内判断当前开发阶段、文档职责、下一步入口和闭环规则。
 
 ---
@@ -32,8 +32,10 @@ Sprint 6-10 完成 contract/local/release-prep scaffold（installer、offline、
 | 工程约定和 AI 工作规则 | `CLAUDE.md` | AI/人类开发前必须先读；只维护稳定规则和入口，不维护批次流水账 |
 | API 契约 | `repo/api/openapi/v1.yaml` | Core OpenAPI REST API 与 Core/Services 跨层控制面契约的唯一真实来源 |
 | Services API 契约 | `repo/api/openapi/services/v1.yaml` | Services 层业务 API 契约 |
+| 当前团队任务清单 | `repo/docs/CORE-TEAM-TASKS.md`、`repo/docs/SERVICES-TEAM-TASKS.md` | Core/Services 当前待办、执行状态和 AI coding 输入；只维护当前态 |
+| 跨团队依赖图 | `repo/docs/TASK-DEPENDENCY-MAP.md` | 当前 Core/Services 任务依赖、并行开发建议和关键路径 |
 | 已完成批次 | `repo/development-records/README.md` | 历史完成记录索引，不作为当前任务清单 |
-| 单批次细节 | `repo/development-records/*.md` | 追溯实现、验证和关键文件时再读 |
+| 单批次细节 | `repo/development-records/*.md` | 已完成批次的历史归档、验证证据和实现追溯；不承载当前任务状态 |
 | guard 微批次系列详情 | `repo/development-records/guard-series/{series}-guard-index.md` | guard 系列完整 ID 列表和批次链接；新 guard 微批次只更新此文件，不更新主文档 |
 
 ---
@@ -78,9 +80,11 @@ Sprint 6-10 完成 contract/local/release-prep scaffold（installer、offline、
 
 1. 当前阶段变更时，必须同步 `ANI-DOCS-INDEX.md`、`ANI-06-开发计划.md` 和 `repo/CURRENT-SPRINT.md`。
 2. 批次完成时，必须新增或更新 `repo/development-records/{批次名}.md`，并更新 `repo/development-records/README.md`。
-3. 历史归档文档允许保留当时日期和上下文，不反向改写为当前态。
-4. 若 `CLAUDE.md` 与其它文档冲突，以 `CLAUDE.md` 的工程规则为准；若是进度状态冲突，以 `ANI-06-开发计划.md` Section 零和 `repo/CURRENT-SPRINT.md` 为准。
-5. `CLAUDE.md` 只保留稳定强制规则、读取顺序、架构边界、提交门禁和 Karpathy 五条开发原则；禁止写入单批次完成清单、API path 长列表、文件级变更清单和每日开发流水账。
-6. 动态进度只维护在 `repo/CURRENT-SPRINT.md`、`ANI-06-开发计划.md` Section 零和 `repo/development-records/*.md`；入口文档只保留当前状态、下一步和链接。
-7. 更换 AI 模型或工具时，必须先重新读取本文件、`CLAUDE.md` 和 `repo/CURRENT-SPRINT.md`，不得依赖上一个会话的记忆。
-8. 修改文档入口后必须运行 `make validate-doc-entrypoints`。
+3. `repo/docs/CORE-TEAM-TASKS.md`、`repo/docs/SERVICES-TEAM-TASKS.md` 和 `repo/docs/TASK-DEPENDENCY-MAP.md` 是当前协作执行入口；同名或近似任务清单不得长期双写到 `repo/development-records/`。
+4. `repo/development-records/` 只做历史归档：任务完成后记录完成项、验证命令、证据和关键文件；不要在其中维护当前待办状态。
+5. 历史归档文档允许保留当时日期和上下文，不反向改写为当前态。
+6. 若 `CLAUDE.md` 与其它文档冲突，以 `CLAUDE.md` 的工程规则为准；若是进度状态冲突，以 `ANI-06-开发计划.md` Section 零和 `repo/CURRENT-SPRINT.md` 为准。
+7. `CLAUDE.md` 只保留稳定强制规则、读取顺序、架构边界、提交门禁和 Karpathy 五条开发原则；禁止写入单批次完成清单、API path 长列表、文件级变更清单和每日开发流水账。
+8. Sprint 状态、完成归档和验证证据维护在 `repo/CURRENT-SPRINT.md`、`ANI-06-开发计划.md` Section 零和 `repo/development-records/*.md`；当前团队任务清单只维护在 `repo/docs/`。
+9. 更换 AI 模型或工具时，必须先重新读取本文件、`CLAUDE.md` 和 `repo/CURRENT-SPRINT.md`，不得依赖上一个会话的记忆。
+10. 修改文档入口后必须运行 `make validate-doc-entrypoints`。
