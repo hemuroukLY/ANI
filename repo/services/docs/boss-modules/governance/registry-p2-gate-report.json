@@ -1,0 +1,310 @@
+{
+  "summary": {
+    "PASS": 50,
+    "WARN": 0,
+    "FAIL": 0
+  },
+  "passed": true,
+  "findings": [
+    {
+      "level": "PASS",
+      "check": "schema_registry_project",
+      "module": "global",
+      "detail": "RegistryProject 无 quota（字段: ['created_at', 'dev_profile', 'id', 'name', 'public', 'tenant_id']…）"
+    },
+    {
+      "level": "PASS",
+      "check": "schema_scan_status",
+      "module": "global",
+      "detail": "五态 enum 一致"
+    },
+    {
+      "level": "PASS",
+      "check": "schema_async_task",
+      "module": "global",
+      "detail": "AsyncTask 用 completed"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_no_gc",
+      "module": "global",
+      "detail": "v1.yaml 无 /registry/gc* path"
+    },
+    {
+      "level": "PASS",
+      "check": "status_board",
+      "module": "governance",
+      "detail": "镜像仓库 / 项目配额 满配"
+    },
+    {
+      "level": "PASS",
+      "check": "status_board",
+      "module": "governance",
+      "detail": "镜像仓库 / 漏洞扫描 满配"
+    },
+    {
+      "level": "PASS",
+      "check": "status_board",
+      "module": "governance",
+      "detail": "镜像仓库 / 垃圾回收 满配"
+    },
+    {
+      "level": "PASS",
+      "check": "full_depth_sections",
+      "module": "registry-project-quota",
+      "detail": "22 章齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "error_examples",
+      "module": "registry-project-quota",
+      "detail": "400+ 与 403 示例齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "sync_checkbox",
+      "module": "registry-project-quota",
+      "detail": "回填验收已勾选"
+    },
+    {
+      "level": "PASS",
+      "check": "prd_section10",
+      "module": "registry-project-quota",
+      "detail": "PRD §10 已同步"
+    },
+    {
+      "level": "PASS",
+      "check": "html_page",
+      "module": "registry-project-quota",
+      "detail": "boss.registry.quota 摘要块合格"
+    },
+    {
+      "level": "PASS",
+      "check": "expected_yaml_op",
+      "module": "registry-project-quota",
+      "detail": "GET /api/v1/registry/projects · listRegistryProjects · scope:registry:read"
+    },
+    {
+      "level": "PASS",
+      "check": "expected_yaml_op",
+      "module": "registry-project-quota",
+      "detail": "POST /api/v1/registry/projects · createRegistryProject · scope:registry:write"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_yaml_opid",
+      "module": "registry-project-quota",
+      "detail": "GET /api/v1/registry/projects → listRegistryProjects"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_yaml_opid",
+      "module": "registry-project-quota",
+      "detail": "POST /api/v1/registry/projects → createRegistryProject"
+    },
+    {
+      "level": "PASS",
+      "check": "spec_yaml_opid",
+      "module": "registry-project-quota",
+      "detail": "GET /api/v1/registry/projects → listRegistryProjects"
+    },
+    {
+      "level": "PASS",
+      "check": "spec_yaml_opid",
+      "module": "registry-project-quota",
+      "detail": "POST /api/v1/registry/projects → createRegistryProject"
+    },
+    {
+      "level": "PASS",
+      "check": "full_depth_sections",
+      "module": "registry-vulnerability-scan",
+      "detail": "22 章齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "error_examples",
+      "module": "registry-vulnerability-scan",
+      "detail": "400+ 与 403 示例齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "sync_checkbox",
+      "module": "registry-vulnerability-scan",
+      "detail": "回填验收已勾选"
+    },
+    {
+      "level": "PASS",
+      "check": "prd_section10",
+      "module": "registry-vulnerability-scan",
+      "detail": "PRD §10 已同步"
+    },
+    {
+      "level": "PASS",
+      "check": "html_page",
+      "module": "registry-vulnerability-scan",
+      "detail": "boss.registry.vuln 摘要块合格"
+    },
+    {
+      "level": "PASS",
+      "check": "expected_yaml_op",
+      "module": "registry-vulnerability-scan",
+      "detail": "GET /api/v1/registry/projects/{project}/scan-report · getRegistryProjectScanReport · scope:registry:read"
+    },
+    {
+      "level": "PASS",
+      "check": "expected_yaml_op",
+      "module": "registry-vulnerability-scan",
+      "detail": "GET /api/v1/registry/images/scan-result · getRegistryImageScanResult · scope:registry:read"
+    },
+    {
+      "level": "PASS",
+      "check": "expected_yaml_op",
+      "module": "registry-vulnerability-scan",
+      "detail": "GET /api/v1/registry/projects/{project}/repositories/{repository}/artifacts · listRegistryArtifacts · scope:registry:read"
+    },
+    {
+      "level": "PASS",
+      "check": "expected_yaml_op",
+      "module": "registry-vulnerability-scan",
+      "detail": "POST /api/v1/registry/projects/{project}/repositories/{repository}/permissions · setRegistryRepositoryPermission · scope:registry:write"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_yaml_opid",
+      "module": "registry-vulnerability-scan",
+      "detail": "GET /api/v1/registry/projects/{project}/scan-report → getRegistryProjectScanReport"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_yaml_opid",
+      "module": "registry-vulnerability-scan",
+      "detail": "GET /api/v1/registry/images/scan-result → getRegistryImageScanResult"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_yaml_opid",
+      "module": "registry-vulnerability-scan",
+      "detail": "GET /api/v1/registry/projects/{project}/repositories/{repository}/artifacts → listRegistryArtifacts"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_yaml_opid",
+      "module": "registry-vulnerability-scan",
+      "detail": "POST /api/v1/registry/projects/{project}/repositories/{repository}/permissions → setRegistryRepositoryPermission"
+    },
+    {
+      "level": "PASS",
+      "check": "spec_yaml_opid",
+      "module": "registry-vulnerability-scan",
+      "detail": "GET /api/v1/registry/projects/{project}/scan-report → getRegistryProjectScanReport"
+    },
+    {
+      "level": "PASS",
+      "check": "spec_yaml_opid",
+      "module": "registry-vulnerability-scan",
+      "detail": "GET /api/v1/registry/images/scan-result → getRegistryImageScanResult"
+    },
+    {
+      "level": "PASS",
+      "check": "spec_yaml_opid",
+      "module": "registry-vulnerability-scan",
+      "detail": "GET /api/v1/registry/projects/{project}/repositories/{repository}/artifacts → listRegistryArtifacts"
+    },
+    {
+      "level": "PASS",
+      "check": "vuln_field_names",
+      "module": "registry-vulnerability-scan",
+      "detail": "项目级 status 字段名正确"
+    },
+    {
+      "level": "PASS",
+      "check": "full_depth_sections",
+      "module": "registry-garbage-collection",
+      "detail": "22 章齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "error_examples",
+      "module": "registry-garbage-collection",
+      "detail": "400+ 与 403 示例齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "sync_checkbox",
+      "module": "registry-garbage-collection",
+      "detail": "回填验收已勾选"
+    },
+    {
+      "level": "PASS",
+      "check": "prd_section10",
+      "module": "registry-garbage-collection",
+      "detail": "PRD §10 已同步"
+    },
+    {
+      "level": "PASS",
+      "check": "html_page",
+      "module": "registry-garbage-collection",
+      "detail": "boss.registry.gc 摘要块合格"
+    },
+    {
+      "level": "PASS",
+      "check": "expected_yaml_op",
+      "module": "registry-garbage-collection",
+      "detail": "GET /api/v1/registry/projects · listRegistryProjects · scope:registry:read"
+    },
+    {
+      "level": "PASS",
+      "check": "expected_yaml_op",
+      "module": "registry-garbage-collection",
+      "detail": "GET /api/v1/registry/projects/{project}/repositories · listRegistryRepositories · scope:registry:read"
+    },
+    {
+      "level": "PASS",
+      "check": "expected_yaml_op",
+      "module": "registry-garbage-collection",
+      "detail": "GET /api/v1/registry/projects/{project}/repositories/{repository}/artifacts · listRegistryArtifacts · scope:registry:read"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_yaml_opid",
+      "module": "registry-garbage-collection",
+      "detail": "GET /api/v1/registry/projects → listRegistryProjects"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_yaml_opid",
+      "module": "registry-garbage-collection",
+      "detail": "GET /api/v1/registry/projects/{project}/repositories → listRegistryRepositories"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_yaml_opid",
+      "module": "registry-garbage-collection",
+      "detail": "GET /api/v1/registry/projects/{project}/repositories/{repository}/artifacts → listRegistryArtifacts"
+    },
+    {
+      "level": "PASS",
+      "check": "spec_yaml_opid",
+      "module": "registry-garbage-collection",
+      "detail": "GET /api/v1/registry/projects → listRegistryProjects"
+    },
+    {
+      "level": "PASS",
+      "check": "spec_yaml_opid",
+      "module": "registry-garbage-collection",
+      "detail": "GET /api/v1/registry/projects/{project}/repositories → listRegistryRepositories"
+    },
+    {
+      "level": "PASS",
+      "check": "spec_yaml_opid",
+      "module": "registry-garbage-collection",
+      "detail": "GET /api/v1/registry/projects/{project}/repositories/{repository}/artifacts → listRegistryArtifacts"
+    },
+    {
+      "level": "PASS",
+      "check": "tasks_path",
+      "module": "registry-garbage-collection",
+      "detail": "tasks/{task_id} 无 operationId（与详文一致）"
+    }
+  ]
+}

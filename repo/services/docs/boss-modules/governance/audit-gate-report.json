@@ -1,0 +1,215 @@
+{
+  "passed": true,
+  "findings": [
+    {
+      "level": "PASS",
+      "check": "yaml_no_audit",
+      "module": "global",
+      "detail": "v1.yaml paths 无 /audit*"
+    },
+    {
+      "level": "PASS",
+      "check": "async_task",
+      "module": "global",
+      "detail": "AsyncTask 用 completed"
+    },
+    {
+      "level": "PASS",
+      "check": "sections",
+      "module": "platform-audit-log",
+      "detail": "章节齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "errors",
+      "module": "platform-audit-log",
+      "detail": "400+403 齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "prd",
+      "module": "platform-audit-log",
+      "detail": "§10 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "html",
+      "module": "platform-audit-log",
+      "detail": "HTML OK"
+    },
+    {
+      "level": "PASS",
+      "check": "sync",
+      "module": "platform-audit-log",
+      "detail": "回填已勾选"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "platform-audit-log",
+      "detail": "含 无"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "platform-audit-log",
+      "detail": "含 /audit*"
+    },
+    {
+      "level": "PASS",
+      "check": "sections",
+      "module": "platform-apikey-audit",
+      "detail": "章节齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "errors",
+      "module": "platform-apikey-audit",
+      "detail": "400+403 齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "prd",
+      "module": "platform-apikey-audit",
+      "detail": "§10 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "html",
+      "module": "platform-apikey-audit",
+      "detail": "HTML OK"
+    },
+    {
+      "level": "PASS",
+      "check": "sync",
+      "module": "platform-apikey-audit",
+      "detail": "回填已勾选"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "platform-apikey-audit",
+      "detail": "含 call_count"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "platform-apikey-audit",
+      "detail": "含 待 YAML"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_op",
+      "module": "platform-apikey-audit",
+      "detail": "GET /api/v1/auth/api-keys → listAPIKeys"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_op",
+      "module": "platform-apikey-audit",
+      "detail": "POST /api/v1/auth/api-keys → createAPIKey"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_op",
+      "module": "platform-apikey-audit",
+      "detail": "DELETE /api/v1/auth/api-keys/{key_id} → revokeAPIKey"
+    },
+    {
+      "level": "PASS",
+      "check": "sections",
+      "module": "platform-inference-audit",
+      "detail": "章节齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "errors",
+      "module": "platform-inference-audit",
+      "detail": "400+403 齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "prd",
+      "module": "platform-inference-audit",
+      "detail": "§10 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "html",
+      "module": "platform-inference-audit",
+      "detail": "HTML OK"
+    },
+    {
+      "level": "PASS",
+      "check": "sync",
+      "module": "platform-inference-audit",
+      "detail": "回填已勾选"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "platform-inference-audit",
+      "detail": "含 prompt"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "platform-inference-audit",
+      "detail": "含 禁止"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_op",
+      "module": "platform-inference-audit",
+      "detail": "POST /api/v1/metering/token-usage → reportTokenUsage"
+    },
+    {
+      "level": "PASS",
+      "check": "sections",
+      "module": "compliance-export",
+      "detail": "章节齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "errors",
+      "module": "compliance-export",
+      "detail": "400+403 齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "prd",
+      "module": "compliance-export",
+      "detail": "§10 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "html",
+      "module": "compliance-export",
+      "detail": "HTML OK"
+    },
+    {
+      "level": "PASS",
+      "check": "sync",
+      "module": "compliance-export",
+      "detail": "回填已勾选"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "compliance-export",
+      "detail": "含 completed"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "compliance-export",
+      "detail": "含 succeeded"
+    },
+    {
+      "level": "PASS",
+      "check": "tasks_path",
+      "module": "compliance-export",
+      "detail": "tasks/{task_id} 已引用"
+    }
+  ]
+}

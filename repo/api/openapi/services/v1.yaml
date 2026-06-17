@@ -45,6 +45,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    PreconditionFailed:
+      description: 前置条件不满足（code=PRECONDITION_FAILED）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   schemas:
     ErrorResponse:
@@ -408,6 +413,184 @@ components:
         events: { type: array, items: { type: string }, minItems: 1 }
         secret: { type: string }
 
+    # ─ Phase 2 扩展 Schema ──────────────────────────────────────────────────
+    InferenceServiceLogEntry:
+      type: object
+      required: [timestamp, level, message]
+      properties:
+        timestamp:  { type: string, format: date-time }
+        level:      { type: string, enum: [debug, info, warn, error] }
+        message:    { type: string }
+        container:  { type: string, nullable: true }
+        stream:     { type: string, enum: [stdout, stderr], nullable: true }
+
+    InferenceServiceLogListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/InferenceServiceLogEntry' } }
+        next_cursor: { type: string, nullable: true }
+
+    InferenceTestRequest:
+      type: object
+      required: [idempotency_key, input]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        input:           { type: object, additionalProperties: true }
+        timeout_seconds: { type: integer, minimum: 1, maximum: 300, default: 30 }
+
+    InferenceTestResponse:
+      type: object
+      required: [output, latency_ms, status]
+      properties:
+        output:     { type: object, additionalProperties: true }
+        latency_ms: { type: integer }
+        model_id:   { type: string, nullable: true }
+        status:     { type: string, enum: [success, timeout, error] }
+
+    InferenceServicePolicies:
+      type: object
+      properties:
+        rate_limit_rpm:     { type: integer, nullable: true }
+        max_concurrency:    { type: integer, nullable: true }
+        allowed_tenant_ids: { type: array, items: { type: string }, nullable: true }
+        auth_mode:          { type: string, enum: [api_key, jwt, none], nullable: true }
+
+    UpdateInferenceServicePoliciesRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key:    { type: string, format: uuid }
+        rate_limit_rpm:     { type: integer, minimum: 1, nullable: true }
+        max_concurrency:    { type: integer, minimum: 1, nullable: true }
+        allowed_tenant_ids: { type: array, items: { type: string } }
+        auth_mode:          { type: string, enum: [api_key, jwt, none] }
+
+    KBCitation:
+      type: object
+      required: [id, kb_id, doc_id, file_name, content, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        kb_id:      { type: string, format: uuid }
+        doc_id:     { type: string, format: uuid }
+        file_name:  { type: string }
+        page:       { type: integer, nullable: true }
+        content:    { type: string }
+        score:      { type: number, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    KBCitationListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/KBCitation' } }
+        next_cursor: { type: string, nullable: true }
+
+    KBSession:
+      type: object
+      required: [id, kb_id, created_at]
+      properties:
+        id:             { type: string, format: uuid }
+        kb_id:          { type: string, format: uuid }
+        message_count:  { type: integer }
+        last_query:     { type: string, nullable: true }
+        created_at:     { type: string, format: date-time }
+        last_active_at: { type: string, format: date-time, nullable: true }
+
+    KBSessionListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/KBSession' } }
+        next_cursor: { type: string, nullable: true }
+
+    UpdateKBPermissionsRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key:  { type: string, format: uuid }
+        public_read:      { type: boolean }
+        allowed_user_ids: { type: array, items: { type: string } }
+
+    UpdateTenantRoleRequest:
+      type: object
+      required: [idempotency_key, permissions]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        name:            { type: string }
+        description:     { type: string, nullable: true }
+        permissions:     { type: array, items: { type: string }, minItems: 1 }
+
+    WebhookDelivery:
+      type: object
+      required: [id, webhook_id, event_type, status, attempt_count, created_at]
+      properties:
+        id:            { type: string, format: uuid }
+        webhook_id:    { type: string, format: uuid }
+        event_type:    { type: string }
+        payload:       { type: object, additionalProperties: true, nullable: true }
+        status:        { type: string, enum: [pending, delivered, failed, retrying] }
+        http_status:   { type: integer, nullable: true }
+        attempt_count: { type: integer }
+        created_at:    { type: string, format: date-time }
+        delivered_at:  { type: string, format: date-time, nullable: true }
+
+    WebhookDeliveryListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/WebhookDelivery' } }
+        next_cursor: { type: string, nullable: true }
+
+    Integration:
+      type: object
+      required: [id, type, name, status, created_at]
+      properties:
+        id:          { type: string, format: uuid }
+        type:        { type: string, enum: [dingtalk, wechat_work, lark, slack, email, generic_webhook] }
+        name:        { type: string }
+        status:      { type: string, enum: [active, disabled] }
+        webhook_url: { type: string, format: uri, nullable: true }
+        created_at:  { type: string, format: date-time }
+
+    IntegrationListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/Integration' } }
+        next_cursor: { type: string, nullable: true }
+
+    CreateIntegrationRequest:
+      type: object
+      required: [idempotency_key, type, name]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        type:        { type: string, enum: [dingtalk, wechat_work, lark, slack, email, generic_webhook] }
+        name:        { type: string }
+        webhook_url: { type: string, format: uri }
+        config:      { type: object, additionalProperties: true }
+
+    IntegrationBot:
+      type: object
+      required: [id, integration_id, name, app_id, status, created_at]
+      properties:
+        id:             { type: string, format: uuid }
+        integration_id: { type: string, format: uuid }
+        name:           { type: string }
+        app_id:         { type: string }
+        status:         { type: string, enum: [active, disabled] }
+        created_at:     { type: string, format: date-time }
+
+    CreateIntegrationBotRequest:
+      type: object
+      required: [idempotency_key, integration_id, name, app_id, app_secret]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        integration_id:  { type: string, format: uuid }
+        name:            { type: string }
+        app_id:          { type: string }
+        app_secret:      { type: string }
+
 paths:
   /models:
     get:
@@ -600,7 +783,79 @@ paths:
       parameters:
         - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
-        "202": { description: 停止任务已提交 }
+        "202":
+          description: 停止任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /inference-services/{service_id}/logs:
+    get:
+      operationId: getInferenceServiceLogs
+      summary: 获取推理服务日志
+      tags: [InferenceServices]
+      parameters:
+        - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: level, in: query, schema: { type: string, enum: [debug, info, warn, error] } }
+      responses:
+        "200":
+          description: 日志列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InferenceServiceLogListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /inference-services/{service_id}/test:
+    post:
+      operationId: testInferenceService
+      summary: 推理服务调用测试
+      tags: [InferenceServices]
+      parameters:
+        - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InferenceTestRequest' }
+      responses:
+        "200":
+          description: 测试推理结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InferenceTestResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /inference-services/{service_id}/policies:
+    put:
+      operationId: updateInferenceServicePolicies
+      summary: 更新推理服务限流与访问策略
+      tags: [InferenceServices]
+      parameters:
+        - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateInferenceServicePoliciesRequest' }
+      responses:
+        "200":
+          description: 更新后的策略
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InferenceServicePolicies' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
 
   /knowledge-bases:
@@ -759,10 +1014,72 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
 
+  /knowledge-bases/{kb_id}/citations:
+    get:
+      operationId: listKnowledgeBaseCitations
+      summary: 知识库引用来源列表
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 引用来源列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KBCitationListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /knowledge-bases/{kb_id}/sessions:
+    get:
+      operationId: listKnowledgeBaseSessions
+      summary: 知识库对话历史列表
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 对话历史列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KBSessionListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /knowledge-bases/{kb_id}/permissions:
+    put:
+      operationId: updateKnowledgeBasePermissions
+      summary: 更新知识库访问权限
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateKBPermissionsRequest' }
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeBase' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
   /gpu-containers:
     get:
       operationId: listGpuContainers
-      summary: GPU容器列表
+      deprecated: true
+      summary: GPU容器列表（已废弃，请使用 /api/v1/instances?kind=gpu_container）
       tags: [GpuContainers]
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [pending, running, stopped, failed, deleted] } }
@@ -782,7 +1099,8 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
     post:
       operationId: createGpuContainer
-      summary: 创建GPU容器
+      deprecated: true
+      summary: 创建GPU容器（已废弃，请使用 POST /api/v1/instances）
       tags: [GpuContainers]
       requestBody:
         required: true
@@ -802,7 +1120,8 @@ paths:
   /gpu-containers/available-gpus:
     get:
       operationId: listAvailableGpus
-      summary: 查询可用GPU资源
+      deprecated: true
+      summary: 查询可用GPU资源（已废弃，请使用 GET /api/v1/gpu-inventory）
       tags: [GpuContainers]
       responses:
         "200":
@@ -817,7 +1136,8 @@ paths:
   /gpu-containers/{container_id}:
     get:
       operationId: getGpuContainer
-      summary: 获取GPU容器详情
+      deprecated: true
+      summary: 获取GPU容器详情（已废弃）
       tags: [GpuContainers]
       parameters:
         - { name: container_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -830,7 +1150,8 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
     patch:
       operationId: patchGpuContainer
-      summary: 更新GPU容器配置
+      deprecated: true
+      summary: 更新GPU容器配置（已废弃）
       tags: [GpuContainers]
       parameters:
         - { name: container_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -848,7 +1169,8 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
     delete:
       operationId: deleteGpuContainer
-      summary: 删除GPU容器
+      deprecated: true
+      summary: 删除GPU容器（已废弃）
       tags: [GpuContainers]
       parameters:
         - { name: container_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -859,7 +1181,8 @@ paths:
   /gpu-containers/{container_id}/metrics:
     get:
       operationId: getGpuContainerMetrics
-      summary: 获取GPU容器监控指标
+      deprecated: true
+      summary: 获取GPU容器监控指标（已废弃）
       tags: [GpuContainers]
       parameters:
         - { name: container_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -874,7 +1197,8 @@ paths:
   /gpu-containers/{container_id}/versions:
     get:
       operationId: listGpuContainerVersions
-      summary: GPU容器版本历史
+      deprecated: true
+      summary: GPU容器版本历史（已废弃）
       tags: [GpuContainers]
       parameters:
         - { name: container_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -891,7 +1215,8 @@ paths:
   /gpu-containers/{container_id}/rollback:
     post:
       operationId: rollbackGpuContainer
-      summary: 回滚GPU容器到指定版本
+      deprecated: true
+      summary: 回滚GPU容器到指定版本（已废弃）
       tags: [GpuContainers]
       parameters:
         - { name: container_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -911,7 +1236,8 @@ paths:
   /gpu-containers/{container_id}/rebuild:
     post:
       operationId: rebuildGpuContainer
-      summary: 重建GPU容器
+      deprecated: true
+      summary: 重建GPU容器（已废弃）
       tags: [GpuContainers]
       parameters:
         - { name: container_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -931,7 +1257,8 @@ paths:
   /sandboxes:
     get:
       operationId: listSandboxes
-      summary: Sandbox列表
+      deprecated: true
+      summary: Sandbox列表（已废弃，请使用 /api/v1/instances?kind=sandbox）
       tags: [Sandboxes]
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [pending, running, paused, expired, deleted] } }
@@ -950,7 +1277,8 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
     post:
       operationId: createSandbox
-      summary: 创建Sandbox
+      deprecated: true
+      summary: 创建Sandbox（已废弃，请使用 POST /api/v1/instances）
       tags: [Sandboxes]
       requestBody:
         required: true
@@ -969,7 +1297,8 @@ paths:
   /sandboxes/{sandbox_id}:
     get:
       operationId: getSandbox
-      summary: 获取Sandbox详情
+      deprecated: true
+      summary: 获取Sandbox详情（已废弃）
       tags: [Sandboxes]
       parameters:
         - { name: sandbox_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -982,7 +1311,8 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
     patch:
       operationId: patchSandbox
-      summary: 更新Sandbox配置
+      deprecated: true
+      summary: 更新Sandbox配置（已废弃）
       tags: [Sandboxes]
       parameters:
         - { name: sandbox_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1000,7 +1330,8 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
     delete:
       operationId: deleteSandbox
-      summary: 删除Sandbox
+      deprecated: true
+      summary: 删除Sandbox（已废弃）
       tags: [Sandboxes]
       parameters:
         - { name: sandbox_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1011,7 +1342,8 @@ paths:
   /sandboxes/{sandbox_id}/extend:
     post:
       operationId: extendSandbox
-      summary: 延期Sandbox有效期
+      deprecated: true
+      summary: 延期Sandbox有效期（已废弃）
       tags: [Sandboxes]
       parameters:
         - { name: sandbox_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1031,7 +1363,8 @@ paths:
   /sandboxes/{sandbox_id}/pause:
     post:
       operationId: pauseSandbox
-      summary: 暂停Sandbox
+      deprecated: true
+      summary: 暂停Sandbox（已废弃）
       tags: [Sandboxes]
       parameters:
         - { name: sandbox_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1050,7 +1383,8 @@ paths:
   /sandboxes/{sandbox_id}/security-events:
     get:
       operationId: listSandboxSecurityEvents
-      summary: Sandbox安全事件列表
+      deprecated: true
+      summary: Sandbox安全事件列表（已废弃，请使用 GET /api/v1/instances/{id}/security-events）
       tags: [Sandboxes]
       parameters:
         - { name: sandbox_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1069,7 +1403,8 @@ paths:
   /sandboxes/{sandbox_id}/security-overview:
     get:
       operationId: getSandboxSecurityOverview
-      summary: Sandbox安全概览
+      deprecated: true
+      summary: Sandbox安全概览（已废弃）
       tags: [Sandboxes]
       parameters:
         - { name: sandbox_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1115,6 +1450,21 @@ paths:
         "409": { $ref: '#/components/responses/Conflict' }
 
   /tenant/members/{member_id}:
+    get:
+      operationId: getTenantMember
+      summary: 获取租户成员详情
+      tags: [Tenant]
+      parameters:
+        - { name: member_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 成员详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantMember' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
     delete:
       operationId: removeTenantMember
       summary: 移除租户成员
@@ -1123,6 +1473,8 @@ paths:
         - { name: member_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "204": { description: 已移除 }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
 
   /tenant/roles:
@@ -1139,6 +1491,29 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/TenantRole' } }
         "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /tenant/roles/{role_id}:
+    put:
+      operationId: updateTenantRole
+      summary: 更新角色权限配置
+      tags: [Tenant]
+      parameters:
+        - { name: role_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTenantRoleRequest' }
+      responses:
+        "200":
+          description: 更新后的角色
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantRole' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   /tenant/sso:
     get:
@@ -1201,7 +1576,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Webhook' }
         "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
         "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
 
   /tenant/webhooks/{webhook_id}:
     delete:
@@ -1212,12 +1589,92 @@ paths:
         - { name: webhook_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "204": { description: 已删除 }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+
+  /tenant/webhooks/{webhook_id}/deliveries:
+    get:
+      operationId: listWebhookDeliveries
+      summary: Webhook 投递日志
+      tags: [Tenant]
+      parameters:
+        - { name: webhook_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, delivered, failed, retrying] } }
+      responses:
+        "200":
+          description: 投递日志列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebhookDeliveryListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /integrations:
+    get:
+      operationId: listIntegrations
+      summary: 第三方集成列表
+      tags: [Integrations]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 集成列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IntegrationListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createIntegration
+      summary: 创建第三方集成
+      tags: [Integrations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateIntegrationRequest' }
+      responses:
+        "201":
+          description: 集成已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Integration' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /integrations/bots:
+    post:
+      operationId: createIntegrationBot
+      summary: 创建企微/钉钉 Bot 集成
+      tags: [Integrations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateIntegrationBotRequest' }
+      responses:
+        "201":
+          description: Bot 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IntegrationBot' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
 tags:
   - { name: Models, description: "模型仓库" }
   - { name: InferenceServices, description: "推理服务" }
   - { name: KnowledgeBases, description: "知识库服务" }
-  - { name: GpuContainers, description: "GPU容器" }
-  - { name: Sandboxes, description: "Sandbox" }
+  - { name: GpuContainers, description: "GPU容器（已废弃）" }
+  - { name: Sandboxes, description: "Sandbox（已废弃）" }
   - { name: Tenant, description: "租户管理（成员/角色/SSO/Webhook）" }
+  - { name: Integrations, description: "第三方集成与企业通知" }

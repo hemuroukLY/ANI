@@ -1,0 +1,257 @@
+{
+  "passed": true,
+  "findings": [
+    {
+      "level": "PASS",
+      "check": "core_no_platform_wh",
+      "module": "global",
+      "detail": "Core 无 platform webhook path"
+    },
+    {
+      "level": "PASS",
+      "check": "sections",
+      "module": "ops-webhook",
+      "detail": "章节齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "errors",
+      "module": "ops-webhook",
+      "detail": "400+403 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "prd",
+      "module": "ops-webhook",
+      "detail": "§10 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "html",
+      "module": "ops-webhook",
+      "detail": "HTML OK"
+    },
+    {
+      "level": "PASS",
+      "check": "sync",
+      "module": "ops-webhook",
+      "detail": "回填 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "ops-webhook",
+      "detail": "tenant/webhooks"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "ops-webhook",
+      "detail": "TODO-YAML"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_op",
+      "module": "ops-webhook",
+      "detail": "GET /api/v1/svc/tenant/webhooks → listWebhooks"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_op",
+      "module": "ops-webhook",
+      "detail": "POST /api/v1/svc/tenant/webhooks → createWebhook"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_op",
+      "module": "ops-webhook",
+      "detail": "GET /api/v1/svc/tenant/webhooks/{webhook_id}/deliveries → listWebhookDeliveries"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_op",
+      "module": "ops-webhook",
+      "detail": "DELETE /api/v1/svc/tenant/webhooks/{webhook_id} → deleteWebhook"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_frozen",
+      "module": "ops-webhook",
+      "detail": "/api/v1/svc/tenant/webhooks"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_frozen",
+      "module": "ops-webhook",
+      "detail": "/api/v1/svc/tenant/webhooks"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_frozen",
+      "module": "ops-webhook",
+      "detail": "/api/v1/svc/tenant/webhooks/{webhook_id}/deliveries"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_frozen",
+      "module": "ops-webhook",
+      "detail": "/api/v1/svc/tenant/webhooks/{webhook_id}"
+    },
+    {
+      "level": "PASS",
+      "check": "fake_opid",
+      "module": "ops-webhook",
+      "detail": "无 getTask"
+    },
+    {
+      "level": "PASS",
+      "check": "sections",
+      "module": "enterprise-notification",
+      "detail": "章节齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "errors",
+      "module": "enterprise-notification",
+      "detail": "400+403 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "prd",
+      "module": "enterprise-notification",
+      "detail": "§10 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "html",
+      "module": "enterprise-notification",
+      "detail": "HTML OK"
+    },
+    {
+      "level": "PASS",
+      "check": "sync",
+      "module": "enterprise-notification",
+      "detail": "回填 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "enterprise-notification",
+      "detail": "wecom"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "enterprise-notification",
+      "detail": "dingtalk"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "enterprise-notification",
+      "detail": "TODO-YAML"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_op",
+      "module": "enterprise-notification",
+      "detail": "POST /api/v1/svc/integrations/bots → createIntegrationBot"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_op",
+      "module": "enterprise-notification",
+      "detail": "GET /api/v1/svc/integrations → listIntegrations"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_frozen",
+      "module": "enterprise-notification",
+      "detail": "/api/v1/svc/integrations/bots"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_frozen",
+      "module": "enterprise-notification",
+      "detail": "/api/v1/svc/integrations"
+    },
+    {
+      "level": "PASS",
+      "check": "fake_opid",
+      "module": "enterprise-notification",
+      "detail": "无 getTask"
+    },
+    {
+      "level": "PASS",
+      "check": "sections",
+      "module": "ops-system-integration",
+      "detail": "章节齐全"
+    },
+    {
+      "level": "PASS",
+      "check": "errors",
+      "module": "ops-system-integration",
+      "detail": "400+403 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "prd",
+      "module": "ops-system-integration",
+      "detail": "§10 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "html",
+      "module": "ops-system-integration",
+      "detail": "HTML OK"
+    },
+    {
+      "level": "PASS",
+      "check": "sync",
+      "module": "ops-system-integration",
+      "detail": "回填 OK"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "ops-system-integration",
+      "detail": "provider"
+    },
+    {
+      "level": "PASS",
+      "check": "content",
+      "module": "ops-system-integration",
+      "detail": "TODO-YAML"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_op",
+      "module": "ops-system-integration",
+      "detail": "GET /api/v1/svc/integrations → listIntegrations"
+    },
+    {
+      "level": "PASS",
+      "check": "yaml_op",
+      "module": "ops-system-integration",
+      "detail": "POST /api/v1/svc/integrations → createIntegration"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_frozen",
+      "module": "ops-system-integration",
+      "detail": "/api/v1/svc/integrations"
+    },
+    {
+      "level": "PASS",
+      "check": "doc_frozen",
+      "module": "ops-system-integration",
+      "detail": "/api/v1/svc/integrations"
+    },
+    {
+      "level": "PASS",
+      "check": "fake_opid",
+      "module": "ops-system-integration",
+      "detail": "无 getTask"
+    }
+  ]
+}
