@@ -14,7 +14,7 @@
 |---|---|
 | **冲刺编号** | Sprint 13（Core real provider 与 live gate 收敛） |
 | **主题** | 将 Sprint 12 已闭合的 Core handler/ports/local adapters 接到真实组件，并建立可复跑 live gate 与 evidence JSON |
-| **当前状态** | Sprint 12 进入条件已满足：A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 已完成并收口；Sprint 13 当前为真实 provider/live gate 启动阶段，首批 provider 实现需按计划逐项拆分 |
+| **当前状态** | Sprint 12 进入条件已满足：A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 已完成并收口；Sprint 13 当前为真实 provider/live gate 收敛阶段，S01 网络路由 Kube-OVN 已到 code+contract ready / LIVE PENDING |
 | **执行环境** | 真实 provider 批次必须先声明组件与版本、live gate 命令、evidence 输出路径和失败边界；涉及真实服务器写操作前必须重新只读盘点并取得人工确认 |
 | **已由代码/真实环境证明完成** | Sprint 12 证明了 contract + Tier1 local profile：B1 实例观测/GPU/Sandbox、B2 网络/存储/K8s workloads + 2 个 422、B3 对象/向量写入均经 OpenAPI、ports/adapters、Gateway handler 和测试闭合。Sprint 11/Sprint 5 提供真实 K8s/Kube-OVN/KubeVirt/vCluster/Rook-Ceph/GPU/CAPK 等历史 live evidence，可作为 Sprint 13 provider gate 的基础。 |
 | **生产化边界** | Sprint 13 未执行具体 live gate 前，Sprint 12 能力仍只可标 Tier1 local profile；不得把计划、local profile 或历史相邻 live evidence 直接等同于当前能力 runtime/production ready |
@@ -35,7 +35,7 @@
 | 实例观测 | Prometheus + kubelet / K8s API（已选 2026-06-19） | `ports.InstanceObservability`，Gateway handler 不绕过 port | 待拆分执行 |
 | GPU 清单/占用 | NVIDIA device plugin / DCGM / node labels | `ports.GPUInventory`，复用 Sprint 5 GPU evidence 作为前置事实 | 待拆分执行 |
 | Sandbox templates | Kata / runtimeClass / template catalog | `ports.SandboxTemplateCatalog` | 待拆分执行 |
-| 网络路由 | Kube-OVN | `ports.NetworkService` / `runtime.NetworkService` / `network_resources.go` | **首切片，就绪声明已建立**（`sprint13-netroute-kubeovn-readiness.md`） |
+| 网络路由 | Kube-OVN | `ports.NetworkService` / `runtime.NetworkService` / `network_resources.go` | **code+contract ready, LIVE PENDING**（`sprint13-netroute-kubeovn-a-track.md`；readiness：`sprint13-netroute-kubeovn-readiness.md`） |
 | 卷快照与 mount-targets | Rook-Ceph RBD / CSI snapshot / NFS 或等价 filesystem backend | `ports.StorageService` / `runtime.LocalStorageService` / `storage_resources.go` | 待拆分执行 |
 | K8s workloads | vCluster / Kubernetes API | `ports.K8sClusterService` / `local_k8s_cluster_service.go` / `k8s_cluster_resources.go` | 待拆分执行 |
 | 对象存储 bucket/upload/download | MinIO（已选 2026-06-19，S3 兼容） | `ports.ObjectStore` + `ports.StorageService` / `storage_resources.go` | 待拆分执行 |
@@ -93,7 +93,7 @@
 - Sprint 9 Core-only 代码开发已完成，并继续作为 RC readiness、release evidence、offline checksum、CLI version 和文档一致性历史门禁保留。
 - Sprint 10 Core-only 代码开发已完成，并继续作为 artifact manifest、version policy、final readiness、CLI release metadata 和文档一致性历史门禁保留；Sprint 10 不是实际 v1.0.0 发布。
 - Sprint 8/9/10 历史文档一致性门禁接受当前 Sprint 11 入口文档中的历史门禁/已完成归档表达，不要求入口文档保留旧 Sprint 的当前态短语。
-- Sprint 5 `REAL-K8S-LAB-A` / `make validate-real-k8s-profile` 仍作为真实底座历史门禁保留，覆盖 Kube-OVN、KubeVirt、vCluster 与 local profile / real-provider 边界。
+- Sprint 5 `REAL-K8S-LAB-A` / `make validate-real-k8s-profile` 仍作为真实底座历史门禁保留，覆盖 Kube-OVN、KubeVirt、vCluster 与 local profile / real-provider 边界；M1-NETWORK-LIVE-A / `validate-kubeovn-network-live-gate` 固定 Kube-OVN `Vpc/Subnet`、NetworkPolicy 和 Service/LB contract 门禁，Sprint 13 S01 已在此基础上补 route contract，但真实 route evidence 仍待人工 B 轨。
 - Sprint 11 聚合门禁依赖 Sprint 10 release-prep，不重新打开这些历史 Sprint 的开发范围。
 
 ## 文档入口边界

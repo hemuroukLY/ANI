@@ -3,31 +3,33 @@
 > 记录类型：Per-slice readiness（ANI-06「真实底座组件引入强制门禁」§153 的执行前声明）
 > 工件归属：Sprint 13 / Core real provider 与 live gate 收敛
 > 执行地图：[`sprint13-real-provider-readiness-plan.md`](sprint13-real-provider-readiness-plan.md)
-> 状态：**planning（尚未跑通 live gate）。在 evidence 产出前，网络路由能力只可标 Tier1 local profile。**
+> 状态：**code+contract ready, LIVE PENDING**（尚未跑通真实 live gate）。在 evidence 产出前，网络路由能力只可标 Tier1 local profile。
 
 ---
 
 ## 0. 已核对的真实事实（禁止臆测）
 
 1. Sprint 12 已落地路由契约与本地实现：`ports.NetworkService.CreateRoute/ListRoutes`（`pkg/ports/network_resources.go`），网关 `GET/POST /networks/routes`（`services/ani-gateway/internal/router/network_resources.go`），当前由 in-memory `NetworkService`（`pkg/adapters/runtime/network_service.go`）支撑 = Tier1 local profile。
-2. 网络真实 provider 既有管线：`ports.NetworkProvider`（`DryRun`/`Apply`/`Observe`）+ `KubeOVNNetworkProviderAdapter`（`pkg/adapters/runtime/kubeovn_network_provider.go`）+ `KubernetesNetworkProviderClient`。VPC/Subnet/SG/LB 已按 render→apply→observe 走真实 provider（Sprint 5 evidence：`m1-network-live-c-kubeovn-real-lab-result.md`）。**路由暂未纳入该 provider 管线。**
-3. live gate 入口：`make validate-kubeovn-network-live-gate` → `scripts/validate_kubeovn_network_live_gate.py`(+test)；fixtures 在 `deploy/real-k8s-lab/kubeovn-network-live-gate.yaml`。
+2. 网络真实 provider 既有管线：`ports.NetworkProvider`（`DryRun`/`Apply`/`Observe`）+ `KubeOVNNetworkProviderAdapter`（`pkg/adapters/runtime/kubeovn_network_provider.go`）+ `KubernetesNetworkProviderClient`。VPC/Subnet/SG/LB 已按 render→apply→observe 走真实 provider（Sprint 5 evidence：`m1-network-live-c-kubeovn-real-lab-result.md`）。S01 A 轨已新增 adapter-local `RenderRoute`，并用 provider dry-run fake 单测覆盖 route manifest 进入既有 provider 管线。
+3. live gate 入口：`make validate-kubeovn-network-live-gate` → `scripts/validate_kubeovn_network_live_gate.py`(+test)；fixtures 在 `deploy/real-k8s-lab/kubeovn-network-live-gate.yaml`。S01 A 轨已将 `kubeovn-route-created` 加入契约校验，但未执行真实 `--live`。
 4. 底座（Sprint 5/11 已部署，三台物理服务器）：Kube-OVN `v1.15.8`、Kubernetes `v1.36.1`、CNI/CoreDNS Ready。
 
 ## 1. §153 五项声明
 
 | 项 | 内容 |
 |---|---|
-| **当前状态** | contract + Tier1 local profile（路由经 in-memory `NetworkService`）。目标：real-provider（Kube-OVN）。 |
+| **当前状态** | code+contract ready + Tier1 local profile（路由 API 仍经 in-memory `NetworkService`）。目标：真实 lab 跑通后再进入 real-provider（Kube-OVN）。 |
 | **真实组件 + 版本** | Kube-OVN `v1.15.8`，Kubernetes `v1.36.1`（三台物理开发服务器）。 |
-| **live gate 命令** | 扩展并运行 `make validate-kubeovn-network-live-gate`，覆盖 route create/list 的 render→apply→observe；在真实 lab 执行。 |
+| **live gate 命令** | 本地契约：`make validate-kubeovn-network-live-gate`；真实 B 轨：`python scripts/validate_kubeovn_network_live_gate.py --live --tenant-id <tenant> --evidence-output <path>`（执行前人工只读盘点与确认）。 |
 | **evidence 输出路径** | `repo/development-records/sprint13-netroute-kubeovn-live-result.md` + 复跑命令与非敏感 evidence JSON（沿用 Sprint 5 network live evidence 结构）。 |
 | **失败边界（不得声称）** | 若路由在真实 Kube-OVN 上的 Apply/Observe 未跑通，网络路由能力**只保持 Tier1 local profile**，不得标 real-provider / runtime ready / production ready；不得用 Sprint 5 VPC/Subnet 的 evidence 替代路由 evidence。 |
 
 ## 2. 代码边界（不改 handler、不改 port 签名）
 
-- real route provider 走既有 `NetworkProvider` render→apply→observe 管线；新增「路由 → Kube-OVN manifest」渲染 + provider 选择（forwarding，与 VPC/Subnet 同构），`NetworkService` route 方法在 real 模式下转发到 provider。
-- **执行前必须先确认** Kube-OVN `v1.15.8` 的静态路由表达方式（`Vpc.spec.staticRoutes` 还是 `VpcStaticRoute`/`StaticRoute` CRD），以部署版本的真实 API 为准再渲染 manifest——不得照搬假设的字段。
+- S01 A 轨已在 Kube-OVN adapter 内新增「路由 → `Vpc.spec.staticRoutes` manifest」渲染，并通过 provider dry-run fake 单测验证 route manifest 可进入既有 provider 管线；未改 `ports.NetworkProviderRenderer` 接口签名，未改 Gateway handler。
+- 当前 renderer 仅支持 `next_hop_type=gateway`，将 `next_hop_id` 作为 `nextHopIP`；`instance`/`nat` 真实映射执行前仍需确认，不得冒充支持。
+- **真实执行前必须先确认** Kube-OVN `v1.15.8` 的静态路由表达方式（`Vpc.spec.staticRoutes` 还是 `VpcStaticRoute`/`StaticRoute` CRD），以部署版本的真实 API 为准；若字段不匹配，必须先修正 adapter 与 live-gate contract 再跑 B 轨。
+- `NetworkService` route 方法未开启 real-mode forwarding：当前 `NetworkRouteCreateRequest` 没有 provider 执行所需的 user/permission proof，且本轮禁止改 port 签名和 Gateway handler。真实 forwarding 需在 B 轨/API 设计确认后单独接线；本轮不使用 fake proof。
 - K8s/Kube-OVN SDK 只能在 adapter/provider/client 边界（`bounded_direct`），**禁止进 Gateway handler**；新依赖需在 `validate_component_imports` 登记 allowlist + `coupling_level` + 理由。
 - 契约：若真实 provider 暴露 local profile 没有的字段，先在 `api/openapi/v1.yaml` **只增可选字段**再实现，保持 v1 兼容。
 

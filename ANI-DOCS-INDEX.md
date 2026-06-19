@@ -14,7 +14,7 @@
 当前执行：Sprint 12 已完成 A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 的 Tier1 local profile；Sprint 13 进入真实 provider / live gate 收敛准备
 代码边界：Sprint 13 必须沿用 Sprint 12 已闭合的 api/openapi/v1.yaml operationId、pkg/ports、pkg/adapters 与 services/ani-gateway/internal/router handler，不得绕过 port 或新增 Services 业务逻辑
 Sprint 13 计划：真实 provider / live gate 计划见 repo/development-records/sprint13-real-provider-readiness-plan.md；未跑通 live gate 前不得标 runtime/production ready
-真实底座门禁：REAL-K8S-LAB-A / make validate-real-k8s-profile；Sprint 5 八个 live gate（网络/VM/vCluster/upgrade/Secret/HA/KMS-SM4/GPU-CAPK）已归档 evidence
+真实底座门禁：REAL-K8S-LAB-A / make validate-real-k8s-profile；Sprint 5 八个 live gate（网络/VM/vCluster/upgrade/Secret/HA/KMS-SM4/GPU-CAPK）已归档 evidence；其中 M1-NETWORK-LIVE-A / validate-kubeovn-network-live-gate 固定 Kube-OVN Vpc/Subnet、NetworkPolicy 和 Service/LB contract 门禁
 真实底座状态：Sprint 11 真实服务器只读验证与 Rook-Ceph 正式部署已闭环并转历史回归门禁（CephCluster Ready/HEALTH_OK，5 SSD OSD，ani-rbd-ssd StorageClass 上线）；RBD smoke test 与逐节点 reboot resilience 已通过
 不是实际 v1.0.0 发布；backup/restore 演练、故障注入、soak 及破坏性磁盘操作须单独审批
 ```

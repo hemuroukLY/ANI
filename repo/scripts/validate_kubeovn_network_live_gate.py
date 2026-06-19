@@ -26,6 +26,7 @@ REQUIRED_CHECKS = {
     "kubeovn-crds-ready",
     "kubeovn-vpc-created",
     "kubeovn-subnet-created",
+    "kubeovn-route-created",
     "networkpolicy-created",
     "service-lb-created",
 }
@@ -122,11 +123,14 @@ class LiveConfig:
     tenant_id: str
     vpc_name: str = "ani-live-net"
     subnet_name: str = "ani-live-subnet"
+    route_name: str = "ani-live-route"
     security_group_name: str = "ani-live-sg"
     load_balancer_name: str = "ani-live-lb"
     namespace: str = ""
     cidr: str = "10.244.80.0/24"
     gateway: str = "10.244.80.1"
+    route_destination: str = "0.0.0.0/0"
+    route_next_hop: str = "10.244.80.1"
     kubeconfig: str = ""
     kubectl_binary: str = "kubectl"
 
@@ -200,9 +204,12 @@ def validate_live_config(config: LiveConfig) -> None:
         "tenant_id": config.tenant_id,
         "vpc_name": config.vpc_name,
         "subnet_name": config.subnet_name,
+        "route_name": config.route_name,
         "security_group_name": config.security_group_name,
         "load_balancer_name": config.load_balancer_name,
         "cidr": config.cidr,
+        "route_destination": config.route_destination,
+        "route_next_hop": config.route_next_hop,
     }
     missing = [name for name, value in required.items() if not value.strip()]
     if missing:
@@ -290,6 +297,35 @@ def subnet_manifest(config: LiveConfig) -> str:
             "kind": "Subnet",
             "metadata": {"name": subnet_name, "labels": provider_labels(config.tenant_id, "subnet", config.subnet_name)},
             "spec": spec,
+        },
+        sort_keys=True,
+    )
+
+
+def route_manifest(config: LiveConfig) -> str:
+    vpc_name = kubernetes_name("vpc", config.vpc_name)
+    return yaml.safe_dump(
+        {
+            "apiVersion": "kubeovn.io/v1",
+            "kind": "Vpc",
+            "metadata": {
+                "name": vpc_name,
+                "labels": provider_labels(config.tenant_id, "vpc", config.vpc_name),
+                "annotations": {
+                    "ani.kubercloud.io/network-route-id": config.route_name,
+                    "ani.kubercloud.io/network-route-next-hop": config.route_next_hop,
+                    "ani.kubercloud.io/network-route-next-hop-type": "gateway",
+                },
+            },
+            "spec": {
+                "staticRoutes": [
+                    {
+                        "cidr": config.route_destination,
+                        "nextHopIP": config.route_next_hop,
+                        "policy": "policyDst",
+                    }
+                ]
+            },
         },
         sort_keys=True,
     )
@@ -395,6 +431,19 @@ def assert_service(document: dict[str, Any], expected_name: str) -> None:
     spec = document.get("spec", {})
     if isinstance(spec, dict) and spec.get("type") not in {None, "LoadBalancer"}:
         fail(f"Service {expected_name} type must be LoadBalancer")
+
+
+def assert_route(document: dict[str, Any], expected_cidr: str, expected_next_hop: str) -> None:
+    spec = document.get("spec", {})
+    static_routes = spec.get("staticRoutes", []) if isinstance(spec, dict) else []
+    if not isinstance(static_routes, list):
+        fail("Vpc staticRoutes must be a list")
+    for route in static_routes:
+        if not isinstance(route, dict):
+            continue
+        if route.get("cidr") == expected_cidr and route.get("nextHopIP") == expected_next_hop:
+            return
+    fail(f"Vpc staticRoutes must include {expected_cidr} via {expected_next_hop}")
 
 
 def wait_for_runner(
@@ -668,6 +717,7 @@ def run_live(config: LiveConfig, runner: LiveRunner | None = None) -> dict[str, 
     namespace = tenant_namespace(config)
     vpc_name = kubernetes_name("vpc", config.vpc_name)
     subnet_name = kubernetes_name("subnet", config.subnet_name)
+    route_name = kubernetes_name("route", config.route_name)
     security_group_name = kubernetes_name("sg", config.security_group_name)
     load_balancer_name = kubernetes_name("lb", config.load_balancer_name)
 
@@ -680,6 +730,7 @@ def run_live(config: LiveConfig, runner: LiveRunner | None = None) -> dict[str, 
     runner.run(kubectl(config, ["apply", "-f", "-"]), input_text=namespace_manifest(config))
     runner.run(kubectl(config, ["apply", "-f", "-"]), input_text=vpc_manifest(config))
     runner.run(kubectl(config, ["apply", "-f", "-"]), input_text=subnet_manifest(config))
+    runner.run(kubectl(config, ["apply", "-f", "-"]), input_text=route_manifest(config))
     runner.run(kubectl(config, ["apply", "-f", "-"]), input_text=networkpolicy_manifest(config))
     runner.run(kubectl(config, ["apply", "-f", "-"]), input_text=service_manifest(config))
 
@@ -695,6 +746,7 @@ def run_live(config: LiveConfig, runner: LiveRunner | None = None) -> dict[str, 
     )
 
     assert_observable_kubernetes_object(vpc, "Vpc", vpc_name)
+    assert_route(vpc, config.route_destination, config.route_next_hop)
     assert_observable_kubernetes_object(subnet, "Subnet", subnet_name)
     assert_observable_kubernetes_object(networkpolicy, "NetworkPolicy", security_group_name)
     assert_service(service, load_balancer_name)
@@ -704,6 +756,7 @@ def run_live(config: LiveConfig, runner: LiveRunner | None = None) -> dict[str, 
         "namespace": namespace,
         "vpc": vpc_name,
         "subnet": subnet_name,
+        "route": route_name,
         "security_group": security_group_name,
         "load_balancer": load_balancer_name,
     }
@@ -756,10 +809,16 @@ def main() -> int:
     parser.add_argument("--namespace", default=os.getenv("ANI_LIVE_NAMESPACE", ""))
     parser.add_argument("--vpc-name", default=os.getenv("ANI_LIVE_VPC_NAME", "ani-live-net"))
     parser.add_argument("--subnet-name", default=os.getenv("ANI_LIVE_SUBNET_NAME", "ani-live-subnet"))
+    parser.add_argument("--route-name", default=os.getenv("ANI_LIVE_ROUTE_NAME", "ani-live-route"))
     parser.add_argument("--security-group-name", default=os.getenv("ANI_LIVE_SECURITY_GROUP_NAME", "ani-live-sg"))
     parser.add_argument("--load-balancer-name", default=os.getenv("ANI_LIVE_LOAD_BALANCER_NAME", "ani-live-lb"))
     parser.add_argument("--cidr", default=os.getenv("ANI_LIVE_SUBNET_CIDR", "10.244.80.0/24"))
     parser.add_argument("--gateway", default=os.getenv("ANI_LIVE_SUBNET_GATEWAY", "10.244.80.1"))
+    parser.add_argument("--route-destination", default=os.getenv("ANI_LIVE_ROUTE_DESTINATION", "0.0.0.0/0"))
+    parser.add_argument(
+        "--route-next-hop",
+        default=os.getenv("ANI_LIVE_ROUTE_NEXT_HOP", os.getenv("ANI_LIVE_SUBNET_GATEWAY", "10.244.80.1")),
+    )
     parser.add_argument("--kubeconfig", default=os.getenv("KUBECONFIG", ""))
     parser.add_argument("--external-lb-live", action="store_true", help="also prove external Kube-OVN LoadBalancer reachability")
     parser.add_argument("--external-lb-namespace", default=os.getenv("ANI_KUBEOVN_EXTERNAL_LB_NAMESPACE", "default"))
@@ -802,10 +861,13 @@ def main() -> int:
             namespace=args.namespace,
             vpc_name=args.vpc_name,
             subnet_name=args.subnet_name,
+            route_name=args.route_name,
             security_group_name=args.security_group_name,
             load_balancer_name=args.load_balancer_name,
             cidr=args.cidr,
             gateway=args.gateway,
+            route_destination=args.route_destination,
+            route_next_hop=args.route_next_hop,
             kubeconfig=args.kubeconfig,
         )
         validate_live_config(config)

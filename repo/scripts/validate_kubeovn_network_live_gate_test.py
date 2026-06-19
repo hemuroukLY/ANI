@@ -17,6 +17,7 @@ class FakeRunner:
     def __init__(self) -> None:
         self.commands: list[list[str]] = []
         self.applied_manifests: list[str] = []
+        self.route_applied = False
 
     def run(self, command: list[str], input_text: str | None = None) -> str:
         self.commands.append(command)
@@ -24,13 +25,14 @@ class FakeRunner:
         if "get crd" in joined:
             return '{"metadata":{"name":"vpcs.kubeovn.io"}}'
         if "get vpc" in joined:
-            return json.dumps(
-                {
-                    "kind": "Vpc",
-                    "metadata": {"name": "vpc-ani-live-net"},
-                    "status": {"conditions": [{"type": "Ready", "status": "True"}]},
-                }
-            )
+            document: dict[str, object] = {
+                "kind": "Vpc",
+                "metadata": {"name": "vpc-ani-live-net"},
+                "status": {"conditions": [{"type": "Ready", "status": "True"}]},
+            }
+            if self.route_applied:
+                document["spec"] = {"staticRoutes": [{"cidr": "0.0.0.0/0", "nextHopIP": "10.244.80.1", "policy": "policyDst"}]}
+            return json.dumps(document)
         if "get subnet" in joined:
             return json.dumps(
                 {
@@ -49,6 +51,8 @@ class FakeRunner:
             if not input_text or "apiVersion" not in input_text:
                 raise AssertionError("apply command must receive a manifest")
             self.applied_manifests.append(input_text)
+            if "staticRoutes:" in input_text:
+                self.route_applied = True
             return "created\n"
         raise AssertionError(f"unexpected command: {joined}")
 
@@ -118,7 +122,7 @@ class FakeExternalLBRunner:
 
 
 class KubeOVNNetworkLiveGateTest(unittest.TestCase):
-    def test_contract_gate_defines_kubeovn_vpc_subnet_networkpolicy_and_lb_checks(self) -> None:
+    def test_contract_gate_defines_kubeovn_vpc_subnet_route_networkpolicy_and_lb_checks(self) -> None:
         document = gate.load_gate(gate.DEFAULT_GATE)
 
         gate.validate_contract(document)
@@ -127,6 +131,7 @@ class KubeOVNNetworkLiveGateTest(unittest.TestCase):
         self.assertIn("kubeovn-crds-ready", check_ids)
         self.assertIn("kubeovn-vpc-created", check_ids)
         self.assertIn("kubeovn-subnet-created", check_ids)
+        self.assertIn("kubeovn-route-created", check_ids)
         self.assertIn("networkpolicy-created", check_ids)
         self.assertIn("service-lb-created", check_ids)
 
@@ -253,7 +258,8 @@ class KubeOVNNetworkLiveGateTest(unittest.TestCase):
         self.assertEqual(result["subnet"], "subnet-ani-live-subnet")
         self.assertIn(["kubectl", "get", "crd", "vpcs.kubeovn.io", "-o", "json"], runner.commands)
         apply_commands = [command for command in runner.commands if command[-2:] == ["-f", "-"]]
-        self.assertEqual(len(apply_commands), 5)
+        self.assertEqual(len(apply_commands), 6)
+        self.assertTrue(any("staticRoutes:" in manifest for manifest in runner.applied_manifests))
 
     def test_external_lb_live_gate_patches_helper_and_proves_curl_results(self) -> None:
         runner = FakeExternalLBRunner()

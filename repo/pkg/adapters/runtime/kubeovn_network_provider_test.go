@@ -39,6 +39,30 @@ func TestKubeOVNNetworkProviderAdapterUsesServerSideDryRun(t *testing.T) {
 	}
 }
 
+func TestKubeOVNNetworkProviderAdapterDryRunsRouteManifest(t *testing.T) {
+	client := &fakeKubernetesNetworkProviderClient{}
+	manifests := renderedNetworkRoute(t)
+
+	result, err := NewKubeOVNNetworkProviderAdapter(client).DryRun(context.Background(), ports.NetworkProviderDryRunRequest{
+		TenantID:        "tenant-a",
+		UserID:          "user-a",
+		ResourceKind:    "route",
+		ResourceID:      "rt-default",
+		Operation:       ports.NetworkProviderOperationCreate,
+		Manifests:       manifests,
+		PermissionProof: "rbac:scope:networks:create",
+	})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if !result.Accepted || len(result.ResourceRefs) != 1 || result.ResourceRefs[0] != "kubeovn/Vpc/vpc-vpc-main" {
+		t.Fatalf("DryRun() result = %#v, want accepted route Vpc ref", result)
+	}
+	if client.dryRuns != 1 {
+		t.Fatalf("dryRuns = %d, want 1", client.dryRuns)
+	}
+}
+
 func TestKubeOVNNetworkProviderAdapterApplyFailsClosed(t *testing.T) {
 	client := &fakeKubernetesNetworkProviderClient{}
 	manifests := renderedNetworkVPC(t)
@@ -174,6 +198,23 @@ func renderedNetworkLoadBalancer(t *testing.T) []ports.WorkloadManifest {
 	})
 	if err != nil {
 		t.Fatalf("RenderLoadBalancer() error = %v", err)
+	}
+	return manifests
+}
+
+func renderedNetworkRoute(t *testing.T) []ports.WorkloadManifest {
+	t.Helper()
+	manifests, err := NewKubeOVNNetworkRenderer().RenderRoute(context.Background(), ports.NetworkRouteRecord{
+		TenantID:        "tenant-a",
+		RouteID:         "rt-default",
+		VPCID:           "vpc-main",
+		DestinationCIDR: "0.0.0.0/0",
+		NextHopType:     "gateway",
+		NextHopID:       "10.40.1.1",
+		State:           ports.NetworkResourceAvailable,
+	})
+	if err != nil {
+		t.Fatalf("RenderRoute() error = %v", err)
 	}
 	return manifests
 }

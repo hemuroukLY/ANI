@@ -105,6 +105,42 @@ func (r *KubeOVNNetworkRenderer) RenderLoadBalancer(_ context.Context, record po
 	return []ports.WorkloadManifest{{Name: name, Kind: "Service", Provider: "kubernetes", Content: content}}, nil
 }
 
+func (r *KubeOVNNetworkRenderer) RenderRoute(_ context.Context, record ports.NetworkRouteRecord) ([]ports.WorkloadManifest, error) {
+	if err := requireNetworkRecord(record.TenantID, record.RouteID, record.RouteID, record.State); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(record.VPCID) == "" {
+		return nil, fmt.Errorf("%w: vpc_id is required", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(record.DestinationCIDR) == "" || strings.TrimSpace(record.NextHopID) == "" {
+		return nil, fmt.Errorf("%w: destination_cidr and next_hop_id are required", ports.ErrInvalid)
+	}
+	nextHopType := strings.ToLower(strings.TrimSpace(record.NextHopType))
+	if nextHopType != "gateway" {
+		return nil, fmt.Errorf("%w: kubeovn route rendering currently supports gateway next_hop_type only", ports.ErrUnsupported)
+	}
+	name := networkProviderName("vpc", record.VPCID)
+	metadata := networkProviderMetadata(record.TenantID, name, "vpc", record.VPCID)
+	metadata["annotations"] = map[string]string{
+		"ani.kubercloud.io/network-route-id":            record.RouteID,
+		"ani.kubercloud.io/network-route-next-hop":      strings.TrimSpace(record.NextHopID),
+		"ani.kubercloud.io/network-route-next-hop-type": nextHopType,
+	}
+	content := manifest(map[string]any{
+		"apiVersion": "kubeovn.io/v1",
+		"kind":       "Vpc",
+		"metadata":   metadata,
+		"spec": map[string]any{
+			"staticRoutes": []any{map[string]any{
+				"cidr":      strings.TrimSpace(record.DestinationCIDR),
+				"nextHopIP": strings.TrimSpace(record.NextHopID),
+				"policy":    "policyDst",
+			}},
+		},
+	})
+	return []ports.WorkloadManifest{{Name: name, Kind: "Vpc", Provider: "kubeovn", Content: content}}, nil
+}
+
 func networkProviderMetadata(tenantID string, name string, resourceKind string, resourceID string) map[string]any {
 	return map[string]any{
 		"name":   name,
