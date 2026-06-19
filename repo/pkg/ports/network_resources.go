@@ -80,6 +80,18 @@ type NetworkLoadBalancerRecord struct {
 	UpdatedAt      time.Time
 }
 
+type NetworkRouteRecord struct {
+	TenantID        string
+	RouteID         string
+	VPCID           string
+	DestinationCIDR string
+	NextHopType     string
+	NextHopID       string
+	Description     string
+	State           NetworkResourceState
+	CreatedAt       time.Time
+}
+
 type NetworkVPCCreateRequest struct {
 	TenantID       string
 	IdempotencyKey string
@@ -114,6 +126,16 @@ type NetworkLoadBalancerCreateRequest struct {
 	Listeners      []NetworkLoadBalancerListener
 }
 
+type NetworkRouteCreateRequest struct {
+	TenantID        string
+	IdempotencyKey  string
+	VPCID           string
+	DestinationCIDR string
+	NextHopType     string
+	NextHopID       string
+	Description     string
+}
+
 type NetworkResourceGetRequest struct {
 	TenantID   string
 	ResourceID string
@@ -121,6 +143,13 @@ type NetworkResourceGetRequest struct {
 
 type NetworkResourceListRequest struct {
 	TenantID string
+	Limit    int
+	Cursor   string
+}
+
+type NetworkRouteListRequest struct {
+	TenantID string
+	VPCID    string
 	Limit    int
 	Cursor   string
 }
@@ -145,6 +174,9 @@ type NetworkService interface {
 	ListLoadBalancers(ctx context.Context, request NetworkResourceListRequest) ([]NetworkLoadBalancerRecord, error)
 	GetLoadBalancer(ctx context.Context, request NetworkResourceGetRequest) (NetworkLoadBalancerRecord, error)
 	DeleteLoadBalancer(ctx context.Context, request NetworkResourceGetRequest) (NetworkLoadBalancerRecord, error)
+
+	CreateRoute(ctx context.Context, request NetworkRouteCreateRequest) (NetworkRouteRecord, error)
+	ListRoutes(ctx context.Context, request NetworkRouteListRequest) ([]NetworkRouteRecord, error)
 }
 
 type NetworkResourceStore interface {

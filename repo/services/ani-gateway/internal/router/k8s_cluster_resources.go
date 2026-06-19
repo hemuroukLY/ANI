@@ -102,6 +102,17 @@ type k8sClusterProxyResponse struct {
 	ProxiedAt  string                 `json:"proxied_at"`
 	DevProfile coreDevProfileResponse `json:"dev_profile"`
 }
+type k8sClusterWorkloadResponse struct {
+	Name          string                 `json:"name"`
+	Namespace     string                 `json:"namespace"`
+	Kind          string                 `json:"kind"`
+	Replicas      int                    `json:"replicas"`
+	ReadyReplicas int                    `json:"ready_replicas"`
+	Image         string                 `json:"image,omitempty"`
+	Status        string                 `json:"status"`
+	CreatedAt     string                 `json:"created_at"`
+	DevProfile    coreDevProfileResponse `json:"dev_profile"`
+}
 
 func newK8sClusterAPI() *k8sClusterAPI {
 	return newK8sClusterAPIWithService(nil)
@@ -130,11 +141,16 @@ func registerK8sClusterResourcesWithService(v1 *route.RouterGroup, service ports
 	v1.DELETE("/k8s-clusters/:cluster_id/node-pools/:node_pool_id", api.deleteNodePool)
 	v1.GET("/k8s-clusters/:cluster_id/kubeconfig", api.getKubeconfig)
 	v1.POST("/k8s-clusters/:cluster_id/proxy", api.proxy)
+	v1.GET("/k8s-clusters/:cluster_id/workloads", api.listWorkloads)
 }
 func (api *k8sClusterAPI) createCluster(ctx context.Context, c *app.RequestContext) {
 	var req k8sClusterCreateRequest
 	if err := c.BindJSON(&req); err != nil {
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid k8s cluster request")
+		return
+	}
+	if req.Version == "requires-real-provider" {
+		writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "k8s cluster create precondition failed: real provider is not configured for this local profile")
 		return
 	}
 	rec, err := api.service.CreateCluster(ctx, ports.K8sClusterCreateRequest{TenantID: demoTenantID(c), IdempotencyKey: req.IdempotencyKey, Name: req.Name, Version: req.Version})
@@ -284,6 +300,23 @@ func (api *k8sClusterAPI) proxy(ctx context.Context, c *app.RequestContext) {
 	}
 	c.JSON(http.StatusOK, k8sClusterProxyFromRecord(rec))
 }
+func (api *k8sClusterAPI) listWorkloads(ctx context.Context, c *app.RequestContext) {
+	recs, err := api.service.ListWorkloads(ctx, ports.K8sClusterWorkloadListRequest{
+		TenantID:  demoTenantID(c),
+		ClusterID: c.Param("cluster_id"),
+		Namespace: c.Query("namespace"),
+		Kind:      c.Query("kind"),
+	})
+	if err != nil {
+		writeK8sClusterError(c, err)
+		return
+	}
+	items := make([]k8sClusterWorkloadResponse, 0, len(recs))
+	for _, rec := range recs {
+		items = append(items, k8sClusterWorkloadFromRecord(rec))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
 func k8sClusterFromRecord(r ports.K8sClusterRecord) k8sClusterResponse {
 	devProfile := localCoreDevProfile("local-k8s-cluster-service", "Core dev/local profile; vCluster lifecycle is simulated")
 	if r.RealProvider && r.Provider == "vcluster" {
@@ -332,6 +365,9 @@ func k8sClusterKubeconfigFromRecord(r ports.K8sClusterKubeconfigRecord) k8sClust
 func k8sClusterProxyFromRecord(r ports.K8sClusterProxyRecord) k8sClusterProxyResponse {
 	return k8sClusterProxyResponse{ClusterID: r.ClusterID, TenantID: r.TenantID, Method: r.Method, Path: r.Path, Query: r.Query, StatusCode: r.StatusCode, Headers: r.Headers, Body: r.Body, ProxiedAt: time.Unix(r.ProxiedAt, 0).UTC().Format(time.RFC3339), DevProfile: localCoreDevProfile("local-k8s-cluster-service", "Core dev/local profile; proxy response is simulated and not forwarded to a real vCluster API server")}
 }
+func k8sClusterWorkloadFromRecord(r ports.K8sClusterWorkloadRecord) k8sClusterWorkloadResponse {
+	return k8sClusterWorkloadResponse{Name: r.Name, Namespace: r.Namespace, Kind: r.Kind, Replicas: r.Replicas, ReadyReplicas: r.ReadyReplicas, Image: r.Image, Status: string(r.Status), CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339), DevProfile: localCoreDevProfile("local-k8s-cluster-service", "Core dev/local profile; workload listing is simulated and not forwarded to a real vCluster API server")}
+}
 func k8sClusterNodePoolGPUFromRequest(gpu k8sClusterNodePoolGPURequest) ports.K8sClusterNodePoolGPU {
 	return ports.K8sClusterNodePoolGPU{Vendor: gpu.Vendor, Model: gpu.Model, Count: gpu.Count, ResourceName: gpu.ResourceName}
 }
@@ -341,6 +377,8 @@ func writeK8sClusterError(c *app.RequestContext, err error) {
 		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrConflict):
 		writeDemoError(c, http.StatusConflict, "CONFLICT", err.Error())
+	case errors.Is(err, ports.ErrFailedPrecondition):
+		writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
 	case errors.Is(err, ports.ErrInvalid):
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:

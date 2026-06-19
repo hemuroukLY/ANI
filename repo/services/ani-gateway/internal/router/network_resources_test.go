@@ -90,3 +90,31 @@ func TestNetworkAPIServiceKeepsTenantIsolation(t *testing.T) {
 		t.Fatalf("GetVPC from another tenant succeeded, want isolation error")
 	}
 }
+
+func TestNetworkAPIDevProfileRoute(t *testing.T) {
+	api := newNetworkAPI()
+	vpc, err := api.service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-route-vpc-a",
+		Name:           "route-vpc",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	route, err := api.service.CreateRoute(context.Background(), ports.NetworkRouteCreateRequest{
+		TenantID:        "tenant-a",
+		IdempotencyKey:  "api-route-a",
+		VPCID:           vpc.VPCID,
+		DestinationCIDR: "0.0.0.0/0",
+		NextHopType:     "gateway",
+		NextHopID:       "11111111-1111-1111-1111-111111111111",
+		Description:     "default route",
+	})
+	if err != nil {
+		t.Fatalf("CreateRoute error = %v", err)
+	}
+	got := networkRouteFromRecord(route)
+	if got.ID == "" || got.VPCID != vpc.VPCID || got.DestinationCIDR != "0.0.0.0/0" || got.NextHopType != "gateway" {
+		t.Fatalf("route response = %+v, want route schema fields", got)
+	}
+}

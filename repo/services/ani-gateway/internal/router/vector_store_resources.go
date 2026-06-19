@@ -160,6 +160,8 @@ func writeVectorStoreError(c *app.RequestContext, err error) {
 		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrUnsupported):
 		writeDemoError(c, http.StatusBadRequest, "UNSUPPORTED", err.Error())
+	case errors.Is(err, ports.ErrFailedPrecondition):
+		writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
 	case errors.Is(err, ports.ErrInvalid):
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:

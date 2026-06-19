@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/kubercloud/ani/pkg/ports"
 )
@@ -79,5 +81,53 @@ func TestLocalVectorStoreServiceSearchValidatesDimension(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("SearchVectorStore() error = nil, want dimension mismatch")
+	}
+}
+
+func TestLocalVectorStoreServiceSearchRequiresReadyStore(t *testing.T) {
+	service := NewLocalVectorStoreService()
+	now := time.Now().UTC()
+	service.stores["vst-pending"] = ports.VectorStoreRecord{
+		TenantID:  "tenant-a",
+		StoreID:   "vst-pending",
+		Name:      "pending-store",
+		Dimension: 3,
+		Metric:    "cosine",
+		State:     ports.VectorStorePending,
+		Reason:    "index is still building",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	_, err := service.SearchVectorStore(context.Background(), ports.VectorStoreResourceSearchRequest{
+		TenantID:   "tenant-a",
+		ResourceID: "vst-pending",
+		Vector:     []float32{0.1, 0.2, 0.3},
+	})
+	if !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("SearchVectorStore error = %v, want ErrFailedPrecondition", err)
+	}
+}
+
+func TestLocalVectorStoreServiceCanCreatePendingDevProfileStore(t *testing.T) {
+	service := NewLocalVectorStoreService()
+	store, err := service.CreateVectorStore(context.Background(), ports.VectorStoreCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "vector-store-pending",
+		Name:           "pending-index",
+		Dimension:      3,
+	})
+	if err != nil {
+		t.Fatalf("CreateVectorStore() error = %v", err)
+	}
+	if store.State != ports.VectorStorePending {
+		t.Fatalf("store state = %s, want pending", store.State)
+	}
+	_, err = service.SearchVectorStore(context.Background(), ports.VectorStoreResourceSearchRequest{
+		TenantID:   "tenant-a",
+		ResourceID: store.StoreID,
+		Vector:     []float32{0.1, 0.2, 0.3},
+	})
+	if !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("SearchVectorStore error = %v, want ErrFailedPrecondition", err)
 	}
 }

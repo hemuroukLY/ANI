@@ -164,6 +164,22 @@ func TestK8sClusterAPIUsesInjectedProxyService(t *testing.T) {
 	if nodePool.NodePoolID != "np-a" || nodePool.NodeCount != 2 {
 		t.Fatalf("node pool = %+v, want injected node pool", nodePool)
 	}
+
+	workloads, err := api.service.ListWorkloads(context.Background(), ports.K8sClusterWorkloadListRequest{
+		TenantID:  "tenant-a",
+		ClusterID: "k8sclu-a",
+		Namespace: "default",
+		Kind:      "Deployment",
+	})
+	if err != nil {
+		t.Fatalf("ListWorkloads error = %v", err)
+	}
+	if !service.workloadsCalled {
+		t.Fatalf("injected service ListWorkloads was not called")
+	}
+	if got := k8sClusterWorkloadFromRecord(workloads[0]); got.Name != "api" || got.Namespace != "default" || got.Kind != "Deployment" || got.Status != "running" {
+		t.Fatalf("workload response = %+v, want injected workload", got)
+	}
 }
 
 func TestK8sClusterResponseMarksRealProviderWhenVClusterWasCreated(t *testing.T) {
@@ -186,12 +202,13 @@ func TestK8sClusterResponseMarksRealProviderWhenVClusterWasCreated(t *testing.T)
 }
 
 type fakeK8sClusterService struct {
-	proxyCalled    bool
-	upgradeCalled  bool
-	nodePoolCalled bool
-	proxyRecord    ports.K8sClusterProxyRecord
-	upgradeRecord  ports.K8sClusterRecord
-	nodePoolRecord ports.K8sClusterNodePoolRecord
+	proxyCalled     bool
+	upgradeCalled   bool
+	nodePoolCalled  bool
+	proxyRecord     ports.K8sClusterProxyRecord
+	upgradeRecord   ports.K8sClusterRecord
+	nodePoolRecord  ports.K8sClusterNodePoolRecord
+	workloadsCalled bool
 }
 
 func (s *fakeK8sClusterService) CreateCluster(context.Context, ports.K8sClusterCreateRequest) (ports.K8sClusterRecord, error) {
@@ -253,6 +270,20 @@ func (s *fakeK8sClusterService) Proxy(_ context.Context, req ports.K8sClusterPro
 	s.proxyRecord.TenantID = req.TenantID
 	s.proxyRecord.ClusterID = req.ClusterID
 	return s.proxyRecord, nil
+}
+
+func (s *fakeK8sClusterService) ListWorkloads(_ context.Context, req ports.K8sClusterWorkloadListRequest) ([]ports.K8sClusterWorkloadRecord, error) {
+	s.workloadsCalled = true
+	return []ports.K8sClusterWorkloadRecord{{
+		Name:          "api",
+		Namespace:     req.Namespace,
+		Kind:          req.Kind,
+		Replicas:      2,
+		ReadyReplicas: 2,
+		Image:         "registry.local/api:dev",
+		Status:        ports.K8sWorkloadRunning,
+		CreatedAt:     time.Unix(930, 0),
+	}}, nil
 }
 
 var _ ports.K8sClusterService = (*fakeK8sClusterService)(nil)

@@ -54,6 +54,15 @@ type networkCreateLoadBalancerRequest struct {
 	Listeners      []networkLBListenerRecord `json:"listeners"`
 }
 
+type networkCreateRouteRequest struct {
+	IdempotencyKey  string `json:"idempotency_key"`
+	VPCID           string `json:"vpc_id"`
+	DestinationCIDR string `json:"destination_cidr"`
+	NextHopType     string `json:"next_hop_type"`
+	NextHopID       string `json:"next_hop_id"`
+	Description     string `json:"description,omitempty"`
+}
+
 type networkLBListenerRecord struct {
 	Protocol   string `json:"protocol"`
 	Port       int32  `json:"port"`
@@ -115,6 +124,17 @@ type networkLoadBalancerResponse struct {
 	UpdatedAt  string                    `json:"updated_at"`
 }
 
+type networkRouteResponse struct {
+	ID              string                 `json:"id"`
+	VPCID           string                 `json:"vpc_id"`
+	DestinationCIDR string                 `json:"destination_cidr"`
+	NextHopType     string                 `json:"next_hop_type"`
+	NextHopID       string                 `json:"next_hop_id"`
+	Description     string                 `json:"description,omitempty"`
+	CreatedAt       string                 `json:"created_at"`
+	DevProfile      coreDevProfileResponse `json:"dev_profile"`
+}
+
 func newNetworkAPI() *networkAPI {
 	return &networkAPI{service: runtimeadapter.NewLocalNetworkService()}
 }
@@ -140,6 +160,9 @@ func registerNetworkResources(v1 *route.RouterGroup) {
 	v1.POST("/networks/load-balancers", api.createLoadBalancer)
 	v1.GET("/networks/load-balancers/:load_balancer_id", api.getLoadBalancer)
 	v1.DELETE("/networks/load-balancers/:load_balancer_id", api.deleteLoadBalancer)
+
+	v1.GET("/networks/routes", api.listRoutes)
+	v1.POST("/networks/routes", api.createRoute)
 }
 
 func (api *networkAPI) createVPC(ctx context.Context, c *app.RequestContext) {
@@ -348,6 +371,44 @@ func (api *networkAPI) deleteLoadBalancer(ctx context.Context, c *app.RequestCon
 	c.JSON(http.StatusOK, networkLoadBalancerFromRecord(record))
 }
 
+func (api *networkAPI) createRoute(ctx context.Context, c *app.RequestContext) {
+	var req networkCreateRouteRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid route request")
+		return
+	}
+	record, err := api.service.CreateRoute(ctx, ports.NetworkRouteCreateRequest{
+		TenantID:        demoTenantID(c),
+		IdempotencyKey:  req.IdempotencyKey,
+		VPCID:           req.VPCID,
+		DestinationCIDR: req.DestinationCIDR,
+		NextHopType:     req.NextHopType,
+		NextHopID:       req.NextHopID,
+		Description:     req.Description,
+	})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, networkRouteFromRecord(record))
+}
+
+func (api *networkAPI) listRoutes(ctx context.Context, c *app.RequestContext) {
+	records, err := api.service.ListRoutes(ctx, ports.NetworkRouteListRequest{
+		TenantID: demoTenantID(c),
+		VPCID:    c.Query("vpc_id"),
+	})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	items := make([]networkRouteResponse, 0, len(records))
+	for _, record := range records {
+		items = append(items, networkRouteFromRecord(record))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
 func networkVPCFromRecord(record ports.NetworkVPCRecord) networkVPCResponse {
 	return networkVPCResponse{
 		ID:         record.VPCID,
@@ -408,6 +469,19 @@ func networkLoadBalancerFromRecord(record ports.NetworkLoadBalancerRecord) netwo
 		DevProfile: localCoreDevProfile("local-network-service", "Core dev/local profile; provider execution is gated separately"),
 		CreatedAt:  networkTime(record.CreatedAt),
 		UpdatedAt:  networkTime(record.UpdatedAt),
+	}
+}
+
+func networkRouteFromRecord(record ports.NetworkRouteRecord) networkRouteResponse {
+	return networkRouteResponse{
+		ID:              record.RouteID,
+		VPCID:           record.VPCID,
+		DestinationCIDR: record.DestinationCIDR,
+		NextHopType:     record.NextHopType,
+		NextHopID:       record.NextHopID,
+		Description:     record.Description,
+		CreatedAt:       networkTime(record.CreatedAt),
+		DevProfile:      localCoreDevProfile("local-network-service", "Core dev/local profile; route provider execution is gated separately"),
 	}
 }
 

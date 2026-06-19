@@ -129,6 +129,13 @@ func (s *k8sClusterProxyForwardingService) GetKubeconfig(ctx context.Context, re
 	return s.base.GetKubeconfig(ctx, req)
 }
 
+func (s *k8sClusterProxyForwardingService) ListWorkloads(ctx context.Context, req ports.K8sClusterWorkloadListRequest) ([]ports.K8sClusterWorkloadRecord, error) {
+	if s.base == nil {
+		return nil, fmt.Errorf("%w: base k8s cluster service is required", ports.ErrNotConfigured)
+	}
+	return s.base.ListWorkloads(ctx, req)
+}
+
 func (s *k8sClusterProxyForwardingService) Proxy(ctx context.Context, req ports.K8sClusterProxyRequest) (ports.K8sClusterProxyRecord, error) {
 	if s.base == nil {
 		return ports.K8sClusterProxyRecord{}, fmt.Errorf("%w: base k8s cluster service is required", ports.ErrNotConfigured)

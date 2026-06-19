@@ -1510,7 +1510,7 @@ components:
 
     NetworkRoute:
       type: object
-      required: [id, vpc_id, destination_cidr, next_hop_type, next_hop_id, created_at]
+      required: [id, vpc_id, destination_cidr, next_hop_type, next_hop_id, created_at, dev_profile]
       properties:
         id:               { type: string, format: uuid }
         vpc_id:           { type: string, format: uuid }
@@ -1519,12 +1519,15 @@ components:
         next_hop_id:      { type: string, format: uuid }
         description:      { type: string, nullable: true }
         created_at:       { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     NetworkRouteListResponse:
       type: object
-      required: [items]
+      required: [items, total]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/NetworkRoute' } }
+        total:       { type: integer }
         next_cursor: { type: string, nullable: true }
 
     CreateNetworkRouteRequest:
@@ -1540,7 +1543,7 @@ components:
 
     VolumeSnapshotRecord:
       type: object
-      required: [id, volume_id, name, status, size_bytes, created_at]
+      required: [id, volume_id, name, status, size_bytes, created_at, dev_profile]
       properties:
         id:         { type: string, format: uuid }
         volume_id:  { type: string, format: uuid }
@@ -1548,12 +1551,15 @@ components:
         status:     { type: string, enum: [creating, available, error, deleting] }
         size_bytes: { type: integer }
         created_at: { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     VolumeSnapshotListResponse:
       type: object
-      required: [items]
+      required: [items, total]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/VolumeSnapshotRecord' } }
+        total:       { type: integer }
         next_cursor: { type: string, nullable: true }
 
     CreateVolumeSnapshotRequest:
@@ -1566,7 +1572,7 @@ components:
 
     FilesystemMountTarget:
       type: object
-      required: [id, filesystem_id, subnet_id, ip_address, status, created_at]
+      required: [id, filesystem_id, subnet_id, ip_address, status, created_at, dev_profile]
       properties:
         id:            { type: string, format: uuid }
         filesystem_id: { type: string, format: uuid }
@@ -1574,12 +1580,15 @@ components:
         ip_address:    { type: string }
         status:        { type: string, enum: [creating, available, deleting, error] }
         created_at:    { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     FilesystemMountTargetListResponse:
       type: object
-      required: [items]
+      required: [items, total]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/FilesystemMountTarget' } }
+        total:       { type: integer }
         next_cursor: { type: string, nullable: true }
 
     StorageBucketRecord:
@@ -1663,7 +1672,7 @@ components:
 
     K8sClusterWorkload:
       type: object
-      required: [name, namespace, kind, replicas, ready_replicas, status, created_at]
+      required: [name, namespace, kind, replicas, ready_replicas, status, created_at, dev_profile]
       properties:
         name:           { type: string }
         namespace:      { type: string }
@@ -1673,6 +1682,8 @@ components:
         image:          { type: string, nullable: true }
         status:         { type: string, enum: [running, pending, failed, succeeded] }
         created_at:     { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     K8sClusterWorkloadListResponse:
       type: object

@@ -16,6 +16,10 @@ EXPECTED_PATHS = {
         "get": ("getStorageVolume", "scope:volumes:read", {"200", "401", "403", "404"}),
         "delete": ("deleteStorageVolume", "scope:volumes:delete", {"200", "401", "403", "404"}),
     },
+    "/volumes/{volume_id}/snapshots": {
+        "get": ("listVolumeSnapshots", "scope:volumes:read", {"200", "401", "403", "404"}),
+        "post": ("createVolumeSnapshot", "scope:volumes:create", {"202", "400", "401", "403", "404"}),
+    },
     "/filesystems": {
         "get": ("listStorageFilesystems", "scope:filesystems:read", {"200", "401", "403"}),
         "post": ("createStorageFilesystem", "scope:filesystems:create", {"201", "400", "401", "403"}),
@@ -23,6 +27,9 @@ EXPECTED_PATHS = {
     "/filesystems/{filesystem_id}": {
         "get": ("getStorageFilesystem", "scope:filesystems:read", {"200", "401", "403", "404"}),
         "delete": ("deleteStorageFilesystem", "scope:filesystems:delete", {"200", "401", "403", "404"}),
+    },
+    "/filesystems/{filesystem_id}/mount-targets": {
+        "get": ("listFilesystemMountTargets", "scope:filesystems:read", {"200", "401", "403", "404"}),
     },
     "/objects": {
         "get": ("listStorageObjects", "scope:objects:read", {"200", "401", "403"}),
@@ -45,12 +52,21 @@ EXPECTED_SCHEMAS = {
     "CreateStorageVolumeRequest",
     "CreateStorageFilesystemRequest",
     "CreateStorageObjectRequest",
+    "VolumeSnapshotRecord",
+    "VolumeSnapshotListResponse",
+    "CreateVolumeSnapshotRequest",
+    "FilesystemMountTarget",
+    "FilesystemMountTargetListResponse",
 }
 
 EXPECTED_FIELDS = {
     "StorageVolume": {"id", "tenant_id", "name", "size_gib", "storage_class", "state", "reason", "created_at", "updated_at"},
     "StorageFilesystem": {"id", "tenant_id", "name", "protocol", "size_gib", "endpoint", "state", "reason", "created_at", "updated_at"},
     "StorageObject": {"id", "tenant_id", "bucket", "key", "size_bytes", "content_type", "state", "reason", "created_at", "updated_at"},
+    "VolumeSnapshotRecord": {"id", "volume_id", "name", "status", "size_bytes", "created_at", "dev_profile"},
+    "VolumeSnapshotListResponse": {"items", "total", "next_cursor"},
+    "FilesystemMountTarget": {"id", "filesystem_id", "subnet_id", "ip_address", "status", "created_at", "dev_profile"},
+    "FilesystemMountTargetListResponse": {"items", "total", "next_cursor"},
 }
 
 EXPECTED_ROUTES = {
@@ -58,8 +74,11 @@ EXPECTED_ROUTES = {
     'v1.POST("/volumes"',
     'v1.GET("/volumes/:volume_id"',
     'v1.DELETE("/volumes/:volume_id"',
+    'v1.GET("/volumes/:volume_id/snapshots"',
+    'v1.POST("/volumes/:volume_id/snapshots"',
     'v1.GET("/filesystems"',
     'v1.POST("/filesystems"',
+    'v1.GET("/filesystems/:filesystem_id/mount-targets"',
     'v1.GET("/objects"',
     'v1.POST("/objects"',
 }
@@ -132,10 +151,10 @@ def validate_gateway(root: Path, errors: list[str]) -> None:
             errors.append(f"storage_resources.go missing route token {route}")
     if "registerStorageResources(v1)" not in router_go:
         errors.append("router.go must register storage resources")
-    for token in ("StorageService interface", "StorageResourceStore interface", "StorageProviderRenderer interface", "StorageProviderDryRun interface", "StorageProviderApply interface", "StorageProviderStatusReader interface", "StorageStatusReconciler interface", "StorageResourceState", "StorageVolumeRecord", "StorageFilesystemRecord", "StorageObjectRecord"):
+    for token in ("StorageService interface", "StorageResourceStore interface", "StorageProviderRenderer interface", "StorageProviderDryRun interface", "StorageProviderApply interface", "StorageProviderStatusReader interface", "StorageStatusReconciler interface", "StorageResourceState", "StorageVolumeRecord", "StorageFilesystemRecord", "StorageObjectRecord", "VolumeSnapshotRecord", "VolumeSnapshotCreateRequest", "VolumeSnapshotListRequest", "FilesystemMountTargetRecord", "FilesystemMountTargetListRequest"):
         if token not in ports_go:
             errors.append(f"pkg/ports/storage_resources.go missing token {token}")
-    for token in ("NewLocalStorageService", "WithStorageResourceStore", "CreateVolume", "CreateFilesystem", "CreateObject", "DeleteVolume"):
+    for token in ("NewLocalStorageService", "WithStorageResourceStore", "CreateVolume", "CreateFilesystem", "CreateObject", "DeleteVolume", "CreateVolumeSnapshot", "ListVolumeSnapshots", "ListFilesystemMountTargets"):
         if token not in adapter_go:
             errors.append(f"storage_service.go missing token {token}")
     for token in ("MetadataStorageStore", "UpsertVolume", "UpsertFilesystem", "UpsertObject", "UpdateResourceState"):

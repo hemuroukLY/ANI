@@ -75,3 +75,47 @@ func TestStorageAPIServiceKeepsTenantIsolation(t *testing.T) {
 		t.Fatalf("GetVolume from another tenant succeeded, want isolation error")
 	}
 }
+
+func TestStorageAPIDevProfileSnapshotAndMountTarget(t *testing.T) {
+	api := newStorageAPI()
+	volume, err := api.service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-snapshot-volume-a",
+		Name:           "db-data",
+		SizeGiB:        16,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume error = %v", err)
+	}
+	snapshot, err := api.service.CreateVolumeSnapshot(context.Background(), ports.VolumeSnapshotCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-snapshot-a",
+		VolumeID:       volume.VolumeID,
+		Name:           "db-data-snap",
+	})
+	if err != nil {
+		t.Fatalf("CreateVolumeSnapshot error = %v", err)
+	}
+	if got := storageSnapshotFromRecord(snapshot); got.ID == "" || got.VolumeID != volume.VolumeID || got.Status != "available" || got.SizeBytes <= 0 {
+		t.Fatalf("snapshot response = %+v, want available snapshot", got)
+	}
+	filesystem, err := api.service.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-mount-fs-a",
+		Name:           "shared",
+		SizeGiB:        64,
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystem error = %v", err)
+	}
+	targets, err := api.service.ListFilesystemMountTargets(context.Background(), ports.FilesystemMountTargetListRequest{
+		TenantID:     "tenant-a",
+		FilesystemID: filesystem.FilesystemID,
+	})
+	if err != nil {
+		t.Fatalf("ListFilesystemMountTargets error = %v", err)
+	}
+	if got := storageMountTargetFromRecord(targets[0]); got.ID == "" || got.FilesystemID != filesystem.FilesystemID || got.Status != "available" || got.IPAddress == "" {
+		t.Fatalf("mount target response = %+v, want available mount target", got)
+	}
+}

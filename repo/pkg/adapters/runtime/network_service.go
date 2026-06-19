@@ -20,10 +20,12 @@ type LocalNetworkService struct {
 	subnets           map[string]ports.NetworkSubnetRecord
 	securityGroup     map[string]ports.NetworkSecurityGroupRecord
 	loadBalancers     map[string]ports.NetworkLoadBalancerRecord
+	routes            map[string]ports.NetworkRouteRecord
 	vpcIdempotency    map[string]string
 	subnetIdempotency map[string]string
 	securityGroupIdem map[string]string
 	loadBalancerIdem  map[string]string
+	routeIdempotency  map[string]string
 }
 
 type NetworkServiceOption func(*LocalNetworkService)
@@ -49,10 +51,12 @@ func NewLocalNetworkService(options ...NetworkServiceOption) *LocalNetworkServic
 		subnets:           map[string]ports.NetworkSubnetRecord{},
 		securityGroup:     map[string]ports.NetworkSecurityGroupRecord{},
 		loadBalancers:     map[string]ports.NetworkLoadBalancerRecord{},
+		routes:            map[string]ports.NetworkRouteRecord{},
 		vpcIdempotency:    map[string]string{},
 		subnetIdempotency: map[string]string{},
 		securityGroupIdem: map[string]string{},
 		loadBalancerIdem:  map[string]string{},
+		routeIdempotency:  map[string]string{},
 	}
 	for _, option := range options {
 		option(service)
@@ -376,6 +380,65 @@ func (s *LocalNetworkService) DeleteLoadBalancer(ctx context.Context, request po
 		return ports.NetworkLoadBalancerRecord{}, err
 	}
 	return record, nil
+}
+
+func (s *LocalNetworkService) CreateRoute(_ context.Context, request ports.NetworkRouteCreateRequest) (ports.NetworkRouteRecord, error) {
+	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
+	if err != nil {
+		return ports.NetworkRouteRecord{}, err
+	}
+	if strings.TrimSpace(request.VPCID) == "" {
+		return ports.NetworkRouteRecord{}, fmt.Errorf("%w: vpc_id is required", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(request.DestinationCIDR) == "" || strings.TrimSpace(request.NextHopType) == "" || strings.TrimSpace(request.NextHopID) == "" {
+		return ports.NetworkRouteRecord{}, fmt.Errorf("%w: destination_cidr/next_hop_type/next_hop_id are required", ports.ErrInvalid)
+	}
+	nextHopType := strings.ToLower(strings.TrimSpace(request.NextHopType))
+	if nextHopType != "gateway" && nextHopType != "instance" && nextHopType != "nat" {
+		return ports.NetworkRouteRecord{}, fmt.Errorf("%w: unsupported route next_hop_type %q", ports.ErrUnsupported, request.NextHopType)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id, ok := s.routeIdempotency[idemKey]; ok {
+		if record, exists := s.routes[id]; exists {
+			return record, nil
+		}
+	}
+	vpc, ok := s.vpcs[strings.TrimSpace(request.VPCID)]
+	if !ok || vpc.TenantID != request.TenantID || vpc.State == ports.NetworkResourceDeleted {
+		return ports.NetworkRouteRecord{}, fmt.Errorf("%w: vpc not found", ports.ErrNotFound)
+	}
+	record := ports.NetworkRouteRecord{
+		TenantID:        request.TenantID,
+		RouteID:         "rt_" + uuid.NewString(),
+		VPCID:           strings.TrimSpace(request.VPCID),
+		DestinationCIDR: strings.TrimSpace(request.DestinationCIDR),
+		NextHopType:     nextHopType,
+		NextHopID:       strings.TrimSpace(request.NextHopID),
+		Description:     strings.TrimSpace(request.Description),
+		State:           ports.NetworkResourceAvailable,
+		CreatedAt:       s.now().UTC(),
+	}
+	s.routes[record.RouteID] = record
+	s.routeIdempotency[idemKey] = record.RouteID
+	return record, nil
+}
+
+func (s *LocalNetworkService) ListRoutes(_ context.Context, request ports.NetworkRouteListRequest) ([]ports.NetworkRouteRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]ports.NetworkRouteRecord, 0, len(s.routes))
+	for _, record := range s.routes {
+		if record.TenantID != request.TenantID {
+			continue
+		}
+		if strings.TrimSpace(request.VPCID) != "" && record.VPCID != strings.TrimSpace(request.VPCID) {
+			continue
+		}
+		items = append(items, record)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
 }
 
 func (s *LocalNetworkService) upsertVPC(ctx context.Context, record ports.NetworkVPCRecord) error {

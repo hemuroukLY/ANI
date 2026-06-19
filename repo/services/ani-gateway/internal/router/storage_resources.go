@@ -37,6 +37,12 @@ type storageCreateObjectRequest struct {
 	ContentType    string `json:"content_type"`
 }
 
+type storageCreateSnapshotRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+	Name           string `json:"name"`
+	Description    string `json:"description,omitempty"`
+}
+
 type storageVolumeResponse struct {
 	ID           string                 `json:"id"`
 	TenantID     string                 `json:"tenant_id"`
@@ -78,6 +84,26 @@ type storageObjectResponse struct {
 	UpdatedAt   string                 `json:"updated_at"`
 }
 
+type storageSnapshotResponse struct {
+	ID         string                 `json:"id"`
+	VolumeID   string                 `json:"volume_id"`
+	Name       string                 `json:"name"`
+	Status     string                 `json:"status"`
+	SizeBytes  int64                  `json:"size_bytes"`
+	CreatedAt  string                 `json:"created_at"`
+	DevProfile coreDevProfileResponse `json:"dev_profile"`
+}
+
+type storageMountTargetResponse struct {
+	ID           string                 `json:"id"`
+	FilesystemID string                 `json:"filesystem_id"`
+	SubnetID     string                 `json:"subnet_id"`
+	IPAddress    string                 `json:"ip_address"`
+	Status       string                 `json:"status"`
+	CreatedAt    string                 `json:"created_at"`
+	DevProfile   coreDevProfileResponse `json:"dev_profile"`
+}
+
 func newStorageAPI() *storageAPI {
 	return &storageAPI{service: runtimeadapter.NewLocalStorageService()}
 }
@@ -88,11 +114,14 @@ func registerStorageResources(v1 *route.RouterGroup) {
 	v1.POST("/volumes", api.createVolume)
 	v1.GET("/volumes/:volume_id", api.getVolume)
 	v1.DELETE("/volumes/:volume_id", api.deleteVolume)
+	v1.GET("/volumes/:volume_id/snapshots", api.listVolumeSnapshots)
+	v1.POST("/volumes/:volume_id/snapshots", api.createVolumeSnapshot)
 
 	v1.GET("/filesystems", api.listFilesystems)
 	v1.POST("/filesystems", api.createFilesystem)
 	v1.GET("/filesystems/:filesystem_id", api.getFilesystem)
 	v1.DELETE("/filesystems/:filesystem_id", api.deleteFilesystem)
+	v1.GET("/filesystems/:filesystem_id/mount-targets", api.listFilesystemMountTargets)
 
 	v1.GET("/objects", api.listObjects)
 	v1.POST("/objects", api.createObject)
@@ -254,6 +283,58 @@ func (api *storageAPI) deleteObject(ctx context.Context, c *app.RequestContext) 
 	c.JSON(http.StatusOK, storageObjectFromRecord(record))
 }
 
+func (api *storageAPI) createVolumeSnapshot(ctx context.Context, c *app.RequestContext) {
+	var req storageCreateSnapshotRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid snapshot request")
+		return
+	}
+	record, err := api.service.CreateVolumeSnapshot(ctx, ports.VolumeSnapshotCreateRequest{
+		TenantID:       demoTenantID(c),
+		IdempotencyKey: req.IdempotencyKey,
+		VolumeID:       c.Param("volume_id"),
+		Name:           req.Name,
+		Description:    req.Description,
+	})
+	if err != nil {
+		writeStorageError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, storageSnapshotFromRecord(record))
+}
+
+func (api *storageAPI) listVolumeSnapshots(ctx context.Context, c *app.RequestContext) {
+	records, err := api.service.ListVolumeSnapshots(ctx, ports.VolumeSnapshotListRequest{
+		TenantID: demoTenantID(c),
+		VolumeID: c.Param("volume_id"),
+	})
+	if err != nil {
+		writeStorageError(c, err)
+		return
+	}
+	items := make([]storageSnapshotResponse, 0, len(records))
+	for _, record := range records {
+		items = append(items, storageSnapshotFromRecord(record))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
+func (api *storageAPI) listFilesystemMountTargets(ctx context.Context, c *app.RequestContext) {
+	records, err := api.service.ListFilesystemMountTargets(ctx, ports.FilesystemMountTargetListRequest{
+		TenantID:     demoTenantID(c),
+		FilesystemID: c.Param("filesystem_id"),
+	})
+	if err != nil {
+		writeStorageError(c, err)
+		return
+	}
+	items := make([]storageMountTargetResponse, 0, len(records))
+	for _, record := range records {
+		items = append(items, storageMountTargetFromRecord(record))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
 func storageVolumeFromRecord(record ports.StorageVolumeRecord) storageVolumeResponse {
 	return storageVolumeResponse{
 		ID:           record.VolumeID,
@@ -298,6 +379,30 @@ func storageObjectFromRecord(record ports.StorageObjectRecord) storageObjectResp
 		DevProfile:  localCoreDevProfile("local-storage-service", "Core dev/local profile; provider execution is gated separately"),
 		CreatedAt:   networkTime(record.CreatedAt),
 		UpdatedAt:   networkTime(record.UpdatedAt),
+	}
+}
+
+func storageSnapshotFromRecord(record ports.VolumeSnapshotRecord) storageSnapshotResponse {
+	return storageSnapshotResponse{
+		ID:         record.SnapshotID,
+		VolumeID:   record.VolumeID,
+		Name:       record.Name,
+		Status:     string(record.Status),
+		SizeBytes:  record.SizeBytes,
+		CreatedAt:  networkTime(record.CreatedAt),
+		DevProfile: localCoreDevProfile("local-storage-service", "Core dev/local profile; snapshot provider execution is gated separately"),
+	}
+}
+
+func storageMountTargetFromRecord(record ports.FilesystemMountTargetRecord) storageMountTargetResponse {
+	return storageMountTargetResponse{
+		ID:           record.MountTargetID,
+		FilesystemID: record.FilesystemID,
+		SubnetID:     record.SubnetID,
+		IPAddress:    record.IPAddress,
+		Status:       string(record.Status),
+		CreatedAt:    networkTime(record.CreatedAt),
+		DevProfile:   localCoreDevProfile("local-storage-service", "Core dev/local profile; mount target provider execution is gated separately"),
 	}
 }
 

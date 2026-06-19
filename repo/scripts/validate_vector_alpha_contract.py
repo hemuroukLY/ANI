@@ -17,7 +17,7 @@ EXPECTED_PATHS = {
         "delete": ("deleteVectorStore", "scope:vector-stores:delete", {"200", "401", "403", "404"}),
     },
     "/vector-stores/{vector_store_id}/search": {
-        "post": ("searchVectorStore", "scope:vector-stores:search", {"200", "400", "401", "403", "404"}),
+        "post": ("searchVectorStore", "scope:vector-stores:search", {"200", "400", "401", "403", "404", "422"}),
     },
 }
 

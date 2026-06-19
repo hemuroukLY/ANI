@@ -74,18 +74,24 @@ func (s *LocalVectorStoreService) CreateVectorStore(ctx context.Context, request
 	s.mu.Unlock()
 
 	now := s.now().UTC()
+	state := ports.VectorStoreReady
+	reason := "created by local vector store profile"
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(request.Name)), "pending-") {
+		state = ports.VectorStorePending
+		reason = "local vector store profile is still building the index"
+	}
 	record := ports.VectorStoreRecord{
 		TenantID:  request.TenantID,
 		StoreID:   "vst_" + uuid.NewString(),
 		Name:      strings.TrimSpace(request.Name),
 		Dimension: request.Dimension,
 		Metric:    metric,
-		State:     ports.VectorStoreReady,
-		Reason:    "created by local vector store profile",
+		State:     state,
+		Reason:    reason,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if s.backend != nil {
+	if s.backend != nil && record.State == ports.VectorStoreReady {
 		if err := s.backend.EnsureCollection(ctx, vectorCollectionRef(record), record.Dimension); err != nil {
 			return ports.VectorStoreRecord{}, err
 		}
@@ -139,6 +145,9 @@ func (s *LocalVectorStoreService) SearchVectorStore(ctx context.Context, request
 	record, err := s.GetVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: request.TenantID, ResourceID: request.ResourceID})
 	if err != nil {
 		return nil, err
+	}
+	if record.State != ports.VectorStoreReady {
+		return nil, fmt.Errorf("%w: vector store is not ready", ports.ErrFailedPrecondition)
 	}
 	if len(request.Vector) != record.Dimension {
 		return nil, fmt.Errorf("%w: vector dimension does not match vector store dimension", ports.ErrInvalid)

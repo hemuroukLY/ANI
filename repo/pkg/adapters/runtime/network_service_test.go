@@ -133,3 +133,51 @@ func TestLocalNetworkServiceSecurityGroupAndLoadBalancer(t *testing.T) {
 		t.Fatalf("load balancers = %#v, want deleted item hidden", list)
 	}
 }
+
+func TestLocalNetworkServiceRoutesDevProfileAndIdempotency(t *testing.T) {
+	service := NewLocalNetworkService()
+	vpc, err := service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "route-vpc-a",
+		Name:           "route-vpc",
+		CIDR:           "10.70.0.0/16",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+
+	route, err := service.CreateRoute(context.Background(), ports.NetworkRouteCreateRequest{
+		TenantID:        "tenant-a",
+		IdempotencyKey:  "route-a",
+		VPCID:           vpc.VPCID,
+		DestinationCIDR: "0.0.0.0/0",
+		NextHopType:     "gateway",
+		NextHopID:       "11111111-1111-1111-1111-111111111111",
+		Description:     "default route",
+	})
+	if err != nil {
+		t.Fatalf("CreateRoute error = %v", err)
+	}
+	retry, err := service.CreateRoute(context.Background(), ports.NetworkRouteCreateRequest{
+		TenantID:        "tenant-a",
+		IdempotencyKey:  "route-a",
+		VPCID:           vpc.VPCID,
+		DestinationCIDR: "10.0.0.0/8",
+		NextHopType:     "nat",
+		NextHopID:       "22222222-2222-2222-2222-222222222222",
+	})
+	if err != nil {
+		t.Fatalf("CreateRoute retry error = %v", err)
+	}
+	if retry.RouteID != route.RouteID || retry.DestinationCIDR != route.DestinationCIDR {
+		t.Fatalf("idempotent route = %+v, want original %+v", retry, route)
+	}
+
+	routes, err := service.ListRoutes(context.Background(), ports.NetworkRouteListRequest{TenantID: "tenant-a", VPCID: vpc.VPCID})
+	if err != nil {
+		t.Fatalf("ListRoutes error = %v", err)
+	}
+	if len(routes) != 1 || routes[0].RouteID != route.RouteID || routes[0].State != ports.NetworkResourceAvailable {
+		t.Fatalf("routes = %+v, want one available route", routes)
+	}
+}

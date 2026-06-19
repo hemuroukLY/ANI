@@ -84,3 +84,65 @@ func TestLocalStorageServiceFilesystemAndObjectDevProfile(t *testing.T) {
 		t.Fatalf("objects = %d, want 1", len(objects))
 	}
 }
+
+func TestLocalStorageServiceSnapshotsAndMountTargets(t *testing.T) {
+	service := NewLocalStorageService()
+	volume, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "snapshot-volume-a",
+		Name:           "db-data",
+		SizeGiB:        8,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume error = %v", err)
+	}
+	snapshot, err := service.CreateVolumeSnapshot(context.Background(), ports.VolumeSnapshotCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "snapshot-a",
+		VolumeID:       volume.VolumeID,
+		Name:           "db-data-snap",
+		Description:    "daily backup",
+	})
+	if err != nil {
+		t.Fatalf("CreateVolumeSnapshot error = %v", err)
+	}
+	retry, err := service.CreateVolumeSnapshot(context.Background(), ports.VolumeSnapshotCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "snapshot-a",
+		VolumeID:       volume.VolumeID,
+		Name:           "changed-name",
+	})
+	if err != nil {
+		t.Fatalf("CreateVolumeSnapshot retry error = %v", err)
+	}
+	if retry.SnapshotID != snapshot.SnapshotID || retry.Name != snapshot.Name {
+		t.Fatalf("idempotent snapshot = %+v, want original %+v", retry, snapshot)
+	}
+	snapshots, err := service.ListVolumeSnapshots(context.Background(), ports.VolumeSnapshotListRequest{TenantID: "tenant-a", VolumeID: volume.VolumeID})
+	if err != nil {
+		t.Fatalf("ListVolumeSnapshots error = %v", err)
+	}
+	if len(snapshots) != 1 || snapshots[0].Status != ports.VolumeSnapshotAvailable {
+		t.Fatalf("snapshots = %+v, want one available snapshot", snapshots)
+	}
+
+	filesystem, err := service.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "mount-fs-a",
+		Name:           "shared",
+		SizeGiB:        32,
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystem error = %v", err)
+	}
+	targets, err := service.ListFilesystemMountTargets(context.Background(), ports.FilesystemMountTargetListRequest{
+		TenantID:     "tenant-a",
+		FilesystemID: filesystem.FilesystemID,
+	})
+	if err != nil {
+		t.Fatalf("ListFilesystemMountTargets error = %v", err)
+	}
+	if len(targets) != 1 || targets[0].FilesystemID != filesystem.FilesystemID || targets[0].Status != ports.MountTargetAvailable {
+		t.Fatalf("mount targets = %+v, want generated available target", targets)
+	}
+}

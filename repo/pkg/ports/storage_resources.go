@@ -53,6 +53,45 @@ type StorageObjectRecord struct {
 	UpdatedAt   time.Time
 }
 
+type VolumeSnapshotStatus string
+
+const (
+	VolumeSnapshotCreating  VolumeSnapshotStatus = "creating"
+	VolumeSnapshotAvailable VolumeSnapshotStatus = "available"
+	VolumeSnapshotError     VolumeSnapshotStatus = "error"
+	VolumeSnapshotDeleting  VolumeSnapshotStatus = "deleting"
+)
+
+type VolumeSnapshotRecord struct {
+	TenantID    string
+	SnapshotID  string
+	VolumeID    string
+	Name        string
+	Description string
+	Status      VolumeSnapshotStatus
+	SizeBytes   int64
+	CreatedAt   time.Time
+}
+
+type MountTargetStatus string
+
+const (
+	MountTargetCreating  MountTargetStatus = "creating"
+	MountTargetAvailable MountTargetStatus = "available"
+	MountTargetDeleting  MountTargetStatus = "deleting"
+	MountTargetError     MountTargetStatus = "error"
+)
+
+type FilesystemMountTargetRecord struct {
+	TenantID      string
+	MountTargetID string
+	FilesystemID  string
+	SubnetID      string
+	IPAddress     string
+	Status        MountTargetStatus
+	CreatedAt     time.Time
+}
+
 type StorageVolumeCreateRequest struct {
 	TenantID       string
 	IdempotencyKey string
@@ -78,6 +117,14 @@ type StorageObjectCreateRequest struct {
 	ContentType    string
 }
 
+type VolumeSnapshotCreateRequest struct {
+	TenantID       string
+	IdempotencyKey string
+	VolumeID       string
+	Name           string
+	Description    string
+}
+
 type StorageResourceGetRequest struct {
 	TenantID   string
 	ResourceID string
@@ -87,6 +134,20 @@ type StorageResourceListRequest struct {
 	TenantID string
 	Limit    int
 	Cursor   string
+}
+
+type VolumeSnapshotListRequest struct {
+	TenantID string
+	VolumeID string
+	Limit    int
+	Cursor   string
+}
+
+type FilesystemMountTargetListRequest struct {
+	TenantID     string
+	FilesystemID string
+	Limit        int
+	Cursor       string
 }
 
 type StorageService interface {
@@ -104,6 +165,10 @@ type StorageService interface {
 	ListObjects(ctx context.Context, request StorageResourceListRequest) ([]StorageObjectRecord, error)
 	GetObject(ctx context.Context, request StorageResourceGetRequest) (StorageObjectRecord, error)
 	DeleteObject(ctx context.Context, request StorageResourceGetRequest) (StorageObjectRecord, error)
+
+	CreateVolumeSnapshot(ctx context.Context, request VolumeSnapshotCreateRequest) (VolumeSnapshotRecord, error)
+	ListVolumeSnapshots(ctx context.Context, request VolumeSnapshotListRequest) ([]VolumeSnapshotRecord, error)
+	ListFilesystemMountTargets(ctx context.Context, request FilesystemMountTargetListRequest) ([]FilesystemMountTargetRecord, error)
 }
 
 type StorageResourceStore interface {

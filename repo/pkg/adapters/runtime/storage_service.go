@@ -19,9 +19,12 @@ type LocalStorageService struct {
 	volumes           map[string]ports.StorageVolumeRecord
 	filesystems       map[string]ports.StorageFilesystemRecord
 	objects           map[string]ports.StorageObjectRecord
+	snapshots         map[string]ports.VolumeSnapshotRecord
+	mountTargets      map[string]ports.FilesystemMountTargetRecord
 	volumeIdempotency map[string]string
 	fsIdempotency     map[string]string
 	objectIdempotency map[string]string
+	snapshotIdem      map[string]string
 }
 
 type StorageServiceOption func(*LocalStorageService)
@@ -46,9 +49,12 @@ func NewLocalStorageService(options ...StorageServiceOption) *LocalStorageServic
 		volumes:           map[string]ports.StorageVolumeRecord{},
 		filesystems:       map[string]ports.StorageFilesystemRecord{},
 		objects:           map[string]ports.StorageObjectRecord{},
+		snapshots:         map[string]ports.VolumeSnapshotRecord{},
+		mountTargets:      map[string]ports.FilesystemMountTargetRecord{},
 		volumeIdempotency: map[string]string{},
 		fsIdempotency:     map[string]string{},
 		objectIdempotency: map[string]string{},
+		snapshotIdem:      map[string]string{},
 	}
 	for _, option := range options {
 		option(service)
@@ -300,6 +306,81 @@ func (s *LocalStorageService) DeleteObject(ctx context.Context, request ports.St
 		return ports.StorageObjectRecord{}, err
 	}
 	return record, nil
+}
+
+func (s *LocalStorageService) CreateVolumeSnapshot(_ context.Context, request ports.VolumeSnapshotCreateRequest) (ports.VolumeSnapshotRecord, error) {
+	if err := requireStorageTenantAndName(request.TenantID, request.Name); err != nil {
+		return ports.VolumeSnapshotRecord{}, err
+	}
+	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
+	if err != nil {
+		return ports.VolumeSnapshotRecord{}, err
+	}
+	if strings.TrimSpace(request.VolumeID) == "" {
+		return ports.VolumeSnapshotRecord{}, fmt.Errorf("%w: volume_id is required", ports.ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id, ok := s.snapshotIdem[idemKey]; ok {
+		if record, exists := s.snapshots[id]; exists {
+			return record, nil
+		}
+	}
+	volume, ok := s.volumes[strings.TrimSpace(request.VolumeID)]
+	if !ok || volume.TenantID != request.TenantID || volume.State == ports.StorageResourceDeleted {
+		return ports.VolumeSnapshotRecord{}, fmt.Errorf("%w: volume not found", ports.ErrNotFound)
+	}
+	record := ports.VolumeSnapshotRecord{
+		TenantID:    request.TenantID,
+		SnapshotID:  "snap_" + uuid.NewString(),
+		VolumeID:    volume.VolumeID,
+		Name:        strings.TrimSpace(request.Name),
+		Description: strings.TrimSpace(request.Description),
+		Status:      ports.VolumeSnapshotAvailable,
+		SizeBytes:   volume.SizeGiB * 1024 * 1024 * 1024,
+		CreatedAt:   s.now().UTC(),
+	}
+	s.snapshots[record.SnapshotID] = record
+	s.snapshotIdem[idemKey] = record.SnapshotID
+	return record, nil
+}
+
+func (s *LocalStorageService) ListVolumeSnapshots(_ context.Context, request ports.VolumeSnapshotListRequest) ([]ports.VolumeSnapshotRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	volume, ok := s.volumes[strings.TrimSpace(request.VolumeID)]
+	if !ok || volume.TenantID != request.TenantID || volume.State == ports.StorageResourceDeleted {
+		return nil, ports.ErrNotFound
+	}
+	items := make([]ports.VolumeSnapshotRecord, 0, len(s.snapshots))
+	for _, record := range s.snapshots {
+		if record.TenantID == request.TenantID && record.VolumeID == request.VolumeID {
+			items = append(items, record)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
+}
+
+func (s *LocalStorageService) ListFilesystemMountTargets(_ context.Context, request ports.FilesystemMountTargetListRequest) ([]ports.FilesystemMountTargetRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	filesystem, ok := s.filesystems[strings.TrimSpace(request.FilesystemID)]
+	if !ok || filesystem.TenantID != request.TenantID || filesystem.State == ports.StorageResourceDeleted {
+		return nil, ports.ErrNotFound
+	}
+	if _, ok := s.mountTargets[filesystem.FilesystemID]; !ok {
+		s.mountTargets[filesystem.FilesystemID] = ports.FilesystemMountTargetRecord{
+			TenantID:      filesystem.TenantID,
+			MountTargetID: "mt_" + uuid.NewString(),
+			FilesystemID:  filesystem.FilesystemID,
+			SubnetID:      "local-subnet",
+			IPAddress:     "127.0.0.1",
+			Status:        ports.MountTargetAvailable,
+			CreatedAt:     s.now().UTC(),
+		}
+	}
+	return []ports.FilesystemMountTargetRecord{s.mountTargets[filesystem.FilesystemID]}, nil
 }
 
 func (s *LocalStorageService) upsertVolume(ctx context.Context, record ports.StorageVolumeRecord) error {
