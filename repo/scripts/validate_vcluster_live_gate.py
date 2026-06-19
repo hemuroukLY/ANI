@@ -22,7 +22,14 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 DOC_ROOT = ROOT.parent
 DEFAULT_GATE = ROOT / "deploy/real-k8s-lab/vcluster-live-gate.yaml"
-REQUIRED_CHECKS = {"helm-install", "vcluster-kubeconfig", "kubectl-version", "core-cluster-register", "core-proxy-version"}
+REQUIRED_CHECKS = {
+    "helm-install",
+    "vcluster-kubeconfig",
+    "kubectl-version",
+    "core-cluster-register",
+    "core-proxy-version",
+    "core-workloads-list",
+}
 REQUIRED_ENV = {"KUBECONFIG", "ANI_GATEWAY_URL", "ANI_BEARER_TOKEN"}
 REQUIRED_DOC_TOKENS = ["M1-K8S-LIVE-A", "validate-vcluster-live-gate", "vCluster", "live proxy"]
 PROFILE = "M1-K8S-LIVE-A"
@@ -151,6 +158,29 @@ class CommandRunner:
             raise RuntimeError(f"Core proxy request failed: HTTP {err.code}: {detail}") from err
         except urllib.error.URLError as err:
             raise RuntimeError(f"Core proxy request failed: {err.reason}") from err
+
+    def get_json(self, url: str, bearer_token: str) -> dict[str, object]:
+        request = urllib.request.Request(
+            url,
+            method="GET",
+            headers={
+                "accept": "application/json",
+                "authorization": "Bearer " + bearer_token,
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                response_body = response.read().decode("utf-8")
+                return {
+                    "status_code": response.status,
+                    "headers": dict(response.headers.items()),
+                    "body": json.loads(response_body) if response_body else {},
+                }
+        except urllib.error.HTTPError as err:
+            detail = err.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Core workloads request failed: HTTP {err.code}: {detail}") from err
+        except urllib.error.URLError as err:
+            raise RuntimeError(f"Core workloads request failed: {err.reason}") from err
 
 
 def tenant_namespace(tenant_id: str) -> str:
@@ -284,11 +314,32 @@ def run_live(config: LiveConfig, runner: CommandRunner | None = None) -> dict[st
     status_code = int(proxy_response.get("status_code", 0))
     if status_code < 200 or status_code >= 300:
         fail(f"Core proxy returned HTTP {status_code}")
+    workloads_response = runner.get_json(
+        config.gateway_url.rstrip("/") + f"/k8s-clusters/{core_cluster_id}/workloads?namespace=default&kind=Deployment",
+        config.ani_bearer_token,
+    )
+    workloads_status = int(workloads_response.get("status_code", 0))
+    if workloads_status < 200 or workloads_status >= 300:
+        fail(f"Core workloads list returned HTTP {workloads_status}")
+    workloads_body = workloads_response.get("body", {})
+    if not isinstance(workloads_body, dict) or not isinstance(workloads_body.get("items"), list):
+        fail("Core workloads list response missing items")
+    workload_items = workloads_body["items"]
+    if not workload_items:
+        fail("Core workloads list response must include at least one workload")
+    first_workload = workload_items[0]
+    if not isinstance(first_workload, dict):
+        fail("Core workloads list item must be an object")
+    for field in ("name", "namespace", "kind", "status"):
+        if not isinstance(first_workload.get(field), str) or not first_workload[field].strip():
+            fail(f"Core workloads list item missing {field}")
     return {
         "status": "passed",
         "core_cluster_id": core_cluster_id,
         "kubectl_version": str(version.get("gitVersion") or version.get("major")),
         "proxy_status": status_code,
+        "workloads_status": workloads_status,
+        "workload_count": len(workload_items),
     }
 
 

@@ -18,6 +18,7 @@ class FakeRunner:
         self.commands: list[list[str]] = []
         self.envs: list[dict[str, str] | None] = []
         self.posts: list[tuple[str, dict[str, object], str]] = []
+        self.gets: list[tuple[str, str]] = []
 
     def run(self, command: list[str], env: dict[str, str] | None = None) -> str:
         self.commands.append(command)
@@ -42,6 +43,28 @@ class FakeRunner:
             }
         return {"status_code": 200, "headers": {"x-upstream": "vcluster"}, "body": {"kind": "Status"}}
 
+    def get_json(self, url: str, bearer_token: str) -> dict[str, object]:
+        self.gets.append((url, bearer_token))
+        return {
+            "status_code": 200,
+            "headers": {},
+            "body": {
+                "items": [
+                    {
+                        "name": "web",
+                        "namespace": "default",
+                        "kind": "Deployment",
+                        "replicas": 1,
+                        "ready_replicas": 1,
+                        "status": "running",
+                        "created_at": "2026-06-19T10:00:00Z",
+                    }
+                ],
+                "total": 1,
+                "next_cursor": None,
+            },
+        }
+
 
 class VClusterCommandRunner(FakeRunner):
     def run(self, command: list[str], env: dict[str, str] | None = None) -> str:
@@ -63,6 +86,7 @@ class VClusterLiveGateTest(unittest.TestCase):
         self.assertIn("vcluster-kubeconfig", check_ids)
         self.assertIn("kubectl-version", check_ids)
         self.assertIn("core-proxy-version", check_ids)
+        self.assertIn("core-workloads-list", check_ids)
 
     def test_contract_gate_rejects_live_check_command_non_string(self) -> None:
         document = deepcopy(gate.load_gate(gate.DEFAULT_GATE))
@@ -245,6 +269,14 @@ class VClusterLiveGateTest(unittest.TestCase):
                 "ani-token",
             ),
         )
+        self.assertEqual(
+            runner.gets[0],
+            (
+                "http://127.0.0.1:3000/api/v1/k8s-clusters/k8sclu-core-live/workloads?namespace=default&kind=Deployment",
+                "ani-token",
+            ),
+        )
+        self.assertEqual(result["workload_count"], 1)
 
     def test_live_gate_uses_vcluster_connect_to_run_kubectl_version_without_printing_kubeconfig(self) -> None:
         runner = VClusterCommandRunner()
@@ -289,6 +321,18 @@ class VClusterLiveGateTest(unittest.TestCase):
                 )
 
         self.assertIn("Core proxy request failed", str(raised.exception))
+        self.assertIn("refused", str(raised.exception))
+
+    def test_command_runner_reports_core_workloads_connection_errors_without_traceback(self) -> None:
+        runner = gate.CommandRunner()
+        with patch.object(gate.urllib.request, "urlopen", side_effect=gate.urllib.error.URLError("refused")):
+            with self.assertRaises(RuntimeError) as raised:
+                runner.get_json(
+                    "http://127.0.0.1:3000/api/v1/k8s-clusters/k8sclu-live/workloads?namespace=default&kind=Deployment",
+                    "ani-token",
+                )
+
+        self.assertIn("Core workloads request failed", str(raised.exception))
         self.assertIn("refused", str(raised.exception))
 
     def test_cli_live_mode_rejects_missing_gateway_before_running_commands(self) -> None:

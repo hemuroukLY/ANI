@@ -25,6 +25,9 @@ live_checks:
   - id: core-proxy-version
     command: POST {gateway_url}/k8s-clusters/{core_cluster_id}/proxy path=/version
     pass_condition: http_2xx
+  - id: core-workloads-list
+    command: GET {gateway_url}/k8s-clusters/{core_cluster_id}/workloads?namespace=default&kind=Deployment
+    pass_condition: http_2xx_response_has_workload_items
 
 readiness_levels:
   contract:

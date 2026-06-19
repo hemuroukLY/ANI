@@ -115,6 +115,74 @@ func TestK8sClusterProxyForwardingServiceRejectsMismatchedResolvedTarget(t *test
 	}
 }
 
+func TestK8sClusterProxyForwardingServiceListsWorkloadsFromResolvedAPIServer(t *testing.T) {
+	clusterProvider := &fakeK8sClusterForwardingProvider{
+		result: ports.K8sClusterProviderApplyResult{
+			Applied:      true,
+			Provider:     "vcluster",
+			ResourceRefs: []string{"vcluster/HelmRelease/vc-workloads"},
+			Reason:       "vCluster Helm release applied",
+		},
+	}
+	base := NewLocalK8sClusterService(WithK8sClusterProviderApply(clusterProvider))
+	cluster, err := base.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "create-vc-workloads",
+		Name:           "vc-workloads",
+		Version:        "v1.36.1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	transport := &capturingK8sProxyRoundTripper{
+		statusCode: http.StatusOK,
+		headers:    http.Header{"Content-Type": []string{"application/json"}},
+		body: `{
+			"kind":"DeploymentList",
+			"items":[{
+				"metadata":{"name":"web","namespace":"default","creationTimestamp":"2026-06-19T10:00:00Z"},
+				"spec":{"replicas":3,"template":{"spec":{"containers":[{"image":"registry.example/web:v1"}]}}},
+				"status":{"readyReplicas":2}
+			}]
+		}`,
+	}
+	resolver := staticK8sProxyTargetResolver{target: ports.K8sClusterProxyTarget{
+		TenantID:    "tenant-a",
+		ClusterID:   cluster.ClusterID,
+		Server:      "https://tenant-a-vcluster.example",
+		BearerToken: "tenant-token",
+	}}
+	service := NewK8sClusterProxyForwardingService(
+		base,
+		resolver,
+		WithK8sClusterProxyForwardingHTTPClient(&http.Client{Transport: transport}),
+	)
+
+	workloads, err := service.ListWorkloads(context.Background(), ports.K8sClusterWorkloadListRequest{
+		TenantID:  "tenant-a",
+		ClusterID: cluster.ClusterID,
+		Namespace: "default",
+		Kind:      "Deployment",
+	})
+	if err != nil {
+		t.Fatalf("ListWorkloads() error = %v", err)
+	}
+	if transport.method != http.MethodGet || transport.path != "/apis/apps/v1/namespaces/default/deployments" {
+		t.Fatalf("upstream request = %s %s, want GET deployments", transport.method, transport.path)
+	}
+	if transport.authorization != "Bearer tenant-token" {
+		t.Fatalf("upstream authorization = %q", transport.authorization)
+	}
+	if len(workloads) != 1 {
+		t.Fatalf("workloads = %+v, want one Deployment", workloads)
+	}
+	got := workloads[0]
+	if got.Name != "web" || got.Namespace != "default" || got.Kind != "Deployment" || got.Replicas != 3 || got.ReadyReplicas != 2 || got.Image != "registry.example/web:v1" || got.Status != ports.K8sWorkloadPending {
+		t.Fatalf("workload = %+v, want parsed pending Deployment", got)
+	}
+}
+
 type staticK8sProxyTargetResolver struct {
 	target ports.K8sClusterProxyTarget
 }
@@ -132,6 +200,14 @@ type capturingK8sProxyRoundTripper struct {
 	query         string
 	authorization string
 	decodedBody   map[string]any
+}
+
+type fakeK8sClusterForwardingProvider struct {
+	result ports.K8sClusterProviderApplyResult
+}
+
+func (p *fakeK8sClusterForwardingProvider) ApplyK8sCluster(context.Context, ports.K8sClusterProviderApplyRequest) (ports.K8sClusterProviderApplyResult, error) {
+	return p.result, nil
 }
 
 func (t *capturingK8sProxyRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
