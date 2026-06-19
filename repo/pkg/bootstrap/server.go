@@ -44,6 +44,10 @@ type Config struct {
 
 	WorkloadProvider                   string
 	WorkloadProviderApplyEnabled       bool
+	NetworkProvider                    string
+	NetworkProviderApplyEnabled        bool
+	NetworkProviderUserID              string
+	NetworkProviderPermissionProof     string
 	WorkloadLifecycleProvider          string
 	WorkloadLifecycleApplyEnabled      bool
 	WorkloadOpsProvider                string
@@ -121,6 +125,18 @@ func (c Config) withEnvironmentOverrides() Config {
 	}
 	if value := os.Getenv("WORKLOAD_PROVIDER_APPLY_ENABLED"); value != "" {
 		c.WorkloadProviderApplyEnabled = parseBool(value)
+	}
+	if value := os.Getenv("NETWORK_PROVIDER"); value != "" {
+		c.NetworkProvider = value
+	}
+	if value := os.Getenv("NETWORK_PROVIDER_APPLY_ENABLED"); value != "" {
+		c.NetworkProviderApplyEnabled = parseBool(value)
+	}
+	if value := os.Getenv("NETWORK_PROVIDER_USER_ID"); value != "" {
+		c.NetworkProviderUserID = value
+	}
+	if value := os.Getenv("NETWORK_PROVIDER_PERMISSION_PROOF"); value != "" {
+		c.NetworkProviderPermissionProof = value
 	}
 	if value := os.Getenv("WORKLOAD_LIFECYCLE_PROVIDER"); value != "" {
 		c.WorkloadLifecycleProvider = value

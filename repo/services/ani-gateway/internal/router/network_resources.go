@@ -136,11 +136,22 @@ type networkRouteResponse struct {
 }
 
 func newNetworkAPI() *networkAPI {
-	return &networkAPI{service: runtimeadapter.NewLocalNetworkService()}
+	return newNetworkAPIWithService(nil)
+}
+
+func newNetworkAPIWithService(service ports.NetworkService) *networkAPI {
+	if service == nil {
+		service = runtimeadapter.NewLocalNetworkService()
+	}
+	return &networkAPI{service: service}
 }
 
 func registerNetworkResources(v1 *route.RouterGroup) {
-	api := newNetworkAPI()
+	registerNetworkResourcesWithService(v1, nil)
+}
+
+func registerNetworkResourcesWithService(v1 *route.RouterGroup, service ports.NetworkService) {
+	api := newNetworkAPIWithService(service)
 	v1.GET("/networks/vpcs", api.listVPCs)
 	v1.POST("/networks/vpcs", api.createVPC)
 	v1.GET("/networks/vpcs/:vpc_id", api.getVPC)
@@ -473,6 +484,19 @@ func networkLoadBalancerFromRecord(record ports.NetworkLoadBalancerRecord) netwo
 }
 
 func networkRouteFromRecord(record ports.NetworkRouteRecord) networkRouteResponse {
+	devProfile := localCoreDevProfile("local-network-service", "Core dev/local profile; route provider execution is gated separately")
+	if record.RealProvider {
+		provider := record.Provider
+		if provider == "" {
+			provider = "kubeovn-network-provider"
+		}
+		devProfile = coreDevProfileResponse{
+			Mode:         "real",
+			Provider:     provider,
+			RealProvider: true,
+			Reason:       "Network route was applied through the configured network provider",
+		}
+	}
 	return networkRouteResponse{
 		ID:              record.RouteID,
 		VPCID:           record.VPCID,
@@ -481,7 +505,7 @@ func networkRouteFromRecord(record ports.NetworkRouteRecord) networkRouteRespons
 		NextHopID:       record.NextHopID,
 		Description:     record.Description,
 		CreatedAt:       networkTime(record.CreatedAt),
-		DevProfile:      localCoreDevProfile("local-network-service", "Core dev/local profile; route provider execution is gated separately"),
+		DevProfile:      devProfile,
 	}
 }
 

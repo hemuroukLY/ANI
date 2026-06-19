@@ -121,6 +121,35 @@ func TestNewCapabilitiesCanWireKubernetesRESTProvider(t *testing.T) {
 	}
 }
 
+func TestNewCapabilitiesCanWireKubeOVNNetworkRouteProvider(t *testing.T) {
+	capabilities, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{
+		NetworkProvider:                "kubeovn_rest",
+		NetworkProviderApplyEnabled:    true,
+		NetworkProviderUserID:          "ani-core-network-provider",
+		NetworkProviderPermissionProof: "rbac-scope:networks.routes.write",
+		KubernetesAPIHost:              "https://kubernetes.example.test",
+		KubernetesProviderFieldManager: "ani-test",
+	})
+	if err != nil {
+		t.Fatalf("NewCapabilitiesWithConfig() error = %v", err)
+	}
+	if _, ok := capabilities.NetworkResources.(*runtimeadapter.LocalNetworkService); !ok {
+		t.Fatalf("NetworkResources = %T, want LocalNetworkService with Kube-OVN route provider", capabilities.NetworkResources)
+	}
+	if _, ok := capabilities.NetworkDryRun.(*runtimeadapter.KubeOVNNetworkProviderAdapter); !ok {
+		t.Fatalf("NetworkDryRun = %T, want KubeOVNNetworkProviderAdapter", capabilities.NetworkDryRun)
+	}
+}
+
+func TestNewCapabilitiesRejectsKubeOVNNetworkProviderWithoutExecutionProof(t *testing.T) {
+	if _, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{
+		NetworkProvider:   "kubeovn_rest",
+		KubernetesAPIHost: "https://kubernetes.example.test",
+	}); err == nil {
+		t.Fatalf("NewCapabilitiesWithConfig() error = nil, want missing network provider proof error")
+	}
+}
+
 func TestNewCapabilitiesCanWireMinIOObjectStoreProvider(t *testing.T) {
 	capabilities, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{
 		ObjectStoreProvider:        "minio",

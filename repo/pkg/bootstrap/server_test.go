@@ -64,6 +64,28 @@ func TestConfigEnvironmentOverridesWorkloadReconcileController(t *testing.T) {
 	}
 }
 
+func TestConfigEnvironmentOverridesNetworkProvider(t *testing.T) {
+	t.Setenv("NETWORK_PROVIDER", "kubeovn_rest")
+	t.Setenv("NETWORK_PROVIDER_APPLY_ENABLED", "true")
+	t.Setenv("NETWORK_PROVIDER_USER_ID", "ani-core-network-provider")
+	t.Setenv("NETWORK_PROVIDER_PERMISSION_PROOF", "rbac-scope:networks.routes.write")
+
+	cfg := (Config{}).withEnvironmentOverrides()
+
+	if cfg.NetworkProvider != "kubeovn_rest" {
+		t.Fatalf("NetworkProvider = %q, want kubeovn_rest", cfg.NetworkProvider)
+	}
+	if !cfg.NetworkProviderApplyEnabled {
+		t.Fatalf("NetworkProviderApplyEnabled = false, want true")
+	}
+	if cfg.NetworkProviderUserID != "ani-core-network-provider" {
+		t.Fatalf("NetworkProviderUserID = %q, want ani-core-network-provider", cfg.NetworkProviderUserID)
+	}
+	if cfg.NetworkProviderPermissionProof != "rbac-scope:networks.routes.write" {
+		t.Fatalf("NetworkProviderPermissionProof = %q, want rbac scope proof", cfg.NetworkProviderPermissionProof)
+	}
+}
+
 func TestStartWorkloadReconcileControllerRequiresOptIn(t *testing.T) {
 	controller := &fakeWorkloadReconcileController{
 		started: make(chan struct{}),

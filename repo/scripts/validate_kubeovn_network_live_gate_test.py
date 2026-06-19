@@ -47,6 +47,8 @@ class FakeRunner:
             return '{"kind":"Service","metadata":{"name":"lb-ani-live-lb"},"spec":{"type":"LoadBalancer"}}'
         if "auth can-i" in joined:
             return "yes\n"
+        if "delete " in joined:
+            return "deleted\n"
         if "apply -f -" in joined:
             if not input_text or "apiVersion" not in input_text:
                 raise AssertionError("apply command must receive a manifest")
@@ -260,6 +262,34 @@ class KubeOVNNetworkLiveGateTest(unittest.TestCase):
         apply_commands = [command for command in runner.commands if command[-2:] == ["-f", "-"]]
         self.assertEqual(len(apply_commands), 6)
         self.assertTrue(any("staticRoutes:" in manifest for manifest in runner.applied_manifests))
+
+    def test_live_gate_cleanup_deletes_temporary_resources_after_observe(self) -> None:
+        runner = FakeRunner()
+        result = gate.run_live(
+            gate.LiveConfig(
+                tenant_id="tenant-a",
+                vpc_name="ani-live-net",
+                subnet_name="ani-live-subnet",
+                security_group_name="ani-live-sg",
+                load_balancer_name="ani-live-lb",
+                namespace="ani-tenant-tenant-a",
+            ),
+            runner=runner,
+            cleanup=True,
+        )
+
+        self.assertEqual(result["cleanup"]["status"], "deleted")
+        delete_commands = [" ".join(command) for command in runner.commands if "delete" in command]
+        self.assertEqual(
+            [
+                "kubectl -n ani-tenant-tenant-a delete service lb-ani-live-lb --ignore-not-found",
+                "kubectl -n ani-tenant-tenant-a delete networkpolicy sg-ani-live-sg --ignore-not-found",
+                "kubectl delete subnet subnet-ani-live-subnet --ignore-not-found",
+                "kubectl delete vpc vpc-ani-live-net --ignore-not-found",
+                "kubectl delete namespace ani-tenant-tenant-a --ignore-not-found",
+            ],
+            delete_commands,
+        )
 
     def test_external_lb_live_gate_patches_helper_and_proves_curl_results(self) -> None:
         runner = FakeExternalLBRunner()

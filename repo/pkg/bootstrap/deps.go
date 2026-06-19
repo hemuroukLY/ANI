@@ -130,7 +130,25 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	workloadIdentity := runtimeadapter.NewMetadataWorkloadIdentityService(metadata)
 	networkStore := runtimeadapter.NewMetadataNetworkStore(metadata)
 	networkRenderer := runtimeadapter.NewKubeOVNNetworkRenderer()
-	networkProvider := runtimeadapter.NewKubeOVNNetworkProviderAdapter(kubeClient)
+	networkProvider, err := networkProviderAdapter(cfg, kubeClient)
+	if err != nil {
+		return Capabilities{}, err
+	}
+	networkServiceOptions := []runtimeadapter.NetworkServiceOption{
+		runtimeadapter.WithNetworkResourceStore(networkStore),
+	}
+	if strings.TrimSpace(cfg.NetworkProvider) == "kubeovn_rest" {
+		networkServiceOptions = append(networkServiceOptions, runtimeadapter.WithNetworkRouteProvider(
+			networkRenderer,
+			networkProvider,
+			networkProvider,
+			networkProvider,
+			runtimeadapter.NetworkProviderExecutionConfig{
+				UserID:          cfg.NetworkProviderUserID,
+				PermissionProof: cfg.NetworkProviderPermissionProof,
+			},
+		))
+	}
 	storageStore := runtimeadapter.NewMetadataStorageStore(metadata)
 	storageProvider := runtimeadapter.NewKubernetesStorageProviderAdapter(kubeClient)
 	objectStore, err := objectStoreAdapter(cfg)
@@ -201,7 +219,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		NetworkApply:          networkProvider,
 		NetworkStatus:         networkProvider,
 		NetworkReconcile:      runtimeadapter.NewLocalNetworkStatusReconciler(networkStore),
-		NetworkResources:      runtimeadapter.NewLocalNetworkService(runtimeadapter.WithNetworkResourceStore(networkStore)),
+		NetworkResources:      runtimeadapter.NewLocalNetworkService(networkServiceOptions...),
 		StorageStore:          storageStore,
 		StorageRenderer:       runtimeadapter.NewKubernetesStorageRenderer(),
 		StorageDryRun:         storageProvider,
@@ -210,6 +228,35 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		StorageReconcile:      runtimeadapter.NewLocalStorageStatusReconciler(storageStore),
 		StorageResources:      runtimeadapter.NewLocalStorageService(storageServiceOptions...),
 	}, nil
+}
+
+func networkProviderAdapter(cfg Config, kubeClient *runtimeadapter.KubernetesRESTClient) (*runtimeadapter.KubeOVNNetworkProviderAdapter, error) {
+	switch strings.TrimSpace(cfg.NetworkProvider) {
+	case "", "local", "not_configured":
+		return runtimeadapter.NewKubeOVNNetworkProviderAdapter(kubeClient), nil
+	case "kubeovn_rest":
+		if strings.TrimSpace(cfg.NetworkProviderUserID) == "" || strings.TrimSpace(cfg.NetworkProviderPermissionProof) == "" {
+			return nil, fmt.Errorf("%w: network provider requires NETWORK_PROVIDER_USER_ID and NETWORK_PROVIDER_PERMISSION_PROOF", ports.ErrInvalid)
+		}
+		client := kubeClient
+		if client == nil {
+			var err error
+			client, err = runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+				Host:         cfg.KubernetesAPIHost,
+				BearerToken:  cfg.KubernetesBearerToken,
+				FieldManager: cfg.KubernetesProviderFieldManager,
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
+		return runtimeadapter.NewKubeOVNNetworkProviderAdapter(
+			client,
+			runtimeadapter.WithKubeOVNNetworkProviderApplyEnabled(cfg.NetworkProviderApplyEnabled),
+		), nil
+	default:
+		return nil, fmt.Errorf("%w: unsupported network provider %q", ports.ErrUnsupported, cfg.NetworkProvider)
+	}
 }
 
 func objectStoreAdapter(cfg Config) (ports.ObjectStore, error) {

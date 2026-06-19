@@ -712,7 +712,28 @@ def run_external_lb_live(config: ExternalLBConfig, runner: LiveRunner | None = N
     }
 
 
-def run_live(config: LiveConfig, runner: LiveRunner | None = None) -> dict[str, object]:
+def cleanup_live_resources(config: LiveConfig, runner: LiveRunner) -> dict[str, object]:
+    namespace = tenant_namespace(config)
+    vpc_name = kubernetes_name("vpc", config.vpc_name)
+    subnet_name = kubernetes_name("subnet", config.subnet_name)
+    security_group_name = kubernetes_name("sg", config.security_group_name)
+    load_balancer_name = kubernetes_name("lb", config.load_balancer_name)
+    deleted = [
+        f"service/{load_balancer_name}",
+        f"networkpolicy/{security_group_name}",
+        f"subnet/{subnet_name}",
+        f"vpc/{vpc_name}",
+        f"namespace/{namespace}",
+    ]
+    runner.run(kubectl(config, ["-n", namespace, "delete", "service", load_balancer_name, "--ignore-not-found"]))
+    runner.run(kubectl(config, ["-n", namespace, "delete", "networkpolicy", security_group_name, "--ignore-not-found"]))
+    runner.run(kubectl(config, ["delete", "subnet", subnet_name, "--ignore-not-found"]))
+    runner.run(kubectl(config, ["delete", "vpc", vpc_name, "--ignore-not-found"]))
+    runner.run(kubectl(config, ["delete", "namespace", namespace, "--ignore-not-found"]))
+    return {"status": "deleted", "resources": deleted}
+
+
+def run_live(config: LiveConfig, runner: LiveRunner | None = None, cleanup: bool = False) -> dict[str, object]:
     runner = runner or LiveRunner()
     namespace = tenant_namespace(config)
     vpc_name = kubernetes_name("vpc", config.vpc_name)
@@ -751,7 +772,7 @@ def run_live(config: LiveConfig, runner: LiveRunner | None = None) -> dict[str, 
     assert_observable_kubernetes_object(networkpolicy, "NetworkPolicy", security_group_name)
     assert_service(service, load_balancer_name)
 
-    return {
+    result: dict[str, object] = {
         "status": "passed",
         "namespace": namespace,
         "vpc": vpc_name,
@@ -760,6 +781,9 @@ def run_live(config: LiveConfig, runner: LiveRunner | None = None) -> dict[str, 
         "security_group": security_group_name,
         "load_balancer": load_balancer_name,
     }
+    if cleanup:
+        result["cleanup"] = cleanup_live_resources(config, runner)
+    return result
 
 
 def write_live_evidence(path: Path, evidence: dict[str, object]) -> None:
@@ -805,6 +829,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gate", default=str(DEFAULT_GATE), help="Kube-OVN network live gate YAML")
     parser.add_argument("--live", action="store_true", help="run live kubectl Kube-OVN checks")
+    parser.add_argument("--cleanup", action="store_true", help="delete temporary live-gate resources after successful observation")
     parser.add_argument("--tenant-id", default=os.getenv("ANI_LIVE_TENANT_ID", "tenant-a"))
     parser.add_argument("--namespace", default=os.getenv("ANI_LIVE_NAMESPACE", ""))
     parser.add_argument("--vpc-name", default=os.getenv("ANI_LIVE_VPC_NAME", "ani-live-net"))
@@ -895,7 +920,7 @@ def main() -> int:
             validate_external_lb_config(external_config)
         if args.evidence_output is not None:
             validate_evidence_output(args.evidence_output)
-        result = run_live(config)
+        result = run_live(config, cleanup=args.cleanup)
         if external_config is not None:
             result["external_load_balancer"] = run_external_lb_live(external_config)
         if args.evidence_output is not None:

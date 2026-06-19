@@ -156,7 +156,7 @@ def validate_gateway(root: Path, errors: list[str]) -> None:
     for route in EXPECTED_ROUTES:
         if route not in routes_go:
             errors.append(f"network_resources.go missing route token {route}")
-    if "registerNetworkResources(v1)" not in router_go:
+    if "registerNetworkResources(v1)" not in router_go and "registerNetworkResourcesWithService(v1, options.NetworkService)" not in router_go:
         errors.append("router.go must register network resources")
     for token in ("NetworkService interface", "NetworkResourceStore interface", "NetworkProviderRenderer interface", "NetworkProviderDryRun interface", "NetworkProviderApply interface", "NetworkProviderStatusReader interface", "NetworkStatusReconciler interface", "NetworkVPCRecord", "NetworkSubnetRecord", "NetworkLoadBalancerRecord", "NetworkRouteRecord", "NetworkRouteCreateRequest", "NetworkRouteListRequest"):
         if token not in ports_go:

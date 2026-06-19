@@ -89,6 +89,8 @@ type NetworkRouteRecord struct {
 	NextHopID       string
 	Description     string
 	State           NetworkResourceState
+	Provider        string
+	RealProvider    bool
 	CreatedAt       time.Time
 }
 
@@ -192,6 +194,7 @@ type NetworkProviderRenderer interface {
 	RenderSubnet(ctx context.Context, record NetworkSubnetRecord) ([]WorkloadManifest, error)
 	RenderSecurityGroup(ctx context.Context, record NetworkSecurityGroupRecord) ([]WorkloadManifest, error)
 	RenderLoadBalancer(ctx context.Context, record NetworkLoadBalancerRecord) ([]WorkloadManifest, error)
+	RenderRoute(ctx context.Context, record NetworkRouteRecord) ([]WorkloadManifest, error)
 }
 
 type NetworkProviderOperation string

@@ -16,6 +16,11 @@ type LocalNetworkService struct {
 	mu                sync.RWMutex
 	now               func() time.Time
 	store             ports.NetworkResourceStore
+	routeRenderer     ports.NetworkProviderRenderer
+	routeDryRun       ports.NetworkProviderDryRun
+	routeApply        ports.NetworkProviderApply
+	routeStatus       ports.NetworkProviderStatusReader
+	routeExecution    NetworkProviderExecutionConfig
 	vpcs              map[string]ports.NetworkVPCRecord
 	subnets           map[string]ports.NetworkSubnetRecord
 	securityGroup     map[string]ports.NetworkSecurityGroupRecord
@@ -30,6 +35,11 @@ type LocalNetworkService struct {
 
 type NetworkServiceOption func(*LocalNetworkService)
 
+type NetworkProviderExecutionConfig struct {
+	UserID          string
+	PermissionProof string
+}
+
 func WithNetworkServiceClock(now func() time.Time) NetworkServiceOption {
 	return func(service *LocalNetworkService) {
 		if now != nil {
@@ -41,6 +51,22 @@ func WithNetworkServiceClock(now func() time.Time) NetworkServiceOption {
 func WithNetworkResourceStore(store ports.NetworkResourceStore) NetworkServiceOption {
 	return func(service *LocalNetworkService) {
 		service.store = store
+	}
+}
+
+func WithNetworkRouteProvider(
+	renderer ports.NetworkProviderRenderer,
+	dryRun ports.NetworkProviderDryRun,
+	apply ports.NetworkProviderApply,
+	status ports.NetworkProviderStatusReader,
+	execution NetworkProviderExecutionConfig,
+) NetworkServiceOption {
+	return func(service *LocalNetworkService) {
+		service.routeRenderer = renderer
+		service.routeDryRun = dryRun
+		service.routeApply = apply
+		service.routeStatus = status
+		service.routeExecution = execution
 	}
 }
 
@@ -382,7 +408,7 @@ func (s *LocalNetworkService) DeleteLoadBalancer(ctx context.Context, request po
 	return record, nil
 }
 
-func (s *LocalNetworkService) CreateRoute(_ context.Context, request ports.NetworkRouteCreateRequest) (ports.NetworkRouteRecord, error) {
+func (s *LocalNetworkService) CreateRoute(ctx context.Context, request ports.NetworkRouteCreateRequest) (ports.NetworkRouteRecord, error) {
 	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
 	if err != nil {
 		return ports.NetworkRouteRecord{}, err
@@ -398,16 +424,18 @@ func (s *LocalNetworkService) CreateRoute(_ context.Context, request ports.Netwo
 		return ports.NetworkRouteRecord{}, fmt.Errorf("%w: unsupported route next_hop_type %q", ports.ErrUnsupported, request.NextHopType)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if id, ok := s.routeIdempotency[idemKey]; ok {
 		if record, exists := s.routes[id]; exists {
+			s.mu.Unlock()
 			return record, nil
 		}
 	}
 	vpc, ok := s.vpcs[strings.TrimSpace(request.VPCID)]
 	if !ok || vpc.TenantID != request.TenantID || vpc.State == ports.NetworkResourceDeleted {
+		s.mu.Unlock()
 		return ports.NetworkRouteRecord{}, fmt.Errorf("%w: vpc not found", ports.ErrNotFound)
 	}
+	providerConfigured := s.routeProviderConfigured()
 	record := ports.NetworkRouteRecord{
 		TenantID:        request.TenantID,
 		RouteID:         "rt_" + uuid.NewString(),
@@ -419,8 +447,27 @@ func (s *LocalNetworkService) CreateRoute(_ context.Context, request ports.Netwo
 		State:           ports.NetworkResourceAvailable,
 		CreatedAt:       s.now().UTC(),
 	}
+	if providerConfigured {
+		record.State = ports.NetworkResourcePending
+	}
 	s.routes[record.RouteID] = record
 	s.routeIdempotency[idemKey] = record.RouteID
+	s.mu.Unlock()
+	if !providerConfigured {
+		return record, nil
+	}
+	applied, err := s.applyRouteProvider(ctx, record)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		record.State = ports.NetworkResourceFailed
+		s.routes[record.RouteID] = record
+		return ports.NetworkRouteRecord{}, err
+	}
+	record = applied
+	if _, exists := s.routes[record.RouteID]; exists {
+		s.routes[record.RouteID] = record
+	}
 	return record, nil
 }
 
@@ -467,6 +514,73 @@ func (s *LocalNetworkService) upsertLoadBalancer(ctx context.Context, record por
 		return nil
 	}
 	return s.store.UpsertLoadBalancer(ctx, record)
+}
+
+func (s *LocalNetworkService) routeProviderConfigured() bool {
+	return s.routeRenderer != nil || s.routeDryRun != nil || s.routeApply != nil || s.routeStatus != nil
+}
+
+func (s *LocalNetworkService) applyRouteProvider(ctx context.Context, record ports.NetworkRouteRecord) (ports.NetworkRouteRecord, error) {
+	if s.routeRenderer == nil || s.routeDryRun == nil || s.routeApply == nil || s.routeStatus == nil {
+		return ports.NetworkRouteRecord{}, fmt.Errorf("%w: network route provider requires renderer, dry-run, apply, and status adapters", ports.ErrNotConfigured)
+	}
+	userID := strings.TrimSpace(s.routeExecution.UserID)
+	permissionProof := strings.TrimSpace(s.routeExecution.PermissionProof)
+	if userID == "" || permissionProof == "" {
+		return ports.NetworkRouteRecord{}, fmt.Errorf("%w: network route provider requires explicit user id and permission proof", ports.ErrInvalid)
+	}
+	manifests, err := s.routeRenderer.RenderRoute(ctx, record)
+	if err != nil {
+		return ports.NetworkRouteRecord{}, err
+	}
+	requestedAt := s.now().UTC()
+	dryRun, err := s.routeDryRun.DryRun(ctx, ports.NetworkProviderDryRunRequest{
+		TenantID:        record.TenantID,
+		UserID:          userID,
+		ResourceKind:    "route",
+		ResourceID:      record.RouteID,
+		Operation:       ports.NetworkProviderOperationCreate,
+		Manifests:       manifests,
+		PermissionProof: permissionProof,
+		RequestedAt:     requestedAt,
+	})
+	if err != nil {
+		return ports.NetworkRouteRecord{}, err
+	}
+	apply, err := s.routeApply.Apply(ctx, ports.NetworkProviderApplyRequest{
+		TenantID:        record.TenantID,
+		UserID:          userID,
+		ResourceKind:    "route",
+		ResourceID:      record.RouteID,
+		Operation:       ports.NetworkProviderOperationCreate,
+		Manifests:       manifests,
+		PermissionProof: permissionProof,
+		DryRunResult:    dryRun,
+		RequestedAt:     requestedAt,
+	})
+	if err != nil {
+		return ports.NetworkRouteRecord{}, err
+	}
+	observation, err := s.routeStatus.Observe(ctx, ports.NetworkProviderStatusRequest{
+		TenantID:        record.TenantID,
+		UserID:          userID,
+		ResourceKind:    "route",
+		ResourceID:      record.RouteID,
+		ApplyResult:     apply,
+		PermissionProof: permissionProof,
+		RequestedAt:     requestedAt,
+	})
+	if err != nil {
+		return ports.NetworkRouteRecord{}, err
+	}
+	if observation.State == "" {
+		record.State = ports.NetworkResourceAvailable
+	} else {
+		record.State = observation.State
+	}
+	record.Provider = firstNetworkNonEmpty(observation.Provider, apply.Provider)
+	record.RealProvider = apply.Applied
+	return record, nil
 }
 
 func requireNetworkTenantAndName(tenantID string, name string) error {

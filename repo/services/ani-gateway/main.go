@@ -39,9 +39,19 @@ func main() {
 		logger.Error("failed to configure secret provider runtime", "err", err)
 		os.Exit(1)
 	}
+	networkService, err := newGatewayNetworkService(gatewayNetworkRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure network provider runtime", "err", err)
+		os.Exit(1)
+	}
 	middleware.StartAuditWorker()
 	middleware.Register(h)
-	router.RegisterWithOptions(h, router.RegisterOptions{K8sClusterService: k8sClusterService, EncryptionService: encryptionService, SecretService: secretService})
+	router.RegisterWithOptions(h, router.RegisterOptions{
+		K8sClusterService: k8sClusterService,
+		EncryptionService: encryptionService,
+		SecretService:     secretService,
+		NetworkService:    networkService,
+	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

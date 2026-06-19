@@ -1,0 +1,21 @@
+{
+  "cleanup": {
+    "resources": [
+      "service/lb-sprint13-s01-lb",
+      "networkpolicy/sg-sprint13-s01-sg",
+      "subnet/subnet-sprint13-s01-subnet",
+      "vpc/vpc-sprint13-s01-route",
+      "namespace/ani-tenant-sprint13-s01-b"
+    ],
+    "status": "deleted"
+  },
+  "id": "kubeovn-network-live-gate",
+  "load_balancer": "lb-sprint13-s01-lb",
+  "namespace": "ani-tenant-sprint13-s01-b",
+  "profile": "M1-NETWORK-LIVE-A",
+  "route": "route-sprint13-s01-route",
+  "security_group": "sg-sprint13-s01-sg",
+  "status": "passed",
+  "subnet": "subnet-sprint13-s01-subnet",
+  "vpc": "vpc-sprint13-s01-route"
+}

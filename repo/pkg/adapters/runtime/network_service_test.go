@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kubercloud/ani/pkg/ports"
 )
@@ -181,3 +182,109 @@ func TestLocalNetworkServiceRoutesDevProfileAndIdempotency(t *testing.T) {
 		t.Fatalf("routes = %+v, want one available route", routes)
 	}
 }
+
+func TestLocalNetworkServiceRouteCanUseKubeOVNProviderPipeline(t *testing.T) {
+	provider := &fakeNetworkRouteProvider{}
+	service := NewLocalNetworkService(
+		WithNetworkRouteProvider(
+			NewKubeOVNNetworkRenderer(),
+			provider,
+			provider,
+			provider,
+			NetworkProviderExecutionConfig{
+				UserID:          "ani-core-network-provider",
+				PermissionProof: "rbac-scope:networks.routes.write",
+			},
+		),
+		WithNetworkServiceClock(func() time.Time { return time.Unix(2000, 0) }),
+	)
+	vpc, err := service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "route-provider-vpc",
+		Name:           "route-provider-vpc",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+
+	route, err := service.CreateRoute(context.Background(), ports.NetworkRouteCreateRequest{
+		TenantID:        "tenant-a",
+		IdempotencyKey:  "route-provider-a",
+		VPCID:           vpc.VPCID,
+		DestinationCIDR: "0.0.0.0/0",
+		NextHopType:     "gateway",
+		NextHopID:       "10.70.0.1",
+	})
+	if err != nil {
+		t.Fatalf("CreateRoute error = %v", err)
+	}
+	if route.State != ports.NetworkResourceAvailable {
+		t.Fatalf("route state = %s, want provider observation available", route.State)
+	}
+	if !route.RealProvider || route.Provider != "kubeovn" {
+		t.Fatalf("route provider = real:%v provider:%q, want kubeovn real provider", route.RealProvider, route.Provider)
+	}
+	if provider.dryRuns != 1 || provider.applies != 1 || provider.observes != 1 {
+		t.Fatalf("provider calls dry=%d apply=%d observe=%d, want 1/1/1", provider.dryRuns, provider.applies, provider.observes)
+	}
+	if provider.lastDryRun.ResourceKind != "route" || provider.lastDryRun.ResourceID != route.RouteID {
+		t.Fatalf("dry-run identity = %#v, want route %s", provider.lastDryRun, route.RouteID)
+	}
+	if provider.lastDryRun.UserID != "ani-core-network-provider" || provider.lastDryRun.PermissionProof == "" {
+		t.Fatalf("dry-run execution identity = %#v, want explicit provider identity", provider.lastDryRun)
+	}
+	if len(provider.lastDryRun.Manifests) != 1 || provider.lastDryRun.Manifests[0].Kind != "Vpc" {
+		t.Fatalf("dry-run manifests = %#v, want route rendered as Vpc staticRoutes", provider.lastDryRun.Manifests)
+	}
+}
+
+type fakeNetworkRouteProvider struct {
+	dryRuns    int
+	applies    int
+	observes   int
+	lastDryRun ports.NetworkProviderDryRunRequest
+}
+
+func (p *fakeNetworkRouteProvider) DryRun(_ context.Context, request ports.NetworkProviderDryRunRequest) (ports.NetworkProviderDryRunResult, error) {
+	p.dryRuns++
+	p.lastDryRun = request
+	return ports.NetworkProviderDryRunResult{
+		Accepted:      true,
+		Provider:      "kubeovn",
+		ManifestCount: len(request.Manifests),
+		ResourceRefs:  []string{"kubeovn/Vpc/vpc-" + request.ResourceID},
+		Reason:        "accepted by fake kubeovn dry-run",
+		CheckedAt:     time.Unix(2001, 0),
+	}, nil
+}
+
+func (p *fakeNetworkRouteProvider) Apply(_ context.Context, request ports.NetworkProviderApplyRequest) (ports.NetworkProviderApplyResult, error) {
+	p.applies++
+	return ports.NetworkProviderApplyResult{
+		Applied:       true,
+		Provider:      "kubeovn",
+		ManifestCount: len(request.Manifests),
+		Operation:     request.Operation,
+		ResourceRefs:  append([]string(nil), request.DryRunResult.ResourceRefs...),
+		Reason:        "applied by fake kubeovn provider",
+		AppliedAt:     time.Unix(2002, 0),
+	}, nil
+}
+
+func (p *fakeNetworkRouteProvider) Observe(_ context.Context, request ports.NetworkProviderStatusRequest) (ports.NetworkProviderStatusResult, error) {
+	p.observes++
+	return ports.NetworkProviderStatusResult{
+		TenantID:     request.TenantID,
+		ResourceKind: request.ResourceKind,
+		ResourceID:   request.ResourceID,
+		Provider:     request.ApplyResult.Provider,
+		ResourceRefs: append([]string(nil), request.ApplyResult.ResourceRefs...),
+		State:        ports.NetworkResourceAvailable,
+		Reason:       "observed by fake kubeovn provider",
+		ObservedAt:   time.Unix(2003, 0),
+	}, nil
+}
+
+var _ ports.NetworkProviderDryRun = (*fakeNetworkRouteProvider)(nil)
+var _ ports.NetworkProviderApply = (*fakeNetworkRouteProvider)(nil)
+var _ ports.NetworkProviderStatusReader = (*fakeNetworkRouteProvider)(nil)
