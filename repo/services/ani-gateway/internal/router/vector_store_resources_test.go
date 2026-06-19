@@ -66,3 +66,31 @@ func TestVectorStoreAPIServiceKeepsTenantIsolation(t *testing.T) {
 		t.Fatalf("GetVectorStore from another tenant succeeded, want isolation error")
 	}
 }
+
+func TestVectorStoreAPIDocumentInsertResponseMatchesCoreSchema(t *testing.T) {
+	api := newVectorStoreAPI()
+	store, err := api.service.CreateVectorStore(context.Background(), ports.VectorStoreCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-vector-docs",
+		Name:           "kb-main",
+		Dimension:      3,
+	})
+	if err != nil {
+		t.Fatalf("CreateVectorStore error = %v", err)
+	}
+
+	result, err := api.service.InsertDocuments(context.Background(), ports.VectorStoreDocumentInsertRequest{
+		TenantID:       "tenant-a",
+		ResourceID:     store.StoreID,
+		IdempotencyKey: "api-insert-docs",
+		Documents: []ports.VectorDocumentInput{
+			{ID: "doc-a", Content: "hello vector", Metadata: map[string]string{"source": "router"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("InsertDocuments error = %v", err)
+	}
+	if got := vectorStoreDocumentInsertFromResult(result); got.InsertedCount != 1 || got.TaskID == "" || got.Status != "completed" {
+		t.Fatalf("insert response = %+v, want VectorStoreDocumentInsertResponse fields", got)
+	}
+}

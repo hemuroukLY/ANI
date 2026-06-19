@@ -44,6 +44,20 @@ type storageCreateSnapshotRequest struct {
 	Description    string `json:"description,omitempty"`
 }
 
+type storageCreateBucketRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+	Name           string `json:"name"`
+	Region         string `json:"region,omitempty"`
+	AccessMode     string `json:"access_mode,omitempty"`
+}
+
+type storageObjectUploadRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+	BucketID       string `json:"bucket_id"`
+	Key            string `json:"key"`
+	ContentType    string `json:"content_type,omitempty"`
+}
+
 type storageVolumeResponse struct {
 	ID           string                 `json:"id"`
 	TenantID     string                 `json:"tenant_id"`
@@ -105,6 +119,29 @@ type storageMountTargetResponse struct {
 	DevProfile   coreDevProfileResponse `json:"dev_profile"`
 }
 
+type storageBucketResponse struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Region      string `json:"region,omitempty"`
+	AccessMode  string `json:"access_mode"`
+	ObjectCount int    `json:"object_count"`
+	SizeBytes   int64  `json:"size_bytes"`
+	CreatedAt   string `json:"created_at"`
+}
+
+type storageObjectUploadResponse struct {
+	UploadURL string `json:"upload_url"`
+	ObjectID  string `json:"object_id"`
+	ExpiresAt string `json:"expires_at,omitempty"`
+}
+
+type storageObjectDownloadResponse struct {
+	DownloadURL string `json:"download_url"`
+	ExpiresAt   string `json:"expires_at,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+	SizeBytes   int64  `json:"size_bytes,omitempty"`
+}
+
 type storageSnapshotTaskResponse struct {
 	ID             string         `json:"id"`
 	IdempotencyKey string         `json:"idempotency_key"`
@@ -138,10 +175,15 @@ func registerStorageResources(v1 *route.RouterGroup) {
 	v1.DELETE("/filesystems/:filesystem_id", api.deleteFilesystem)
 	v1.GET("/filesystems/:filesystem_id/mount-targets", api.listFilesystemMountTargets)
 
+	v1.GET("/buckets", api.listStorageBuckets)
+	v1.POST("/buckets", api.createStorageBucket)
+
 	v1.GET("/objects", api.listObjects)
 	v1.POST("/objects", api.createObject)
+	v1.POST("/objects/upload", api.uploadStorageObject)
 	v1.GET("/objects/:object_id", api.getObject)
 	v1.DELETE("/objects/:object_id", api.deleteObject)
+	v1.GET("/objects/:object_id/download", api.downloadStorageObject)
 }
 
 func (api *storageAPI) createVolume(ctx context.Context, c *app.RequestContext) {
@@ -298,6 +340,76 @@ func (api *storageAPI) deleteObject(ctx context.Context, c *app.RequestContext) 
 	c.JSON(http.StatusOK, storageObjectFromRecord(record))
 }
 
+func (api *storageAPI) createStorageBucket(ctx context.Context, c *app.RequestContext) {
+	var req storageCreateBucketRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid bucket request")
+		return
+	}
+	record, err := api.service.CreateStorageBucket(ctx, ports.StorageBucketCreateRequest{
+		TenantID:       demoTenantID(c),
+		IdempotencyKey: req.IdempotencyKey,
+		Name:           req.Name,
+		Region:         req.Region,
+		AccessMode:     req.AccessMode,
+	})
+	if err != nil {
+		writeStorageError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, storageBucketFromRecord(record))
+}
+
+func (api *storageAPI) listStorageBuckets(ctx context.Context, c *app.RequestContext) {
+	records, err := api.service.ListStorageBuckets(ctx, ports.StorageResourceListRequest{
+		TenantID: demoTenantID(c),
+		Limit:    queryInt(c, "limit", 20),
+		Cursor:   c.Query("cursor"),
+	})
+	if err != nil {
+		writeStorageError(c, err)
+		return
+	}
+	items := make([]storageBucketResponse, 0, len(records))
+	for _, record := range records {
+		items = append(items, storageBucketFromRecord(record))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
+func (api *storageAPI) uploadStorageObject(ctx context.Context, c *app.RequestContext) {
+	var req storageObjectUploadRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid object upload request")
+		return
+	}
+	record, err := api.service.CreateStorageObjectUpload(ctx, ports.StorageObjectUploadRequest{
+		TenantID:       demoTenantID(c),
+		IdempotencyKey: req.IdempotencyKey,
+		BucketID:       req.BucketID,
+		Key:            req.Key,
+		ContentType:    req.ContentType,
+	})
+	if err != nil {
+		writeStorageError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, storageObjectUploadFromRecord(record))
+}
+
+func (api *storageAPI) downloadStorageObject(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.GetStorageObjectDownload(ctx, ports.StorageObjectDownloadRequest{
+		TenantID:       demoTenantID(c),
+		ObjectID:       c.Param("object_id"),
+		ExpiresSeconds: queryInt(c, "expires_seconds", 3600),
+	})
+	if err != nil {
+		writeStorageError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, storageObjectDownloadFromRecord(record))
+}
+
 func (api *storageAPI) createVolumeSnapshot(ctx context.Context, c *app.RequestContext) {
 	var req storageCreateSnapshotRequest
 	if err := c.BindJSON(&req); err != nil {
@@ -399,6 +511,35 @@ func storageObjectFromRecord(record ports.StorageObjectRecord) storageObjectResp
 	}
 }
 
+func storageBucketFromRecord(record ports.StorageBucketRecord) storageBucketResponse {
+	return storageBucketResponse{
+		ID:          record.BucketID,
+		Name:        record.Name,
+		Region:      record.Region,
+		AccessMode:  record.AccessMode,
+		ObjectCount: record.ObjectCount,
+		SizeBytes:   record.SizeBytes,
+		CreatedAt:   networkTime(record.CreatedAt),
+	}
+}
+
+func storageObjectUploadFromRecord(record ports.StorageObjectUploadRecord) storageObjectUploadResponse {
+	return storageObjectUploadResponse{
+		UploadURL: record.UploadURL,
+		ObjectID:  record.ObjectID,
+		ExpiresAt: networkTime(record.ExpiresAt),
+	}
+}
+
+func storageObjectDownloadFromRecord(record ports.StorageObjectDownloadRecord) storageObjectDownloadResponse {
+	return storageObjectDownloadResponse{
+		DownloadURL: record.DownloadURL,
+		ExpiresAt:   networkTime(record.ExpiresAt),
+		ContentType: record.ContentType,
+		SizeBytes:   record.SizeBytes,
+	}
+}
+
 func storageSnapshotFromRecord(record ports.VolumeSnapshotRecord) storageSnapshotResponse {
 	return storageSnapshotResponse{
 		ID:         record.SnapshotID,
@@ -444,6 +585,8 @@ func writeStorageError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrNotFound):
 		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+	case errors.Is(err, ports.ErrConflict):
+		writeDemoError(c, http.StatusConflict, "CONFLICT", err.Error())
 	case errors.Is(err, ports.ErrUnsupported):
 		writeDemoError(c, http.StatusBadRequest, "UNSUPPORTED", err.Error())
 	case errors.Is(err, ports.ErrInvalid):

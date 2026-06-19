@@ -127,3 +127,46 @@ func TestStorageAPIDevProfileSnapshotAndMountTarget(t *testing.T) {
 		t.Fatalf("mount target response = %+v, want available mount target", got)
 	}
 }
+
+func TestStorageAPIBucketAndSignedURLResponsesMatchCoreSchema(t *testing.T) {
+	api := newStorageAPI()
+	bucket, err := api.service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-bucket-a",
+		Name:           "models-a",
+		Region:         "local",
+		AccessMode:     "private",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket error = %v", err)
+	}
+	if got := storageBucketFromRecord(bucket); got.ID == "" || got.Name != "models-a" || got.AccessMode != "private" || got.CreatedAt == "" {
+		t.Fatalf("bucket response = %+v, want StorageBucketRecord fields", got)
+	}
+
+	upload, err := api.service.CreateStorageObjectUpload(context.Background(), ports.StorageObjectUploadRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-upload-a",
+		BucketID:       bucket.BucketID,
+		Key:            "llm/model.bin",
+		ContentType:    "application/octet-stream",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageObjectUpload error = %v", err)
+	}
+	if got := storageObjectUploadFromRecord(upload); got.ObjectID == "" || got.UploadURL == "" || got.ExpiresAt == "" {
+		t.Fatalf("upload response = %+v, want StorageObjectUploadResponse fields", got)
+	}
+
+	download, err := api.service.GetStorageObjectDownload(context.Background(), ports.StorageObjectDownloadRequest{
+		TenantID:       "tenant-a",
+		ObjectID:       upload.ObjectID,
+		ExpiresSeconds: 3600,
+	})
+	if err != nil {
+		t.Fatalf("GetStorageObjectDownload error = %v", err)
+	}
+	if got := storageObjectDownloadFromRecord(download); got.DownloadURL == "" || got.ExpiresAt == "" || got.ContentType != "application/octet-stream" {
+		t.Fatalf("download response = %+v, want StorageObjectDownloadInfo fields", got)
+	}
+}

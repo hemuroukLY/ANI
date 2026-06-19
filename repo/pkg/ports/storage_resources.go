@@ -53,6 +53,30 @@ type StorageObjectRecord struct {
 	UpdatedAt   time.Time
 }
 
+type StorageBucketRecord struct {
+	TenantID    string
+	BucketID    string
+	Name        string
+	Region      string
+	AccessMode  string
+	ObjectCount int
+	SizeBytes   int64
+	CreatedAt   time.Time
+}
+
+type StorageObjectUploadRecord struct {
+	ObjectID  string
+	UploadURL string
+	ExpiresAt time.Time
+}
+
+type StorageObjectDownloadRecord struct {
+	DownloadURL string
+	ExpiresAt   time.Time
+	ContentType string
+	SizeBytes   int64
+}
+
 type VolumeSnapshotStatus string
 
 const (
@@ -117,6 +141,29 @@ type StorageObjectCreateRequest struct {
 	ContentType    string
 }
 
+type StorageBucketCreateRequest struct {
+	TenantID       string
+	IdempotencyKey string
+	Name           string
+	Region         string
+	AccessMode     string
+}
+
+type StorageObjectUploadRequest struct {
+	TenantID       string
+	IdempotencyKey string
+	BucketID       string
+	Key            string
+	ContentType    string
+	ExpiresSeconds int
+}
+
+type StorageObjectDownloadRequest struct {
+	TenantID       string
+	ObjectID       string
+	ExpiresSeconds int
+}
+
 type VolumeSnapshotCreateRequest struct {
 	TenantID       string
 	IdempotencyKey string
@@ -165,6 +212,11 @@ type StorageService interface {
 	ListObjects(ctx context.Context, request StorageResourceListRequest) ([]StorageObjectRecord, error)
 	GetObject(ctx context.Context, request StorageResourceGetRequest) (StorageObjectRecord, error)
 	DeleteObject(ctx context.Context, request StorageResourceGetRequest) (StorageObjectRecord, error)
+
+	CreateStorageBucket(ctx context.Context, request StorageBucketCreateRequest) (StorageBucketRecord, error)
+	ListStorageBuckets(ctx context.Context, request StorageResourceListRequest) ([]StorageBucketRecord, error)
+	CreateStorageObjectUpload(ctx context.Context, request StorageObjectUploadRequest) (StorageObjectUploadRecord, error)
+	GetStorageObjectDownload(ctx context.Context, request StorageObjectDownloadRequest) (StorageObjectDownloadRecord, error)
 
 	CreateVolumeSnapshot(ctx context.Context, request VolumeSnapshotCreateRequest) (VolumeSnapshotRecord, error)
 	ListVolumeSnapshots(ctx context.Context, request VolumeSnapshotListRequest) ([]VolumeSnapshotRecord, error)

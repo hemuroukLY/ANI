@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"io"
 	"testing"
+	"time"
 
 	"github.com/kubercloud/ani/pkg/ports"
 )
@@ -145,4 +147,122 @@ func TestLocalStorageServiceSnapshotsAndMountTargets(t *testing.T) {
 	if len(targets) != 1 || targets[0].FilesystemID != filesystem.FilesystemID || targets[0].Status != ports.MountTargetAvailable {
 		t.Fatalf("mount targets = %+v, want generated available target", targets)
 	}
+}
+
+func TestLocalStorageServiceBucketsAndSignedObjectURLsUseObjectStorePort(t *testing.T) {
+	objectStore := &fakeObjectStore{
+		uploadURL:   "https://objects.local/upload/model.bin",
+		downloadURL: "https://objects.local/download/model.bin",
+		expiresAt:   time.Date(2026, 6, 19, 10, 30, 0, 0, time.UTC),
+	}
+	service := NewLocalStorageService(WithStorageObjectStore(objectStore))
+
+	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bucket-a",
+		Name:           "models-a",
+		Region:         "local",
+		AccessMode:     "private",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+	if bucket.BucketID == "" || bucket.Name != "models-a" || bucket.AccessMode != "private" {
+		t.Fatalf("bucket = %#v, want private models-a bucket", bucket)
+	}
+	if objectStore.ensureBucket != ports.BucketClass("models-a") {
+		t.Fatalf("EnsureBucket class = %q, want models-a", objectStore.ensureBucket)
+	}
+
+	replay, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bucket-a",
+		Name:           "changed-name",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket replay error = %v", err)
+	}
+	if replay.BucketID != bucket.BucketID || replay.Name != bucket.Name {
+		t.Fatalf("replay bucket = %#v, want original %#v", replay, bucket)
+	}
+
+	upload, err := service.CreateStorageObjectUpload(context.Background(), ports.StorageObjectUploadRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "upload-a",
+		BucketID:       bucket.BucketID,
+		Key:            "llm/model.bin",
+		ContentType:    "application/octet-stream",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageObjectUpload() error = %v", err)
+	}
+	if upload.UploadURL != objectStore.uploadURL || upload.ObjectID == "" || upload.ExpiresAt != objectStore.expiresAt {
+		t.Fatalf("upload = %#v, want signed upload response", upload)
+	}
+	if objectStore.uploadRef.BucketClass != ports.BucketClass("models-a") || objectStore.uploadRef.ObjectKey != "llm/model.bin" {
+		t.Fatalf("upload ref = %#v, want bucket models-a key llm/model.bin", objectStore.uploadRef)
+	}
+
+	download, err := service.GetStorageObjectDownload(context.Background(), ports.StorageObjectDownloadRequest{
+		TenantID:       "tenant-a",
+		ObjectID:       upload.ObjectID,
+		ExpiresSeconds: 600,
+	})
+	if err != nil {
+		t.Fatalf("GetStorageObjectDownload() error = %v", err)
+	}
+	if download.DownloadURL != objectStore.downloadURL || download.ContentType != "application/octet-stream" {
+		t.Fatalf("download = %#v, want signed download response", download)
+	}
+	if objectStore.downloadRef.BucketClass != ports.BucketClass("models-a") || objectStore.downloadRef.ObjectKey != "llm/model.bin" {
+		t.Fatalf("download ref = %#v, want bucket models-a key llm/model.bin", objectStore.downloadRef)
+	}
+
+	buckets, err := service.ListStorageBuckets(context.Background(), ports.StorageResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListStorageBuckets() error = %v", err)
+	}
+	if len(buckets) != 1 || buckets[0].ObjectCount != 1 {
+		t.Fatalf("buckets = %#v, want one bucket with one object", buckets)
+	}
+}
+
+type fakeObjectStore struct {
+	ensureBucket ports.BucketClass
+	uploadRef    ports.ObjectRef
+	downloadRef  ports.ObjectRef
+	uploadURL    string
+	downloadURL  string
+	expiresAt    time.Time
+}
+
+func (s *fakeObjectStore) EnsureBucket(_ context.Context, class ports.BucketClass) error {
+	s.ensureBucket = class
+	return nil
+}
+
+func (s *fakeObjectStore) PutObject(context.Context, ports.PutObjectInput) (ports.ObjectMetadata, error) {
+	return ports.ObjectMetadata{}, ports.ErrUnsupported
+}
+
+func (s *fakeObjectStore) GetObject(context.Context, ports.ObjectRef) (io.ReadCloser, ports.ObjectMetadata, error) {
+	return nil, ports.ObjectMetadata{}, ports.ErrUnsupported
+}
+
+func (s *fakeObjectStore) DeleteObject(context.Context, ports.ObjectRef) error {
+	return ports.ErrUnsupported
+}
+
+func (s *fakeObjectStore) StatObject(context.Context, ports.ObjectRef) (ports.ObjectMetadata, error) {
+	return ports.ObjectMetadata{}, ports.ErrUnsupported
+}
+
+func (s *fakeObjectStore) SignedUploadURL(_ context.Context, ref ports.ObjectRef, _ time.Duration) (ports.SignedURL, error) {
+	s.uploadRef = ref
+	return ports.SignedURL{URL: s.uploadURL, ExpiresAt: s.expiresAt}, nil
+}
+
+func (s *fakeObjectStore) SignedDownloadURL(_ context.Context, ref ports.ObjectRef, _ time.Duration) (ports.SignedURL, error) {
+	s.downloadRef = ref
+	return ports.SignedURL{URL: s.downloadURL, ExpiresAt: s.expiresAt}, nil
 }
