@@ -3,11 +3,13 @@
 > 记录类型：Sprint 13 B-track production-shaped review / guard
 > 日期：2026-06-20
 > 范围：仅 ANI Core Sprint 13 S01-S04 已通过 B 轨 real-provider evidence 的生产形态边界审查
-> 状态：**real-provider evidence passed, production-shaped gate pending**。不得标 production ready 或 runtime ready。
+> 状态：**real-provider evidence passed; production-shaped acceptance standard ready; historical evidence pending**。不得用旧 lab evidence 标 production ready 或 runtime ready。
 
 ## 结论
 
 S01-S04 均已通过各自 real-provider live gate，但这些结果仍是 lab/live evidence，不是生产形态证据。为防止误标生产可用，本批次新增 `validate-sprint13-b-track-production-shape` 门禁，强制四份 evidence JSON 与四份 live-result 文档同时记录 `production_shape.status=pending` 和进入生产形态前必须补齐的项目。
+
+后续 `SPRINT13-B-TRACK-PRODUCTION-SHAPED-CLOSURE` 已把该门禁升级为 production-shaped acceptance standard：Kubernetes REST client 支持 in-cluster ServiceAccount token/CA，Gateway network/storage/gpu runtime 透传 in-cluster 配置，S01 route metadata 已持久化，S02/S03/S04 live gate 增加 `--production-shaped` 模式，并新增 `deploy/real-k8s-lab/sprint13-production-shaped-gateway-profile.yaml` / `sprint13-production-shaped-gateway-rbac.yaml` 作为 S01-S07 B 轨 passed 标准。旧 S01-S04 evidence 仍保持 pending，必须重新跑 production-shaped live gate 才能标 passed。
 
 ## S01-S04 审查矩阵
 
@@ -26,11 +28,12 @@ cd repo && make validate-sprint13-b-track-production-shape
 
 门禁检查：
 
-- S01-S04 evidence JSON 必须保留 real-provider gate `status=passed`。
+- S01-S04 historical evidence JSON 必须保留 real-provider gate `status=passed`。
 - S01-S04 evidence JSON 必须包含 `production_shape`。
 - `production_shape.status=pending` 时必须列出 `missing_items`。
-- 若未来标 `production_shape.status=passed`，不得使用 `lab_proxy`、`local_port_forward` 或 `dev_gateway` 传输形态，且 `missing_items` 必须为空。
+- 若未来标 `production_shape.status=passed`，不得使用 lab/local/kubectl proxy/port-forward/dev gateway 传输形态，`missing_items` 必须为空，且 `proof_items` 必须包含该切片 required proof。
 - 对应 live-result 文档必须同时写明 `Production-shaped gate`、`production_shape` 和不代表 `production ready`。
+- Production profile/RBAC 必须存在并覆盖 S01-S07 proof 标准。
 
 ## 生产形态通过条件
 

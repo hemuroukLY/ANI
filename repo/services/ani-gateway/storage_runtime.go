@@ -11,25 +11,33 @@ import (
 )
 
 type gatewayStorageRuntimeConfig struct {
-	ProviderMode              string
-	ProviderApply             bool
-	ProviderUserID            string
-	ProviderProof             string
-	KubernetesAPIHost         string
-	KubernetesBearerToken     string
-	KubernetesProviderManager string
-	KubernetesHTTPClient      *http.Client
+	ProviderMode                      string
+	ProviderApply                     bool
+	ProviderUserID                    string
+	ProviderProof                     string
+	KubernetesAPIHost                 string
+	KubernetesServiceHost             string
+	KubernetesServicePort             string
+	KubernetesBearerToken             string
+	KubernetesServiceAccountTokenFile string
+	KubernetesServiceAccountCAFile    string
+	KubernetesProviderManager         string
+	KubernetesHTTPClient              *http.Client
 }
 
 func gatewayStorageRuntimeConfigFromEnv() gatewayStorageRuntimeConfig {
 	return gatewayStorageRuntimeConfig{
-		ProviderMode:              os.Getenv("STORAGE_PROVIDER"),
-		ProviderApply:             strings.EqualFold(strings.TrimSpace(os.Getenv("STORAGE_PROVIDER_APPLY_ENABLED")), "true"),
-		ProviderUserID:            os.Getenv("STORAGE_PROVIDER_USER_ID"),
-		ProviderProof:             os.Getenv("STORAGE_PROVIDER_PERMISSION_PROOF"),
-		KubernetesAPIHost:         os.Getenv("KUBERNETES_API_HOST"),
-		KubernetesBearerToken:     os.Getenv("KUBERNETES_BEARER_TOKEN"),
-		KubernetesProviderManager: os.Getenv("KUBERNETES_PROVIDER_FIELD_MANAGER"),
+		ProviderMode:                      os.Getenv("STORAGE_PROVIDER"),
+		ProviderApply:                     strings.EqualFold(strings.TrimSpace(os.Getenv("STORAGE_PROVIDER_APPLY_ENABLED")), "true"),
+		ProviderUserID:                    os.Getenv("STORAGE_PROVIDER_USER_ID"),
+		ProviderProof:                     os.Getenv("STORAGE_PROVIDER_PERMISSION_PROOF"),
+		KubernetesAPIHost:                 os.Getenv("KUBERNETES_API_HOST"),
+		KubernetesServiceHost:             os.Getenv("KUBERNETES_SERVICE_HOST"),
+		KubernetesServicePort:             os.Getenv("KUBERNETES_SERVICE_PORT"),
+		KubernetesBearerToken:             os.Getenv("KUBERNETES_BEARER_TOKEN"),
+		KubernetesServiceAccountTokenFile: os.Getenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE"),
+		KubernetesServiceAccountCAFile:    os.Getenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE"),
+		KubernetesProviderManager:         os.Getenv("KUBERNETES_PROVIDER_FIELD_MANAGER"),
 	}
 }
 
@@ -42,10 +50,14 @@ func newGatewayStorageService(cfg gatewayStorageRuntimeConfig) (ports.StorageSer
 			return nil, fmt.Errorf("%w: storage provider requires STORAGE_PROVIDER_USER_ID and STORAGE_PROVIDER_PERMISSION_PROOF", ports.ErrInvalid)
 		}
 		client, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
-			Host:         cfg.KubernetesAPIHost,
-			BearerToken:  cfg.KubernetesBearerToken,
-			FieldManager: cfg.KubernetesProviderManager,
-			HTTPClient:   cfg.KubernetesHTTPClient,
+			Host:            cfg.KubernetesAPIHost,
+			ServiceHost:     cfg.KubernetesServiceHost,
+			ServicePort:     cfg.KubernetesServicePort,
+			BearerToken:     cfg.KubernetesBearerToken,
+			BearerTokenFile: cfg.KubernetesServiceAccountTokenFile,
+			CAFile:          cfg.KubernetesServiceAccountCAFile,
+			FieldManager:    cfg.KubernetesProviderManager,
+			HTTPClient:      cfg.KubernetesHTTPClient,
 		})
 		if err != nil {
 			return nil, err

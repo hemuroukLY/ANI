@@ -38,14 +38,14 @@ class Sprint13ProductionShapeGuardTest(unittest.TestCase):
 
         self.assertIn("pending production_shape must list missing_items", str(raised.exception))
 
-    def test_production_passed_rejects_lab_proxy_transport(self) -> None:
+    def test_production_passed_rejects_lab_transport(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             evidence = Path(tmp) / "evidence.json"
             evidence.write_text(json.dumps({
                 "status": "passed",
                 "production_shape": {
                     "status": "passed",
-                    "transport_profile": "lab_proxy",
+                    "transport_profile": "lab_kubeconfig_and_dev_gateway",
                     "missing_items": [],
                 },
             }) + "\n", encoding="utf-8")
@@ -53,7 +53,24 @@ class Sprint13ProductionShapeGuardTest(unittest.TestCase):
             with self.assertRaises(SystemExit) as raised:
                 guard.validate_evidence("S01", evidence)
 
-        self.assertIn("production_shape passed cannot use lab_proxy", str(raised.exception))
+        self.assertIn("production_shape passed cannot use lab_kubeconfig_and_dev_gateway", str(raised.exception))
+
+    def test_production_passed_requires_proof_items(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "evidence.json"
+            evidence.write_text(json.dumps({
+                "status": "passed",
+                "production_shape": {
+                    "status": "passed",
+                    "transport_profile": "in_cluster_serviceaccount",
+                    "missing_items": [],
+                },
+            }) + "\n", encoding="utf-8")
+
+            with self.assertRaises(SystemExit) as raised:
+                guard.validate_evidence("S01", evidence)
+
+        self.assertIn("production_shape passed requires proof_items", str(raised.exception))
 
 
 if __name__ == "__main__":

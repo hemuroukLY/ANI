@@ -454,19 +454,30 @@ func (s *LocalNetworkService) CreateRoute(ctx context.Context, request ports.Net
 	s.routeIdempotency[idemKey] = record.RouteID
 	s.mu.Unlock()
 	if !providerConfigured {
+		if err := s.upsertRoute(ctx, record); err != nil {
+			return ports.NetworkRouteRecord{}, err
+		}
 		return record, nil
+	}
+	if err := s.upsertRoute(ctx, record); err != nil {
+		return ports.NetworkRouteRecord{}, err
 	}
 	applied, err := s.applyRouteProvider(ctx, record)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err != nil {
 		record.State = ports.NetworkResourceFailed
 		s.routes[record.RouteID] = record
+		s.mu.Unlock()
+		_ = s.upsertRoute(ctx, record)
 		return ports.NetworkRouteRecord{}, err
 	}
 	record = applied
 	if _, exists := s.routes[record.RouteID]; exists {
 		s.routes[record.RouteID] = record
+	}
+	s.mu.Unlock()
+	if err := s.upsertRoute(ctx, record); err != nil {
+		return ports.NetworkRouteRecord{}, err
 	}
 	return record, nil
 }
@@ -514,6 +525,13 @@ func (s *LocalNetworkService) upsertLoadBalancer(ctx context.Context, record por
 		return nil
 	}
 	return s.store.UpsertLoadBalancer(ctx, record)
+}
+
+func (s *LocalNetworkService) upsertRoute(ctx context.Context, record ports.NetworkRouteRecord) error {
+	if s.store == nil {
+		return nil
+	}
+	return s.store.UpsertRoute(ctx, record)
 }
 
 func (s *LocalNetworkService) routeProviderConfigured() bool {

@@ -44,6 +44,7 @@ class LiveArgs:
     kubernetes_nodes_url: str
     dcgm_metrics_url: str
     evidence_output: str
+    production_shaped: bool = False
 
 
 def fail(message: str) -> None:
@@ -128,6 +129,26 @@ def validate_gate_path(path: str) -> None:
 
 def trim_url(value: str) -> str:
     return value.strip().rstrip("/")
+
+
+def is_local_transport(value: str) -> bool:
+    lowered = value.strip().lower()
+    return (
+        "127.0.0.1" in lowered
+        or "localhost" in lowered
+        or "kubectl proxy" in lowered
+        or "kubectl-proxy" in lowered
+        or "port-forward" in lowered
+    )
+
+
+def validate_production_shaped_live_args(args: LiveArgs) -> None:
+    if is_local_transport(args.gateway_url):
+        fail("production-shaped live mode requires a non-local production gateway URL")
+    if args.kubernetes_nodes_url.strip():
+        fail("production-shaped live mode must not use --kubernetes-nodes-url")
+    if is_local_transport(args.dcgm_metrics_url):
+        fail("production-shaped live mode requires non-local DCGM service or Prometheus URL")
 
 
 def default_command_runner(command: list[str]) -> str:
@@ -242,6 +263,8 @@ def validate_live(
         fail("live mode requires --gateway-url")
     if not args.dcgm_metrics_url.strip():
         fail("live mode requires --dcgm-metrics-url")
+    if args.production_shaped:
+        validate_production_shaped_live_args(args)
 
     nodes_doc = load_kubernetes_nodes(args, command_runner, json_getter)
     gpu_node_count, gpu_capacity_total = summarize_kubernetes_gpu_nodes(nodes_doc)
@@ -284,6 +307,17 @@ def validate_live(
         "occupancy_total": occupancy_total,
         "dcgm_metric_present": True,
     }
+    if args.production_shaped:
+        evidence["production_shape"] = {
+            "status": "passed",
+            "transport_profile": "in_cluster_kubernetes_api_and_cluster_metrics_service",
+            "missing_items": [],
+            "proof_items": [
+                "production_gateway",
+                "in_cluster_kubernetes_api",
+                "production_dcgm_service_or_prometheus_query",
+            ],
+        }
     if args.evidence_output.strip():
         output = Path(args.evidence_output)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -305,6 +339,7 @@ def main() -> int:
     )
     parser.add_argument("--dcgm-metrics-url", default="", help="DCGM exporter metrics URL")
     parser.add_argument("--evidence-output", default="", help="non-sensitive evidence JSON output")
+    parser.add_argument("--production-shaped", action="store_true", help="require production-shaped S04 transport and write production_shape evidence")
     args = parser.parse_args()
 
     validate_gate_path(args.gate)
@@ -320,6 +355,7 @@ def main() -> int:
             kubernetes_nodes_url=args.kubernetes_nodes_url,
             dcgm_metrics_url=args.dcgm_metrics_url,
             evidence_output=args.evidence_output,
+            production_shaped=args.production_shaped,
         ))
         print(f"{PROFILE} live checks valid; evidence written to {args.evidence_output or '<not written>'}")
         return 0

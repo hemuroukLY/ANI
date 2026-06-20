@@ -603,6 +603,41 @@ class VClusterLiveGateTest(unittest.TestCase):
 
         self.assertIn("live mode requires chart_version", str(raised.exception))
 
+    def test_production_shaped_live_config_rejects_proxy_server(self) -> None:
+        config = gate.LiveConfig(
+            tenant_id="tenant-a",
+            cluster_id="k8sclu-live",
+            gateway_url="https://gateway.ani.example/api/v1",
+            ani_bearer_token="ani-token",
+            kubeconfig="/tmp/real-lab.kubeconfig",
+            vcluster_server="https://tenant-a-vcluster.ani.example",
+            proxy_server="http://127.0.0.1:18002",
+            production_shaped=True,
+        )
+
+        with patch.object(gate.shutil, "which", return_value="/usr/bin/tool"):
+            with self.assertRaises(SystemExit) as raised:
+                gate.validate_live_config(config)
+
+        self.assertIn("production-shaped live mode must not use --proxy-server", str(raised.exception))
+
+    def test_production_shaped_live_config_requires_non_local_gateway(self) -> None:
+        config = gate.LiveConfig(
+            tenant_id="tenant-a",
+            cluster_id="k8sclu-live",
+            gateway_url="http://127.0.0.1:3000/api/v1",
+            ani_bearer_token="ani-token",
+            kubeconfig="/tmp/real-lab.kubeconfig",
+            vcluster_server="https://tenant-a-vcluster.ani.example",
+            production_shaped=True,
+        )
+
+        with patch.object(gate.shutil, "which", return_value="/usr/bin/tool"):
+            with self.assertRaises(SystemExit) as raised:
+                gate.validate_live_config(config)
+
+        self.assertIn("production-shaped live mode requires a non-local production gateway URL", str(raised.exception))
+
     def test_cli_live_mode_rejects_evidence_output_surrounding_whitespace_before_running(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             output = Path(tmpdir) / "vcluster-live-evidence.json"

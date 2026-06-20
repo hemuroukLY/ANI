@@ -83,6 +83,40 @@ class GPUInventoryLiveGateTest(unittest.TestCase):
 
         self.assertIn("live mode requires --dcgm-metrics-url", str(raised.exception))
 
+    def test_production_shaped_live_rejects_kubernetes_nodes_url(self) -> None:
+        args = gate.LiveArgs(
+            gateway_url="https://gateway.ani.example/api/v1",
+            ani_bearer_token="ani-token",
+            kubectl_binary="kubectl",
+            kubeconfig="/tmp/real-lab.kubeconfig",
+            kubernetes_nodes_url="http://127.0.0.1:18004/api/v1/nodes",
+            dcgm_metrics_url="https://prometheus.ani.example/api/v1/query?query=DCGM_FI_DEV_GPU_UTIL",
+            evidence_output="",
+            production_shaped=True,
+        )
+
+        with self.assertRaises(SystemExit) as raised:
+            gate.validate_live(args)
+
+        self.assertIn("production-shaped live mode must not use --kubernetes-nodes-url", str(raised.exception))
+
+    def test_production_shaped_live_rejects_local_dcgm_metrics_url(self) -> None:
+        args = gate.LiveArgs(
+            gateway_url="https://gateway.ani.example/api/v1",
+            ani_bearer_token="ani-token",
+            kubectl_binary="kubectl",
+            kubeconfig="/tmp/real-lab.kubeconfig",
+            kubernetes_nodes_url="",
+            dcgm_metrics_url="http://127.0.0.1:9400/metrics",
+            evidence_output="",
+            production_shaped=True,
+        )
+
+        with self.assertRaises(SystemExit) as raised:
+            gate.validate_live(args)
+
+        self.assertIn("production-shaped live mode requires non-local DCGM service or Prometheus URL", str(raised.exception))
+
     def test_live_writes_non_sensitive_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             evidence = Path(tmp) / "gpu-evidence.json"

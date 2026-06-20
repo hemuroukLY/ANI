@@ -133,6 +133,7 @@ class LiveConfig:
     chart_name: str = "vcluster"
     chart_repo: str = "https://charts.loft.sh"
     chart_version: str = "0.34.1"
+    production_shaped: bool = False
     work_dir: Path | None = None
 
 
@@ -240,6 +241,30 @@ def validate_live_config(config: LiveConfig) -> None:
     for binary in binaries:
         if shutil.which(binary) is None:
             fail(f"{binary} is required for --live")
+    if config.production_shaped:
+        validate_production_shaped_live_config(config)
+
+
+def is_local_transport(value: str) -> bool:
+    lowered = value.strip().lower()
+    return (
+        "127.0.0.1" in lowered
+        or "localhost" in lowered
+        or "kubectl proxy" in lowered
+        or "kubectl-proxy" in lowered
+        or "port-forward" in lowered
+    )
+
+
+def validate_production_shaped_live_config(config: LiveConfig) -> None:
+    if is_local_transport(config.gateway_url):
+        fail("production-shaped live mode requires a non-local production gateway URL")
+    if config.proxy_server.strip():
+        fail("production-shaped live mode must not use --proxy-server")
+    if not config.vcluster_server.strip():
+        fail("production-shaped live mode requires --vcluster-server from metadata target")
+    if is_local_transport(config.vcluster_server):
+        fail("production-shaped live mode requires non-local metadata target server")
 
 
 def helm_install_command(config: LiveConfig) -> list[str]:
@@ -426,6 +451,17 @@ def run_live(config: LiveConfig, runner: CommandRunner | None = None) -> dict[st
             "workload_count": len(workload_items),
             "workload_name": LIVE_WORKLOAD_NAME,
         }
+        if config.production_shaped:
+            result["production_shape"] = {
+                "status": "passed",
+                "transport_profile": "metadata_target_tls",
+                "missing_items": [],
+                "proof_items": [
+                    "production_gateway",
+                    "production_per_cluster_metadata_target",
+                    "production_tls_and_token_management",
+                ],
+            }
     finally:
         runner.run(workload_delete_command(config), env=host_kube_env(config))
     result["cleanup"] = "deleted"
@@ -487,6 +523,7 @@ def main() -> int:
     parser.add_argument("--vcluster-binary", default=os.getenv("ANI_VCLUSTER_BINARY", "vcluster"))
     parser.add_argument("--kubectl-binary", default=os.getenv("ANI_KUBECTL_BINARY", "kubectl"))
     parser.add_argument("--chart-version", default=os.getenv("VCLUSTER_CHART_VERSION", "0.34.1"))
+    parser.add_argument("--production-shaped", action="store_true", help="require production-shaped S02 transport and write production_shape evidence")
     parser.add_argument(
         "--evidence-output",
         default=os.getenv("ANI_VCLUSTER_LIVE_EVIDENCE_OUTPUT") or None,
@@ -512,6 +549,7 @@ def main() -> int:
             vcluster_binary=args.vcluster_binary,
             kubectl_binary=args.kubectl_binary,
             chart_version=args.chart_version,
+            production_shaped=args.production_shaped,
         )
         validate_live_config(config)
         if args.evidence_output is not None:

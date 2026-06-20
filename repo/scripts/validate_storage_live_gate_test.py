@@ -118,6 +118,25 @@ class StorageLiveGateTest(unittest.TestCase):
 
         self.assertIn("live mode requires evidence_output", str(raised.exception))
 
+    def test_production_shaped_live_config_rejects_local_gateway(self) -> None:
+        config = gate.LiveConfig(
+            gateway_url="http://127.0.0.1:8080/api/v1",
+            ani_bearer_token="dev-token",
+            tenant_id="tenant-a",
+            namespace="ani-tenant-tenant-a",
+            storage_class="ani-rbd-ssd",
+            snapshot_class="csi-rbdplugin-snapclass",
+            filesystem_backend="nfs",
+            evidence_output=Path("storage-live-evidence.json"),
+            production_shaped=True,
+        )
+
+        with patch.object(gate.shutil, "which", return_value="/usr/bin/kubectl"):
+            with self.assertRaises(SystemExit) as raised:
+                gate.validate_live_config(config)
+
+        self.assertIn("production-shaped live mode requires a non-local production gateway URL", str(raised.exception))
+
 
 class FakeHTTPClient:
     def __init__(self) -> None:

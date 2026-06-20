@@ -11,19 +11,27 @@ import (
 )
 
 type gatewayGPUInventoryRuntimeConfig struct {
-	ProviderMode              string
-	KubernetesAPIHost         string
-	KubernetesBearerToken     string
-	KubernetesProviderManager string
-	KubernetesHTTPClient      *http.Client
+	ProviderMode                      string
+	KubernetesAPIHost                 string
+	KubernetesServiceHost             string
+	KubernetesServicePort             string
+	KubernetesBearerToken             string
+	KubernetesServiceAccountTokenFile string
+	KubernetesServiceAccountCAFile    string
+	KubernetesProviderManager         string
+	KubernetesHTTPClient              *http.Client
 }
 
 func gatewayGPUInventoryRuntimeConfigFromEnv() gatewayGPUInventoryRuntimeConfig {
 	return gatewayGPUInventoryRuntimeConfig{
-		ProviderMode:              os.Getenv("GPU_INVENTORY_PROVIDER"),
-		KubernetesAPIHost:         os.Getenv("KUBERNETES_API_HOST"),
-		KubernetesBearerToken:     os.Getenv("KUBERNETES_BEARER_TOKEN"),
-		KubernetesProviderManager: os.Getenv("KUBERNETES_PROVIDER_FIELD_MANAGER"),
+		ProviderMode:                      os.Getenv("GPU_INVENTORY_PROVIDER"),
+		KubernetesAPIHost:                 os.Getenv("KUBERNETES_API_HOST"),
+		KubernetesServiceHost:             os.Getenv("KUBERNETES_SERVICE_HOST"),
+		KubernetesServicePort:             os.Getenv("KUBERNETES_SERVICE_PORT"),
+		KubernetesBearerToken:             os.Getenv("KUBERNETES_BEARER_TOKEN"),
+		KubernetesServiceAccountTokenFile: os.Getenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE"),
+		KubernetesServiceAccountCAFile:    os.Getenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE"),
+		KubernetesProviderManager:         os.Getenv("KUBERNETES_PROVIDER_FIELD_MANAGER"),
 	}
 }
 
@@ -33,10 +41,14 @@ func newGatewayGPUInventory(cfg gatewayGPUInventoryRuntimeConfig) (ports.GPUInve
 		return nil, nil
 	case "kubernetes_rest":
 		client, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
-			Host:         cfg.KubernetesAPIHost,
-			BearerToken:  cfg.KubernetesBearerToken,
-			FieldManager: cfg.KubernetesProviderManager,
-			HTTPClient:   cfg.KubernetesHTTPClient,
+			Host:            cfg.KubernetesAPIHost,
+			ServiceHost:     cfg.KubernetesServiceHost,
+			ServicePort:     cfg.KubernetesServicePort,
+			BearerToken:     cfg.KubernetesBearerToken,
+			BearerTokenFile: cfg.KubernetesServiceAccountTokenFile,
+			CAFile:          cfg.KubernetesServiceAccountCAFile,
+			FieldManager:    cfg.KubernetesProviderManager,
+			HTTPClient:      cfg.KubernetesHTTPClient,
 		})
 		if err != nil {
 			return nil, err

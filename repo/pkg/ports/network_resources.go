@@ -186,6 +186,7 @@ type NetworkResourceStore interface {
 	UpsertSubnet(ctx context.Context, record NetworkSubnetRecord) error
 	UpsertSecurityGroup(ctx context.Context, record NetworkSecurityGroupRecord) error
 	UpsertLoadBalancer(ctx context.Context, record NetworkLoadBalancerRecord) error
+	UpsertRoute(ctx context.Context, record NetworkRouteRecord) error
 	UpdateResourceState(ctx context.Context, request NetworkResourceStateUpdateRequest) error
 }
 

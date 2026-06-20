@@ -70,3 +70,7 @@ Evidence 摘要：
 - Production-shaped gate: **PENDING**；`production_shape.status=pending`。进入生产形态前必须补齐 `production_per_cluster_metadata_target` 与 `production_tls_and_token_management`，并使用正式 per-cluster target 而非本地 proxy 重新产出 evidence。
 - 不声明 S03-S07 已完成真实 live gate。
 - 不把本机 kubectl proxy 路径等同于生产 per-cluster metadata resolver、TLS/credential 管理或长期租户集群生命周期能力。
+
+## Post-closure note
+
+2026-06-20 的 `SPRINT13-B-TRACK-PRODUCTION-SHAPED-CLOSURE` 已为 `validate_vcluster_live_gate.py` 增加 `--production-shaped` 模式；该模式拒绝 `--proxy-server` 与本地 Gateway，并要求 production metadata target server。本文 evidence 仍是 historical lab evidence，不能自动升级为 `production_shape.status=passed`。S02 若要标 production-shaped passed，必须重新跑 production-shaped live gate 并通过 `validate-sprint13-b-track-production-shape`。

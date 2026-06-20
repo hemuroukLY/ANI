@@ -80,7 +80,7 @@ help:
 	@echo "    make validate-object-store-live-gate 校验 Sprint 13 S05 object-store MinIO live gate 契约"
 	@echo "    make validate-vector-store-live-gate 校验 Sprint 13 S06 vector-store Milvus live gate 契约"
 	@echo "    make validate-instance-observability-live-gate 校验 Sprint 13 S07 instance observability Prometheus live gate 契约"
-	@echo "    make validate-sprint13-b-track-production-shape 校验 Sprint 13 S01-S04 B轨生产形态边界"
+	@echo "    make validate-sprint13-b-track-production-shape 校验 Sprint 13 S01-S04/S05-S07 B轨生产形态验收标准"
 	@echo "    make validate-core-installer 校验 Sprint 7 Core installer profile"
 	@echo "    make validate-core-offline 校验 Sprint 7 Core offline package manifest"
 	@echo "    make validate-core-cli 校验 Sprint 7/8 Core CLI"
@@ -566,10 +566,10 @@ validate-instance-observability-live-gate:
 	@echo "✅ SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A instance observability live gate contract valid"
 
 validate-sprint13-b-track-production-shape:
-	@echo "→ 校验 Sprint 13 S01-S04 B轨生产形态边界..."
+	@echo "→ 校验 Sprint 13 S01-S04/S05-S07 B轨生产形态验收标准..."
 	python scripts/validate_sprint13_b_track_production_shape.py
 	python scripts/validate_sprint13_b_track_production_shape_test.py
-	@echo "✅ Sprint 13 S01-S04 production-shaped evidence boundaries valid"
+	@echo "✅ Sprint 13 production-shaped acceptance standard valid"
 
 validate-core-installer:
 	@echo "→ 校验 Sprint 7 CORE-INSTALLER-A Core installer profile..."

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +43,50 @@ func TestKubernetesRESTClientServerSideDryRunUsesDryRunAll(t *testing.T) {
 	}
 	if gotAuth != "Bearer token-a" {
 		t.Fatalf("Authorization = %q, want bearer token", gotAuth)
+	}
+}
+
+func TestKubernetesRESTClientUsesInClusterServiceAccountWhenHostOmitted(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenPath, []byte("service-account-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var gotURL string
+	var gotAuth string
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotURL = r.URL.String()
+		gotAuth = r.Header.Get("Authorization")
+		return jsonResponse(http.StatusCreated, `{"kind":"Deployment"}`), nil
+	})
+
+	client, err := NewKubernetesRESTClient(KubernetesRESTClientConfig{
+		ServiceHost:     "10.96.0.1",
+		ServicePort:     "443",
+		BearerTokenFile: tokenPath,
+		HTTPClient:      &http.Client{Transport: transport},
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient() error = %v", err)
+	}
+	if _, err := client.ServerSideDryRun(context.Background(), renderedDeployment(t)); err != nil {
+		t.Fatalf("ServerSideDryRun() error = %v", err)
+	}
+	if !strings.HasPrefix(gotURL, "https://10.96.0.1:443/apis/apps/v1/") {
+		t.Fatalf("url = %q, want in-cluster Kubernetes service URL", gotURL)
+	}
+	if gotAuth != "Bearer service-account-token" {
+		t.Fatalf("Authorization = %q, want service account token", gotAuth)
+	}
+}
+
+func TestKubernetesRESTClientRejectsInClusterConfigWithoutServiceAccountToken(t *testing.T) {
+	_, err := NewKubernetesRESTClient(KubernetesRESTClientConfig{
+		ServiceHost:     "10.96.0.1",
+		ServicePort:     "443",
+		BearerTokenFile: filepath.Join(t.TempDir(), "missing-token"),
+	})
+	if err == nil {
+		t.Fatalf("NewKubernetesRESTClient() error = nil, want missing service account token error")
 	}
 }
 

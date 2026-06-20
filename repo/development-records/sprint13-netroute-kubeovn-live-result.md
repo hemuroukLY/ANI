@@ -84,3 +84,7 @@ kubectl get service lb-sprint13-s01-lb -n ani-tenant-sprint13-s01-b --ignore-not
 - Production-shaped gate: **PENDING**；`production_shape.status=pending`。进入生产形态前必须补齐 `production_rbac_and_credential_management` 与 `persistent_route_metadata_reconciliation`，并用正式控制面凭据/RBAC 与持久化 route reconcile 路径重新产出 evidence。
 - 不声明 S02-S07 已完成真实 live gate。
 - 不把 Kube-OVN external LB 可达性、生产镜像供应链、生产凭据管理或多租户长期资源生命周期纳入本次结论。
+
+## Post-closure note
+
+2026-06-20 的 `SPRINT13-B-TRACK-PRODUCTION-SHAPED-CLOSURE` 已补齐 in-cluster ServiceAccount/RBAC profile 与 S01 route metadata persistence；本文件中的 evidence 仍是 historical lab evidence，不能自动升级为 `production_shape.status=passed`。S01 若要标 production-shaped passed，必须使用正式 Gateway / in-cluster RBAC / 持久 route metadata 路径重新产出非敏感 evidence，并通过 `validate-sprint13-b-track-production-shape`。

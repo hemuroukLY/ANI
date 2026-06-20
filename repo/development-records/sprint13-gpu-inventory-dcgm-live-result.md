@@ -70,3 +70,7 @@ SPRINT13-GPU-INVENTORY-DCGM-A live checks valid; evidence written to development
 ## 后续
 
 S04 real-provider gate 已闭环；Production-shaped gate 仍为 **PENDING**，`production_shape.status=pending`。进入生产形态前必须补齐 `production_in_cluster_kubernetes_api` 与 `production_dcgm_service_or_prometheus_query`，即 Gateway 使用正式 Kubernetes API/ServiceAccount/RBAC，DCGM 使用集群 Service 或 Prometheus 查询而非本地 port-forward。下一步仍只能在人工确认后进入 S05/S06/S07 的 B 轨真实 live gate。未完成的切片继续保持 LIVE PENDING。
+
+## Post-closure note
+
+2026-06-20 的 `SPRINT13-B-TRACK-PRODUCTION-SHAPED-CLOSURE` 已补齐 Gateway in-cluster ServiceAccount/CA/token 支持，并为 `validate_gpu_inventory_live_gate.py` 增加 `--production-shaped` 模式；该模式拒绝 `--kubernetes-nodes-url` 与本地 DCGM/Prometheus URL。本文 evidence 仍是 historical lab evidence，不能自动升级为 `production_shape.status=passed`。S04 若要标 production-shaped passed，必须重新跑 production-shaped live gate 并通过 `validate-sprint13-b-track-production-shape`。

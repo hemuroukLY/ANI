@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ani-gateway
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-gateway
+    ani.dev/profile: sprint13-production-shaped
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ani-gateway-core-provider
+  labels:
+    app.kubernetes.io/name: ani-gateway
+    ani.dev/profile: sprint13-production-shaped
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "services", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services", "persistentvolumeclaims"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["kubeovn.io"]
+    resources: ["vpcs", "subnets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ani-gateway-core-provider
+  labels:
+    app.kubernetes.io/name: ani-gateway
+    ani.dev/profile: sprint13-production-shaped
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ani-gateway-core-provider
+subjects:
+  - kind: ServiceAccount
+    name: ani-gateway
+    namespace: ani-system

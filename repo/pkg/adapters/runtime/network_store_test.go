@@ -117,6 +117,39 @@ func TestLocalNetworkServicePersistsCreateAndDelete(t *testing.T) {
 	}
 }
 
+func TestMetadataNetworkStoreUpsertsRoute(t *testing.T) {
+	tx := &fakeMetadataTx{}
+	store := NewMetadataNetworkStore(fakeMetadataStore{tx: tx}, WithNetworkStoreClock(func() time.Time {
+		return time.Unix(100, 0)
+	}))
+
+	err := store.UpsertRoute(context.Background(), ports.NetworkRouteRecord{
+		TenantID:        networkStoreTenantID,
+		RouteID:         "rt-persisted",
+		VPCID:           "vpc-persisted",
+		DestinationCIDR: "10.250.0.0/16",
+		NextHopType:     "gateway",
+		NextHopID:       "10.244.180.1",
+		Description:     "default route",
+		State:           ports.NetworkResourceAvailable,
+		Provider:        "kubeovn",
+		RealProvider:    true,
+		CreatedAt:       time.Unix(90, 0),
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoute() error = %v", err)
+	}
+	if !strings.Contains(tx.sql, "INSERT INTO network_routes") {
+		t.Fatalf("sql = %q, want network_routes insert", tx.sql)
+	}
+	if got, want := tx.args[1], "rt-persisted"; got != want {
+		t.Fatalf("route id arg = %v, want %s", got, want)
+	}
+	if got, want := tx.args[9], true; got != want {
+		t.Fatalf("real provider arg = %v, want %v", got, want)
+	}
+}
+
 func TestMetadataNetworkStoreUpdatesResourceState(t *testing.T) {
 	tx := &fakeMetadataTx{}
 	store := NewMetadataNetworkStore(fakeMetadataStore{tx: tx}, WithNetworkStoreClock(func() time.Time {

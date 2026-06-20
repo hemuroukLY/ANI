@@ -85,3 +85,7 @@ No resources found in ani-tenant-tenant-a namespace.
 - Production-shaped gate: **PENDING**；`production_shape.status=pending`。进入生产形态前必须补齐 `production_serviceaccount_rbac` 与 `tenant_storage_lifecycle_and_backup_restore`，并使用正式 Gateway/ServiceAccount/RBAC 路径重新产出 evidence。
 - 不声明 S04-S07 已完成真实 live gate。
 - 不把本次 NFS protocol contract 等同于生产 NFS/CephFS 数据面挂载能力；本次 mount-target 只证明 Core API 与 Kubernetes `Service` contract create/list/cleanup 路径。
+
+## Post-closure note
+
+2026-06-20 的 `SPRINT13-B-TRACK-PRODUCTION-SHAPED-CLOSURE` 已补齐 Gateway in-cluster ServiceAccount/CA/token 支持，并为 `validate_storage_live_gate.py` 增加 `--production-shaped` 模式；该模式拒绝本地 Gateway evidence。本文 evidence 仍是 historical lab evidence，不能自动升级为 `production_shape.status=passed`。S03 若要标 production-shaped passed，必须重新跑 production-shaped live gate 并通过 `validate-sprint13-b-track-production-shape`。
