@@ -202,6 +202,45 @@ class Sprint13ProductionShapeGuardTest(unittest.TestCase):
 
         self.assertIn("S04 production_shape passed requires inventory_status=200", str(raised.exception))
 
+    def test_s05_production_passed_requires_object_store_business_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "evidence.json"
+            evidence.write_text(json.dumps({
+                "status": "passed",
+                "production_shape": {
+                    "status": "passed",
+                    "transport_profile": "production_gateway_and_object_store_service",
+                    "missing_items": [],
+                    "proof_items": [
+                        "production_gateway",
+                        "production_object_store_credentials",
+                        "production_presigned_url_endpoint",
+                    ],
+                },
+            }) + "\n", encoding="utf-8")
+
+            with self.assertRaises(SystemExit) as raised:
+                guard.validate_evidence("S05", evidence)
+
+        self.assertIn("S05 production_shape passed requires bucket_create_status=201", str(raised.exception))
+
+    def test_production_deployment_requires_object_store_provider_secret_wiring(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            deployment = Path(tmp) / "deployment.yaml"
+            deployment.write_text(
+                guard.PRODUCTION_DEPLOYMENT.read_text(encoding="utf-8").replace(
+                    "            - name: OBJECT_STORE_PROVIDER\n              value: minio\n",
+                    "",
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(guard, "PRODUCTION_DEPLOYMENT", deployment):
+                with self.assertRaises(SystemExit) as raised:
+                    guard.validate_production_deployment_contract()
+
+        self.assertIn("production Deployment missing env OBJECT_STORE_PROVIDER", str(raised.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

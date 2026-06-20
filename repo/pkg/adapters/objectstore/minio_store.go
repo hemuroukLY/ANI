@@ -29,6 +29,7 @@ var s3BucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
 
 type MinIOObjectStoreConfig struct {
 	Endpoint        string
+	PublicEndpoint  string
 	AccessKeyID     string
 	SecretAccessKey string
 	SessionToken    string
@@ -41,6 +42,7 @@ type MinIOObjectStoreConfig struct {
 
 type MinIOObjectStore struct {
 	endpoint        *url.URL
+	publicEndpoint  *url.URL
 	accessKeyID     string
 	secretAccessKey string
 	sessionToken    string
@@ -56,6 +58,13 @@ func NewMinIOObjectStore(config MinIOObjectStoreConfig) (*MinIOObjectStore, erro
 	endpoint, err := parseMinIOEndpoint(config.Endpoint, config.Secure)
 	if err != nil {
 		return nil, err
+	}
+	publicEndpoint := endpoint
+	if strings.TrimSpace(config.PublicEndpoint) != "" {
+		publicEndpoint, err = parseMinIOEndpoint(config.PublicEndpoint, config.Secure)
+		if err != nil {
+			return nil, err
+		}
 	}
 	accessKeyID := strings.TrimSpace(config.AccessKeyID)
 	secretAccessKey := strings.TrimSpace(config.SecretAccessKey)
@@ -76,6 +85,7 @@ func NewMinIOObjectStore(config MinIOObjectStoreConfig) (*MinIOObjectStore, erro
 	}
 	return &MinIOObjectStore{
 		endpoint:        endpoint,
+		publicEndpoint:  publicEndpoint,
 		accessKeyID:     accessKeyID,
 		secretAccessKey: secretAccessKey,
 		sessionToken:    strings.TrimSpace(config.SessionToken),
@@ -240,7 +250,7 @@ func (s *MinIOObjectStore) presign(ctx context.Context, method string, ref ports
 	if ttl <= 0 {
 		return ports.SignedURL{}, fmt.Errorf("%w: signed URL ttl must be positive", ports.ErrInvalid)
 	}
-	target, err := s.objectURL(ref)
+	target, err := s.objectURLForEndpoint(ref, s.publicEndpoint)
 	if err != nil {
 		return ports.SignedURL{}, err
 	}
@@ -353,6 +363,10 @@ func (s *MinIOObjectStore) bucketURL(bucket string) url.URL {
 }
 
 func (s *MinIOObjectStore) objectURL(ref ports.ObjectRef) (url.URL, error) {
+	return s.objectURLForEndpoint(ref, s.endpoint)
+}
+
+func (s *MinIOObjectStore) objectURLForEndpoint(ref ports.ObjectRef, endpoint *url.URL) (url.URL, error) {
 	bucket, err := s.bucketName(ref.BucketClass)
 	if err != nil {
 		return url.URL{}, err
@@ -362,7 +376,7 @@ func (s *MinIOObjectStore) objectURL(ref ports.ObjectRef) (url.URL, error) {
 	if tenantID == "" || objectKey == "" {
 		return url.URL{}, fmt.Errorf("%w: tenant_id and object key are required", ports.ErrInvalid)
 	}
-	target := *s.endpoint
+	target := *endpoint
 	target.Path = "/" + bucket + "/" + strings.Trim(tenantID, "/") + "/" + strings.TrimLeft(objectKey, "/")
 	target.RawPath = ""
 	target.RawQuery = ""

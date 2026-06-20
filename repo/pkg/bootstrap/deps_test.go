@@ -270,6 +270,7 @@ func TestNewCapabilitiesCanWireMinIOObjectStoreProvider(t *testing.T) {
 	capabilities, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{
 		ObjectStoreProvider:        "minio",
 		ObjectStoreEndpoint:        "https://minio.example:9000",
+		ObjectStorePublicEndpoint:  "https://minio-public.example:30900",
 		ObjectStoreAccessKeyID:     "minio",
 		ObjectStoreSecretAccessKey: "secret",
 		ObjectStoreRegion:          "us-east-1",
@@ -288,8 +289,8 @@ func TestNewCapabilitiesCanWireMinIOObjectStoreProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SignedUploadURL() error = %v", err)
 	}
-	if !strings.HasPrefix(signed.URL, "https://minio.example:9000/models-a/tenant-a/model.bin?") {
-		t.Fatalf("signed URL = %q, want MinIO endpoint prefix", signed.URL)
+	if !strings.HasPrefix(signed.URL, "https://minio-public.example:30900/models-a/tenant-a/model.bin?") {
+		t.Fatalf("signed URL = %q, want MinIO public endpoint prefix", signed.URL)
 	}
 }
 

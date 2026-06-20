@@ -118,6 +118,45 @@ func TestMinIOObjectStoreBuildsTenantScopedSignedUploadAndDownloadURLs(t *testin
 	}
 }
 
+func TestMinIOObjectStoreUsesPublicEndpointOnlyForSignedURLs(t *testing.T) {
+	t.Parallel()
+
+	var apiHosts []string
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		apiHosts = append(apiHosts, r.Host)
+		return minIOTestResponse(http.StatusOK), nil
+	})}
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{
+		Endpoint:        "http://minio.ani-s05-objectstore.svc.cluster.local:9000",
+		PublicEndpoint:  "http://minio-public.example:30900",
+		AccessKeyID:     "minio",
+		SecretAccessKey: "secret",
+		SessionToken:    "session-token",
+		Region:          "us-east-1",
+		HTTPClient:      client,
+		Now:             fixedMinIOTestClock,
+	})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+	if err := store.EnsureBucket(context.Background(), ports.BucketClass("models-a")); err != nil {
+		t.Fatalf("EnsureBucket() error = %v", err)
+	}
+	if len(apiHosts) != 1 || apiHosts[0] != "minio.ani-s05-objectstore.svc.cluster.local:9000" {
+		t.Fatalf("api hosts = %v, want internal endpoint", apiHosts)
+	}
+
+	upload, err := store.SignedUploadURL(context.Background(), ports.ObjectRef{
+		TenantID:    "tenant-a",
+		BucketClass: ports.BucketClass("models-a"),
+		ObjectKey:   "live.txt",
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("SignedUploadURL() error = %v", err)
+	}
+	assertSignedURL(t, upload.URL, "http://minio-public.example:30900/models-a/tenant-a/live.txt", "60")
+}
+
 func TestMinIOObjectStoreRejectsInvalidPresignInput(t *testing.T) {
 	t.Parallel()
 

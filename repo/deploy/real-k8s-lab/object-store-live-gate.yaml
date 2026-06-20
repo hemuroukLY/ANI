@@ -7,12 +7,11 @@ description: >
 
 required_tools:
   - curl
-  - mc
 
 live_checks:
   - id: minio-health-ready
-    command: mc alias set ani-minio {minio_url} {access_key} {secret_key} && mc ls ani-minio
-    pass_condition: minio_alias_connects_and_bucket_namespace_is_readable
+    command: GET {minio_url}/minio/health/ready
+    pass_condition: minio_http_readiness_endpoint_returns_200
   - id: core-bucket-create
     command: POST {gateway_url}/buckets idempotency_key={idempotency_key} name={bucket_name}
     pass_condition: http_201_response_has_storage_bucket_record

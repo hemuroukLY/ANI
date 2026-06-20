@@ -3,7 +3,7 @@
 > 记录类型：Sprint 13 A-track completion record
 > 日期：2026-06-19
 > 范围：ANI Core only
-> 状态：code+contract ready, LIVE PENDING
+> 状态：A 轨 code+contract ready；B 轨已在 2026-06-20 通过 production-shaped live gate
 
 ## 目标
 
@@ -59,4 +59,4 @@ git diff --check passed
 
 ## 后续 B 轨
 
-人工确认真实 MinIO endpoint、TLS、access policy、bucket prefix、租户隔离策略和 evidence 输出路径后，执行 human-gated live gate 并归档非敏感 evidence。真实 evidence 归档前，S05 保持 Tier1 local profile / LIVE PENDING。
+已在 B 轨人工授权后完成真实 live gate，结果见 [`sprint13-objectstore-minio-live-result.md`](sprint13-objectstore-minio-live-result.md)，evidence 见 `live-evidence/sprint13-objectstore-minio-live-evidence.json`。该结果为 S05 production-shaped acceptance passed，不代表 full platform production ready。

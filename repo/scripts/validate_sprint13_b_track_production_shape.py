@@ -78,6 +78,19 @@ SLICES = {
             "production_dcgm_service_or_prometheus_query",
         },
     },
+    "S05": {
+        "evidence": RECORD_ROOT / "live-evidence/sprint13-objectstore-minio-live-evidence.json",
+        "result": RECORD_ROOT / "sprint13-objectstore-minio-live-result.md",
+        "required_missing": {
+            "production_object_store_credentials",
+            "production_presigned_url_endpoint",
+        },
+        "required_proof": {
+            "production_gateway",
+            "production_object_store_credentials",
+            "production_presigned_url_endpoint",
+        },
+    },
 }
 
 ALLOWED_PRODUCTION_STATUSES = {"pending", "passed"}
@@ -139,6 +152,14 @@ REQUIRED_DEPLOYMENT_ENVS = {
     "VCLUSTER_HELM_SET_VALUES",
     "VCLUSTER_PROXY_SERVER_TEMPLATE",
     "VCLUSTER_KUBECONFIG_SERVER_TEMPLATE",
+    "OBJECT_STORE_PROVIDER",
+    "OBJECT_STORE_ENDPOINT",
+    "OBJECT_STORE_PUBLIC_ENDPOINT",
+    "OBJECT_STORE_ACCESS_KEY_ID",
+    "OBJECT_STORE_SECRET_ACCESS_KEY",
+    "OBJECT_STORE_REGION",
+    "OBJECT_STORE_SECURE",
+    "OBJECT_STORE_BUCKET_PREFIX",
 }
 REQUIRED_PRODUCTION_READINESS_DOC_TOKENS = {
     "Auth/Dex production gate",
@@ -227,6 +248,8 @@ def validate_evidence(slice_id: str, path: Path) -> None:
         validate_s03_storage_lifecycle_evidence(payload)
     if slice_id == "S04":
         validate_s04_gpu_dcgm_evidence(payload)
+    if slice_id == "S05":
+        validate_s05_object_store_evidence(payload)
 
 
 def validate_s01_gateway_production_evidence(payload: dict[str, Any]) -> None:
@@ -304,6 +327,34 @@ def validate_s04_gpu_dcgm_evidence(payload: dict[str, Any]) -> None:
         fail("S04 production_shape passed requires inventory_count >= 1")
     if payload.get("dcgm_metric_present") is not True:
         fail("S04 production_shape passed requires dcgm_metric_present=true")
+
+
+def validate_s05_object_store_evidence(payload: dict[str, Any]) -> None:
+    expected_statuses = {
+        "bucket_create_status": 201,
+        "bucket_list_status": 200,
+        "upload_presign_status": 200,
+        "download_presign_status": 200,
+        "actual_upload_status": 200,
+        "actual_download_status": 200,
+        "cleanup_api_key_status": 201,
+        "cleanup_status": 200,
+        "cleanup_api_key_revoke_status": 200,
+    }
+    for field, expected in expected_statuses.items():
+        if payload.get(field) != expected:
+            fail(f"S05 production_shape passed requires {field}={expected}")
+    bucket_list_count = payload.get("bucket_list_count")
+    if not isinstance(bucket_list_count, int) or bucket_list_count < 1:
+        fail("S05 production_shape passed requires bucket_list_count >= 1")
+    if payload.get("minio_health_ready") is not True:
+        fail("S05 production_shape passed requires minio_health_ready=true")
+    if payload.get("upload_presign_url_present") is not True:
+        fail("S05 production_shape passed requires upload_presign_url_present=true")
+    if payload.get("download_presign_url_present") is not True:
+        fail("S05 production_shape passed requires download_presign_url_present=true")
+    if payload.get("cleanup_enabled") is not True:
+        fail("S05 production_shape passed requires cleanup_enabled=true")
 
 
 def validate_result_doc(slice_id: str, path: Path) -> None:
@@ -444,6 +495,15 @@ def validate_production_deployment_contract() -> None:
     value_from = database_env.get("valueFrom")
     if not isinstance(value_from, dict) or "secretKeyRef" not in value_from:
         fail("production Deployment DATABASE_URL must come from secretKeyRef")
+    if env_by_name.get("OBJECT_STORE_PROVIDER", {}).get("value") != "minio":
+        fail("production Deployment OBJECT_STORE_PROVIDER must be minio")
+    for name in ("OBJECT_STORE_ENDPOINT", "OBJECT_STORE_PUBLIC_ENDPOINT", "OBJECT_STORE_ACCESS_KEY_ID", "OBJECT_STORE_SECRET_ACCESS_KEY"):
+        env_item = env_by_name.get(name, {})
+        value_from = env_item.get("valueFrom")
+        if not isinstance(value_from, dict) or "secretKeyRef" not in value_from:
+            fail(f"production Deployment {name} must come from secretKeyRef")
+        if "value" in env_item:
+            fail(f"production Deployment must not commit {name} literal")
     proxy_template = env_by_name.get("VCLUSTER_PROXY_SERVER_TEMPLATE", {}).get("value")
     kubeconfig_template = env_by_name.get("VCLUSTER_KUBECONFIG_SERVER_TEMPLATE", {}).get("value")
     if proxy_template != "https://{cluster_id}.{namespace}:443":

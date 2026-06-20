@@ -287,13 +287,22 @@ func TestLocalStorageServiceBucketsAndSignedObjectURLsUseObjectStorePort(t *test
 	if objectStore.downloadRef.BucketClass != ports.BucketClass("models-a") || objectStore.downloadRef.ObjectKey != "llm/model.bin" {
 		t.Fatalf("download ref = %#v, want bucket models-a key llm/model.bin", objectStore.downloadRef)
 	}
+	if _, err := service.DeleteObject(context.Background(), ports.StorageResourceGetRequest{
+		TenantID:   "tenant-a",
+		ResourceID: upload.ObjectID,
+	}); err != nil {
+		t.Fatalf("DeleteObject() error = %v", err)
+	}
+	if objectStore.deleteRef.BucketClass != ports.BucketClass("models-a") || objectStore.deleteRef.ObjectKey != "llm/model.bin" {
+		t.Fatalf("delete ref = %#v, want bucket models-a key llm/model.bin", objectStore.deleteRef)
+	}
 
 	buckets, err := service.ListStorageBuckets(context.Background(), ports.StorageResourceListRequest{TenantID: "tenant-a"})
 	if err != nil {
 		t.Fatalf("ListStorageBuckets() error = %v", err)
 	}
-	if len(buckets) != 1 || buckets[0].ObjectCount != 1 {
-		t.Fatalf("buckets = %#v, want one bucket with one object", buckets)
+	if len(buckets) != 1 || buckets[0].ObjectCount != 0 {
+		t.Fatalf("buckets = %#v, want one bucket with deleted object excluded", buckets)
 	}
 }
 
@@ -301,6 +310,7 @@ type fakeObjectStore struct {
 	ensureBucket ports.BucketClass
 	uploadRef    ports.ObjectRef
 	downloadRef  ports.ObjectRef
+	deleteRef    ports.ObjectRef
 	uploadURL    string
 	downloadURL  string
 	expiresAt    time.Time
@@ -319,8 +329,9 @@ func (s *fakeObjectStore) GetObject(context.Context, ports.ObjectRef) (io.ReadCl
 	return nil, ports.ObjectMetadata{}, ports.ErrUnsupported
 }
 
-func (s *fakeObjectStore) DeleteObject(context.Context, ports.ObjectRef) error {
-	return ports.ErrUnsupported
+func (s *fakeObjectStore) DeleteObject(_ context.Context, ref ports.ObjectRef) error {
+	s.deleteRef = ref
+	return nil
 }
 
 func (s *fakeObjectStore) StatObject(context.Context, ports.ObjectRef) (ports.ObjectMetadata, error) {

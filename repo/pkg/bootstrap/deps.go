@@ -307,6 +307,7 @@ func objectStoreAdapter(cfg Config) (ports.ObjectStore, error) {
 	case "minio":
 		return objectstore.NewMinIOObjectStore(objectstore.MinIOObjectStoreConfig{
 			Endpoint:        cfg.ObjectStoreEndpoint,
+			PublicEndpoint:  cfg.ObjectStorePublicEndpoint,
 			AccessKeyID:     cfg.ObjectStoreAccessKeyID,
 			SecretAccessKey: cfg.ObjectStoreSecretAccessKey,
 			SessionToken:    cfg.ObjectStoreSessionToken,

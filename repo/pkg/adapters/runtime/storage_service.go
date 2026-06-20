@@ -360,12 +360,28 @@ func (s *LocalStorageService) GetObject(_ context.Context, request ports.Storage
 }
 
 func (s *LocalStorageService) DeleteObject(ctx context.Context, request ports.StorageResourceGetRequest) (ports.StorageObjectRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
 	record, ok := s.objects[request.ResourceID]
 	if !ok || record.TenantID != request.TenantID || record.State == ports.StorageResourceDeleted {
+		s.mu.RUnlock()
 		return ports.StorageObjectRecord{}, ports.ErrNotFound
 	}
+	objectStore := s.objectStore
+	s.mu.RUnlock()
+
+	if objectStore != nil {
+		if err := objectStore.DeleteObject(ctx, storageObjectRef(record)); err != nil && err != ports.ErrNotFound {
+			return ports.StorageObjectRecord{}, err
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.objects[request.ResourceID]
+	if !ok || current.TenantID != request.TenantID || current.State == ports.StorageResourceDeleted {
+		return ports.StorageObjectRecord{}, ports.ErrNotFound
+	}
+	record = current
 	record.State = ports.StorageResourceDeleted
 	record.Reason = "deleted by local storage profile"
 	record.UpdatedAt = s.now().UTC()

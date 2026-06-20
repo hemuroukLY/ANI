@@ -1,0 +1,30 @@
+{
+  "actual_download_status": 200,
+  "actual_upload_status": 200,
+  "bucket_create_status": 201,
+  "bucket_list_count": 1,
+  "bucket_list_status": 200,
+  "cleanup_api_key_revoke_status": 200,
+  "cleanup_api_key_status": 201,
+  "cleanup_enabled": true,
+  "cleanup_status": 200,
+  "download_presign_status": 200,
+  "download_presign_url_present": true,
+  "id": "object-store-live-gate",
+  "minio_health_ready": true,
+  "minio_health_status": 200,
+  "production_shape": {
+    "missing_items": [],
+    "proof_items": [
+      "production_gateway",
+      "production_object_store_credentials",
+      "production_presigned_url_endpoint"
+    ],
+    "status": "passed",
+    "transport_profile": "production_gateway_and_object_store_service"
+  },
+  "profile": "SPRINT13-OBJECTSTORE-MINIO-A",
+  "status": "passed",
+  "upload_presign_status": 200,
+  "upload_presign_url_present": true
+}

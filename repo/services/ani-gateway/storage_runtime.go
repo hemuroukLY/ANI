@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kubercloud/ani/pkg/adapters/objectstore"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
@@ -23,6 +24,16 @@ type gatewayStorageRuntimeConfig struct {
 	KubernetesServiceAccountCAFile    string
 	KubernetesProviderManager         string
 	KubernetesHTTPClient              *http.Client
+	ObjectStoreProvider               string
+	ObjectStoreEndpoint               string
+	ObjectStorePublicEndpoint         string
+	ObjectStoreAccessKeyID            string
+	ObjectStoreSecretAccessKey        string
+	ObjectStoreSessionToken           string
+	ObjectStoreRegion                 string
+	ObjectStoreSecure                 bool
+	ObjectStoreBucketPrefix           string
+	ObjectStoreHTTPClient             *http.Client
 }
 
 func gatewayStorageRuntimeConfigFromEnv() gatewayStorageRuntimeConfig {
@@ -38,12 +49,43 @@ func gatewayStorageRuntimeConfigFromEnv() gatewayStorageRuntimeConfig {
 		KubernetesServiceAccountTokenFile: os.Getenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE"),
 		KubernetesServiceAccountCAFile:    os.Getenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE"),
 		KubernetesProviderManager:         os.Getenv("KUBERNETES_PROVIDER_FIELD_MANAGER"),
+		ObjectStoreProvider:               os.Getenv("OBJECT_STORE_PROVIDER"),
+		ObjectStoreEndpoint:               os.Getenv("OBJECT_STORE_ENDPOINT"),
+		ObjectStorePublicEndpoint:         os.Getenv("OBJECT_STORE_PUBLIC_ENDPOINT"),
+		ObjectStoreAccessKeyID:            os.Getenv("OBJECT_STORE_ACCESS_KEY_ID"),
+		ObjectStoreSecretAccessKey:        os.Getenv("OBJECT_STORE_SECRET_ACCESS_KEY"),
+		ObjectStoreSessionToken:           os.Getenv("OBJECT_STORE_SESSION_TOKEN"),
+		ObjectStoreRegion:                 os.Getenv("OBJECT_STORE_REGION"),
+		ObjectStoreSecure:                 strings.EqualFold(strings.TrimSpace(os.Getenv("OBJECT_STORE_SECURE")), "true"),
+		ObjectStoreBucketPrefix:           os.Getenv("OBJECT_STORE_BUCKET_PREFIX"),
 	}
 }
 
 func newGatewayStorageService(cfg gatewayStorageRuntimeConfig) (ports.StorageService, error) {
+	options := []runtimeadapter.StorageServiceOption{}
+	if strings.TrimSpace(cfg.ObjectStoreProvider) == "minio" {
+		store, err := objectstore.NewMinIOObjectStore(objectstore.MinIOObjectStoreConfig{
+			Endpoint:        cfg.ObjectStoreEndpoint,
+			PublicEndpoint:  cfg.ObjectStorePublicEndpoint,
+			AccessKeyID:     cfg.ObjectStoreAccessKeyID,
+			SecretAccessKey: cfg.ObjectStoreSecretAccessKey,
+			SessionToken:    cfg.ObjectStoreSessionToken,
+			Region:          cfg.ObjectStoreRegion,
+			Secure:          cfg.ObjectStoreSecure,
+			BucketPrefix:    cfg.ObjectStoreBucketPrefix,
+			HTTPClient:      cfg.ObjectStoreHTTPClient,
+		})
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, runtimeadapter.WithStorageObjectStore(store))
+	}
+
 	switch mode := strings.TrimSpace(cfg.ProviderMode); mode {
 	case "", "local", "not_configured":
+		if len(options) > 0 {
+			return runtimeadapter.NewLocalStorageService(options...), nil
+		}
 		return nil, nil
 	case "kubernetes_rest":
 		if strings.TrimSpace(cfg.ProviderUserID) == "" || strings.TrimSpace(cfg.ProviderProof) == "" {
@@ -66,7 +108,7 @@ func newGatewayStorageService(cfg gatewayStorageRuntimeConfig) (ports.StorageSer
 			client,
 			runtimeadapter.WithKubernetesStorageProviderApplyEnabled(cfg.ProviderApply),
 		)
-		return runtimeadapter.NewLocalStorageService(
+		options = append(options,
 			runtimeadapter.WithStorageProvider(
 				runtimeadapter.NewKubernetesStorageRenderer(),
 				provider,
@@ -77,7 +119,8 @@ func newGatewayStorageService(cfg gatewayStorageRuntimeConfig) (ports.StorageSer
 					PermissionProof: cfg.ProviderProof,
 				},
 			),
-		), nil
+		)
+		return runtimeadapter.NewLocalStorageService(options...), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported STORAGE_PROVIDER %q", ports.ErrUnsupported, mode)
 	}

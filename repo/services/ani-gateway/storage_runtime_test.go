@@ -72,6 +72,51 @@ func TestGatewayStorageServiceRejectsKubernetesProviderWithoutProof(t *testing.T
 	}
 }
 
+func TestGatewayStorageServiceCanInjectMinIOObjectStore(t *testing.T) {
+	objectStoreTransport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256") {
+			t.Fatalf("MinIO request missing SigV4 authorization header: %q", r.Header.Get("Authorization"))
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}}, nil
+	})
+
+	service, err := newGatewayStorageService(gatewayStorageRuntimeConfig{
+		ObjectStoreProvider:        "minio",
+		ObjectStoreEndpoint:        "http://minio.internal:9000",
+		ObjectStorePublicEndpoint:  "http://minio-public.example:30900",
+		ObjectStoreAccessKeyID:     "minio",
+		ObjectStoreSecretAccessKey: "secret",
+		ObjectStoreBucketPrefix:    "ani-s13-",
+		ObjectStoreHTTPClient:      &http.Client{Transport: objectStoreTransport},
+	})
+	if err != nil {
+		t.Fatalf("newGatewayStorageService() error = %v", err)
+	}
+	if service == nil {
+		t.Fatal("service = nil, want object-store-backed storage service")
+	}
+	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bucket-a",
+		Name:           "models",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+	upload, err := service.CreateStorageObjectUpload(context.Background(), ports.StorageObjectUploadRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "object-a",
+		BucketID:       bucket.BucketID,
+		Key:            "live.txt",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageObjectUpload() error = %v", err)
+	}
+	if !strings.HasPrefix(upload.UploadURL, "http://minio-public.example:30900/ani-s13-models/") {
+		t.Fatalf("upload URL = %q, want MinIO public endpoint", upload.UploadURL)
+	}
+}
+
 func TestGatewayStorageConfigFromEnvIncludesInClusterKubernetesService(t *testing.T) {
 	t.Setenv("STORAGE_PROVIDER", "kubernetes_rest")
 	t.Setenv("KUBERNETES_SERVICE_HOST", "10.96.0.1")
@@ -85,6 +130,25 @@ func TestGatewayStorageConfigFromEnvIncludesInClusterKubernetesService(t *testin
 	}
 	if cfg.KubernetesServiceAccountTokenFile == "" || cfg.KubernetesServiceAccountCAFile == "" {
 		t.Fatalf("service account files not loaded from env: %#v", cfg)
+	}
+}
+
+func TestGatewayStorageConfigFromEnvIncludesObjectStoreProvider(t *testing.T) {
+	t.Setenv("OBJECT_STORE_PROVIDER", "minio")
+	t.Setenv("OBJECT_STORE_ENDPOINT", "http://minio.example:9000")
+	t.Setenv("OBJECT_STORE_PUBLIC_ENDPOINT", "http://minio-public.example:30900")
+	t.Setenv("OBJECT_STORE_ACCESS_KEY_ID", "minio")
+	t.Setenv("OBJECT_STORE_SECRET_ACCESS_KEY", "secret")
+	t.Setenv("OBJECT_STORE_REGION", "us-east-1")
+	t.Setenv("OBJECT_STORE_SECURE", "false")
+	t.Setenv("OBJECT_STORE_BUCKET_PREFIX", "ani-s13-")
+
+	cfg := gatewayStorageRuntimeConfigFromEnv()
+	if cfg.ObjectStoreProvider != "minio" || cfg.ObjectStoreEndpoint != "http://minio.example:9000" || cfg.ObjectStorePublicEndpoint != "http://minio-public.example:30900" {
+		t.Fatalf("object store provider config not loaded from env: %#v", cfg)
+	}
+	if cfg.ObjectStoreAccessKeyID == "" || cfg.ObjectStoreSecretAccessKey == "" || cfg.ObjectStoreBucketPrefix != "ani-s13-" {
+		t.Fatalf("object store credentials/prefix not loaded from env")
 	}
 }
 

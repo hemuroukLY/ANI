@@ -29,6 +29,7 @@ type Config struct {
 
 	ObjectStoreProvider        string
 	ObjectStoreEndpoint        string
+	ObjectStorePublicEndpoint  string
 	ObjectStoreAccessKeyID     string
 	ObjectStoreSecretAccessKey string
 	ObjectStoreSessionToken    string
@@ -209,6 +210,9 @@ func (c Config) withEnvironmentOverrides() Config {
 	}
 	if value := os.Getenv("OBJECT_STORE_ENDPOINT"); value != "" {
 		c.ObjectStoreEndpoint = value
+	}
+	if value := os.Getenv("OBJECT_STORE_PUBLIC_ENDPOINT"); value != "" {
+		c.ObjectStorePublicEndpoint = value
 	}
 	if value := os.Getenv("OBJECT_STORE_ACCESS_KEY_ID"); value != "" {
 		c.ObjectStoreAccessKeyID = value
