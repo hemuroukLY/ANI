@@ -12,6 +12,14 @@
   "id": "kubeovn-network-live-gate",
   "load_balancer": "lb-sprint13-s01-lb",
   "namespace": "ani-tenant-sprint13-s01-b",
+  "production_shape": {
+    "missing_items": [
+      "production_rbac_and_credential_management",
+      "persistent_route_metadata_reconciliation"
+    ],
+    "status": "pending",
+    "transport_profile": "lab_kubeconfig"
+  },
   "profile": "M1-NETWORK-LIVE-A",
   "route": "route-sprint13-s01-route",
   "security_group": "sg-sprint13-s01-sg",

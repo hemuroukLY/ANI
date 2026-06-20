@@ -1,0 +1,53 @@
+# SPRINT13-B-TRACK-PRODUCTION-SHAPE-REVIEW - S01-S04 production-shaped boundary guard
+
+> 记录类型：Sprint 13 B-track production-shaped review / guard
+> 日期：2026-06-20
+> 范围：仅 ANI Core Sprint 13 S01-S04 已通过 B 轨 real-provider evidence 的生产形态边界审查
+> 状态：**real-provider evidence passed, production-shaped gate pending**。不得标 production ready 或 runtime ready。
+
+## 结论
+
+S01-S04 均已通过各自 real-provider live gate，但这些结果仍是 lab/live evidence，不是生产形态证据。为防止误标生产可用，本批次新增 `validate-sprint13-b-track-production-shape` 门禁，强制四份 evidence JSON 与四份 live-result 文档同时记录 `production_shape.status=pending` 和进入生产形态前必须补齐的项目。
+
+## S01-S04 审查矩阵
+
+| 切片 | 已证明 | production_shape 当前状态 | 生产形态仍缺 |
+|---|---|---|---|
+| S01 网络路由 Kube-OVN | `NETWORK_PROVIDER=kubeovn_rest` 下 route create/observe/cleanup 通过 | `pending` / `lab_kubeconfig` | `production_rbac_and_credential_management`；`persistent_route_metadata_reconciliation` |
+| S02 K8s workloads vCluster | Core Gateway workload list observe + cleanup 通过 | `pending` / `lab_proxy` | `production_per_cluster_metadata_target`；`production_tls_and_token_management` |
+| S03 storage Rook-Ceph | Core volume/snapshot/filesystem/mount-target create/list/cleanup 通过 | `pending` / `lab_kubeconfig_and_dev_gateway` | `production_serviceaccount_rbac`；`tenant_storage_lifecycle_and_backup_restore` |
+| S04 GPU inventory/DCGM | Core `/gpu-inventory` 与 `/gpu-inventory/occupancy` + DCGM metrics 通过 | `pending` / `lab_proxy` | `production_in_cluster_kubernetes_api`；`production_dcgm_service_or_prometheus_query` |
+
+## 新增强制门禁
+
+```bash
+cd repo && make validate-sprint13-b-track-production-shape
+```
+
+门禁检查：
+
+- S01-S04 evidence JSON 必须保留 real-provider gate `status=passed`。
+- S01-S04 evidence JSON 必须包含 `production_shape`。
+- `production_shape.status=pending` 时必须列出 `missing_items`。
+- 若未来标 `production_shape.status=passed`，不得使用 `lab_proxy`、`local_port_forward` 或 `dev_gateway` 传输形态，且 `missing_items` 必须为空。
+- 对应 live-result 文档必须同时写明 `Production-shaped gate`、`production_shape` 和不代表 `production ready`。
+
+## 生产形态通过条件
+
+后续若要把某个切片升级为 production-shaped passed，必须重新产出证据，不得复用当前 lab evidence：
+
+- Gateway 使用正式部署路径，不使用本机 `127.0.0.1` dev gateway 作为生产证据。
+- Kubernetes API 通过正式 ServiceAccount/RBAC、in-cluster API 或受控 API endpoint 访问，不使用本机 `kubectl proxy` 作为生产证据。
+- DCGM/Prometheus 使用集群 Service 或正式 Prometheus query，不使用本机 port-forward 作为生产证据。
+- 凭据、token、kubeconfig、服务器 IP、Pod IP 不写入 evidence 或文档。
+
+## 验证
+
+```text
+python scripts/validate_sprint13_b_track_production_shape_test.py
+....
+Ran 4 tests
+OK
+```
+
+完整提交前仍需跑 Sprint 13 基线与文档门禁。

@@ -3,7 +3,7 @@
 > 记录类型：Sprint 13 B-track live result / real provider evidence
 > 日期：2026-06-20
 > 范围：仅 ANI Core S04 GPU inventory / occupancy real provider live gate；不代表 production ready
-> 状态：**real-provider evidence passed for S04 GPU inventory gate**。S05-S07 仍保持 LIVE PENDING。
+> 状态：**real-provider evidence passed for S04 GPU inventory gate, production-shaped gate pending**。S05-S07 仍保持 LIVE PENDING。
 
 ## 目标
 
@@ -17,7 +17,7 @@
 | 真实组件 + 版本 | Kubernetes `v1.36.1`；containerd `2.2.4`；NVIDIA device-plugin DaemonSet `nvidia-device-plugin-daemonset` 为 `3/3 ready`，镜像 `nvcr.io/nvidia/k8s-device-plugin:v0.19.2`；DCGM exporter Helm release `ani-dcgm-exporter` 部署于 `ani-system`，chart/app version `4.8.2`，DaemonSet `3/3 ready`，镜像 `nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless`；三台节点合计 6 GPU。 |
 | live gate 命令 | Contract/local：`make validate-gpu-contracts validate-gpu-inventory-live-gate`；真实命令形态：`python scripts/validate_gpu_inventory_live_gate.py --live --gateway-url <core-api>/api/v1 --ani-bearer-token <redacted> --kubernetes-nodes-url <kubectl-proxy>/api/v1/nodes --dcgm-metrics-url <dcgm-metrics-url> --evidence-output development-records/live-evidence/sprint13-gpu-inventory-dcgm-live-evidence.json`。 |
 | evidence 输出路径 | 通过型 live evidence：`repo/development-records/live-evidence/sprint13-gpu-inventory-dcgm-live-evidence.json`；只读盘点 evidence 保留为 `repo/development-records/live-evidence/sprint13-gpu-inventory-dcgm-readonly-evidence.json`。 |
-| 边界 | S04 只可标 `real-provider evidence passed for GPU inventory gate`；不得标 production ready、runtime ready、S05-S07 完成或整 Sprint 13 完成。DCGM exporter 作为 Sprint 13 lab 支撑组件存在，不代表生产部署方案冻结。 |
+| 边界 | S04 只可标 `real-provider evidence passed for GPU inventory gate`；不得标 production ready、runtime ready、S05-S07 完成或整 Sprint 13 完成。DCGM exporter 作为 Sprint 13 lab 支撑组件存在，不代表生产部署方案冻结。Production-shaped gate: **PENDING**，`production_shape.status=pending`。 |
 
 ## 实测输出摘要
 
@@ -47,6 +47,14 @@ SPRINT13-GPU-INVENTORY-DCGM-A live checks valid; evidence written to development
   "inventory_status": 200,
   "occupancy_status": 200,
   "occupancy_total": 6,
+  "production_shape": {
+    "missing_items": [
+      "production_in_cluster_kubernetes_api",
+      "production_dcgm_service_or_prometheus_query"
+    ],
+    "status": "pending",
+    "transport_profile": "lab_proxy"
+  },
   "profile": "SPRINT13-GPU-INVENTORY-DCGM-A",
   "status": "passed"
 }
@@ -61,4 +69,4 @@ SPRINT13-GPU-INVENTORY-DCGM-A live checks valid; evidence written to development
 
 ## 后续
 
-S04 已闭环；下一步仍只能在人工确认后进入 S05/S06/S07 的 B 轨真实 live gate。未完成的切片继续保持 LIVE PENDING。
+S04 real-provider gate 已闭环；Production-shaped gate 仍为 **PENDING**，`production_shape.status=pending`。进入生产形态前必须补齐 `production_in_cluster_kubernetes_api` 与 `production_dcgm_service_or_prometheus_query`，即 Gateway 使用正式 Kubernetes API/ServiceAccount/RBAC，DCGM 使用集群 Service 或 Prometheus 查询而非本地 port-forward。下一步仍只能在人工确认后进入 S05/S06/S07 的 B 轨真实 live gate。未完成的切片继续保持 LIVE PENDING。

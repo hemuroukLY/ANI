@@ -5,6 +5,14 @@
   "id": "storage-live-gate",
   "mount_target_count": 1,
   "namespace": "ani-tenant-tenant-a",
+  "production_shape": {
+    "missing_items": [
+      "production_serviceaccount_rbac",
+      "tenant_storage_lifecycle_and_backup_restore"
+    ],
+    "status": "pending",
+    "transport_profile": "lab_kubeconfig_and_dev_gateway"
+  },
   "profile": "SPRINT13-STORAGE-ROOK-CEPH-A",
   "snapshot_class": "csi-rbdplugin-snapclass",
   "snapshot_count": 1,

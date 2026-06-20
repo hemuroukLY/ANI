@@ -3,6 +3,14 @@
   "core_cluster_id": "k8sclu-22cb0b6a-1fc2-4eb2-b487-528d1601a9fd",
   "id": "vcluster-live-gate",
   "kubectl_version": "v1.35.0",
+  "production_shape": {
+    "missing_items": [
+      "production_per_cluster_metadata_target",
+      "production_tls_and_token_management"
+    ],
+    "status": "pending",
+    "transport_profile": "lab_proxy"
+  },
   "profile": "M1-K8S-LIVE-A",
   "proxy_status": 200,
   "status": "passed",

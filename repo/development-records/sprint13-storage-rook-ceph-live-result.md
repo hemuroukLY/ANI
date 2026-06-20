@@ -3,7 +3,7 @@
 > 记录类型：Sprint 13 B-track live result
 > 完成日期：2026-06-20
 > 范围：仅 ANI Core S03 storage snapshot / filesystem mount-target real-provider evidence；不代表 production ready
-> 状态：**real-provider evidence passed for S03 storage snapshot / mount-target gate**
+> 状态：**real-provider evidence passed for S03 storage snapshot / mount-target gate, production-shaped gate pending**
 
 ## 目标
 
@@ -17,7 +17,7 @@
 | 真实组件 + 版本 | Kubernetes `v1.36.1`；Rook `v1.20.0`；Ceph `v19.2.3`；CSI driver `rook-ceph.rbd.csi.ceph.com`；snapshot CRDs 已安装；运行中的 `snapshot-controller` 镜像为 `registry.k8s.io/sig-storage/snapshot-controller:v8.4.0`；Rook RBD CSI ctrlplugin sidecar `csi-snapshotter` 为 `registry.k8s.io/sig-storage/csi-snapshotter:v8.5.0`；RBD StorageClass `ani-rbd-ssd`；VolumeSnapshotClass `csi-rbdplugin-snapclass`，driver `rook-ceph.rbd.csi.ceph.com`，`deletionPolicy=Delete`，default annotation enabled. |
 | live gate 命令 | `python scripts/validate_storage_live_gate.py --live --gateway-url http://127.0.0.1:8080/api/v1 --ani-bearer-token dev-token --tenant-id tenant-a --namespace ani-tenant-tenant-a --storage-class ani-rbd-ssd --snapshot-class csi-rbdplugin-snapclass --filesystem-backend nfs --kubeconfig ../local-secrets/real-k8s-lab.kubeconfig --evidence-output development-records/live-evidence/sprint13-storage-rook-ceph-live-evidence.json` |
 | evidence 输出路径 | `repo/development-records/live-evidence/sprint13-storage-rook-ceph-live-evidence.json` |
-| 失败边界 | 本次只证明 S03 Core storage snapshot / mount-target real-provider evidence passed；不代表 production ready，不证明长期租户存储生命周期、PVC 真实数据面读写、生产凭据管理、备份/恢复策略、CephFS/NFS 后端生产形态或 S04-S07 完成。 |
+| 失败边界 | 本次只证明 S03 Core storage snapshot / mount-target real-provider evidence passed；不代表 production ready，不证明长期租户存储生命周期、PVC 真实数据面读写、生产凭据管理、备份/恢复策略、CephFS/NFS 后端生产形态或 S04-S07 完成。Production-shaped gate: **PENDING**，`production_shape.status=pending`。 |
 
 ## 关键输出
 
@@ -35,6 +35,14 @@ Evidence 摘要：
   "id": "storage-live-gate",
   "mount_target_count": 1,
   "namespace": "ani-tenant-tenant-a",
+  "production_shape": {
+    "missing_items": [
+      "production_serviceaccount_rbac",
+      "tenant_storage_lifecycle_and_backup_restore"
+    ],
+    "status": "pending",
+    "transport_profile": "lab_kubeconfig_and_dev_gateway"
+  },
   "profile": "SPRINT13-STORAGE-ROOK-CEPH-A",
   "snapshot_class": "csi-rbdplugin-snapclass",
   "snapshot_count": 1,
@@ -74,5 +82,6 @@ No resources found in ani-tenant-tenant-a namespace.
 ## 非目标
 
 - 不声明 storage production ready 或完整 runtime ready。
+- Production-shaped gate: **PENDING**；`production_shape.status=pending`。进入生产形态前必须补齐 `production_serviceaccount_rbac` 与 `tenant_storage_lifecycle_and_backup_restore`，并使用正式 Gateway/ServiceAccount/RBAC 路径重新产出 evidence。
 - 不声明 S04-S07 已完成真实 live gate。
 - 不把本次 NFS protocol contract 等同于生产 NFS/CephFS 数据面挂载能力；本次 mount-target 只证明 Core API 与 Kubernetes `Service` contract create/list/cleanup 路径。

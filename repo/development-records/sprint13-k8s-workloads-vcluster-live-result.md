@@ -3,7 +3,7 @@
 > 记录类型：Sprint 13 B-track live result
 > 完成日期：2026-06-20
 > 范围：仅 ANI Core S02 K8s workloads vCluster workload list evidence；不代表 production ready
-> 状态：**real-provider evidence passed for S02 workload list gate**
+> 状态：**real-provider evidence passed for S02 workload list gate, production-shaped gate pending**
 
 ## 目标
 
@@ -17,7 +17,7 @@
 | 真实组件 + 版本 | 宿主 Kubernetes `v1.36.1`；vCluster Helm chart/app 固定恢复为 `0.34.1`；vCluster API evidence 返回 Kubernetes `v1.35.0`；vCluster CLI 恢复为 `v0.34.1`。 |
 | live gate 命令 | `python scripts/validate_vcluster_live_gate.py --live --tenant-id tenant-a --namespace ani-tenant-tenant-a-vcluster --cluster-id k8sclu-live --gateway-url http://127.0.0.1:8080/api/v1 --ani-bearer-token dev-token --vcluster-binary /private/tmp/vcluster-v0.34.1-darwin-arm64 --proxy-server http://127.0.0.1:18002 --chart-version 0.34.1 --evidence-output development-records/live-evidence/sprint13-k8s-workloads-vcluster-live-evidence.json` |
 | evidence 输出路径 | `repo/development-records/live-evidence/sprint13-k8s-workloads-vcluster-live-evidence.json` |
-| 失败边界 | 本次只证明 S02 workload list real-provider evidence passed；不代表 production ready，不证明生产 per-cluster metadata target、KMS token 管理、长期 workload 生命周期管理、跨 namespace 策略或 S03-S07 完成。 |
+| 失败边界 | 本次只证明 S02 workload list real-provider evidence passed；不代表 production ready，不证明生产 per-cluster metadata target、KMS token 管理、长期 workload 生命周期管理、跨 namespace 策略或 S03-S07 完成。Production-shaped gate: **PENDING**，`production_shape.status=pending`。 |
 
 ## 关键输出
 
@@ -33,6 +33,14 @@ Evidence 摘要：
   "core_cluster_id": "k8sclu-22cb0b6a-1fc2-4eb2-b487-528d1601a9fd",
   "id": "vcluster-live-gate",
   "kubectl_version": "v1.35.0",
+  "production_shape": {
+    "missing_items": [
+      "production_per_cluster_metadata_target",
+      "production_tls_and_token_management"
+    ],
+    "status": "pending",
+    "transport_profile": "lab_proxy"
+  },
   "profile": "M1-K8S-LIVE-A",
   "proxy_status": 200,
   "status": "passed",
@@ -59,5 +67,6 @@ Evidence 摘要：
 ## 非目标
 
 - 不声明 K8s workloads production ready。
+- Production-shaped gate: **PENDING**；`production_shape.status=pending`。进入生产形态前必须补齐 `production_per_cluster_metadata_target` 与 `production_tls_and_token_management`，并使用正式 per-cluster target 而非本地 proxy 重新产出 evidence。
 - 不声明 S03-S07 已完成真实 live gate。
 - 不把本机 kubectl proxy 路径等同于生产 per-cluster metadata resolver、TLS/credential 管理或长期租户集群生命周期能力。
