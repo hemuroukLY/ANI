@@ -23,6 +23,22 @@
 - 契约差异先改 `api/openapi/v1.yaml`（只增可选字段）再实现，保持 v1 兼容。
 - **代码-文档一致是硬门禁**：每个 slice 的 live-gate 校验器要求 4 份文档（ANI-DOCS-INDEX.md、ANI-06-开发计划.md、repo/CURRENT-SPRINT.md、repo/development-records/README.md）都包含该 slice 的全部 `REQUIRED_DOC_TOKENS`（见 §3）；任一缺失即门禁失败。
 
+## 1.5 真实环境接入（新会话必读，凭据不入库）
+
+- **三台物理服务器登录信息与 tailscale 网段**：见本机 `/Users/zhangfan/ANI/local-secrets/dev-physical-servers.md`。新会话在执行任何真实步骤前先读取该文件获取 SSH / 凭据与网络接入；**不得把其中的 IP、用户名、密码、tailscale 网段值复制进本文件、evidence、日志、commit 或回复**（CLAUDE.md 强制）。
+- **网段不冲突**：为 live gate 创建的任意 tailscale / 临时测试网段，**不得与 Kube-OVN join subnet `172.30.0.0/16` 及集群 Pod/Service CIDR 重叠**；apply 前先核对 CIDR，冲突即换段。
+- **镜像拉取慢时**：优先给容器运行时配置 registry mirror（加速/国内镜像地址）；仍慢则在本机 MAC 拉取并打包镜像后中转上传到三台服务器（`docker save` → `scp` → `ctr -n k8s.io images import` / `crictl` 导入，或私有 registry 中转），避免直连超时导致部署失败。中转过程同样不落凭据。
+
+## 1.6 生产可用判定（每切片，与 S01–S04 同级）
+
+每切片「生产可用 = production-shaped passed」必须同时满足：
+1. 真实 adapter 接真实组件（非 fake/stub）；组件 SDK 仅在 adapter，import 在 allowlist。
+2. 经 production-shaped Gateway（in-cluster ServiceAccount/RBAC + `ANI_AUTH_MODE=auth_service`）跑**正向业务证据**（非 kubectl-only / proof-only）。
+3. evidence `production_shape.status=passed` 且 `make validate-sprint13-b-track-production-shape` 绿。
+4. 生产级工程质量：幂等、错误处理、超时/重试、临时资源 `--cleanup`、无凭据泄漏。
+
+> 注：组件级 production-shaped passed **不等于 full platform production ready**；正式镜像发布/升级、长期 SLA/soak、备份恢复、故障注入由后续 release gate 承担，不在本切片范围。
+
 ## 2. 编排提示（粘进 codex goal 持续运行）
 
 ```text
@@ -37,7 +53,7 @@ repo/development-records/sprint13-s05-s07-b-track-prompts.md（§0 现状 + §1 
 分支：feature/sprint12-core-support。不 push、不动 main、不改 port 签名/handler、不动 /api/v1/svc。
 
 逐切片 S05→S06→S07，每个做完整 B 轨：
-1. 只读盘点三台物理服务器（凭据见本机 local-secrets/，绝不入库/回显），确认组件未部署与真实 API（MinIO S3/pre-signed、Milvus collection schema、Prometheus query）。按 §153 更新该 slice readiness。
+1. 先读 /Users/zhangfan/ANI/local-secrets/dev-physical-servers.md 取三台服务器登录信息与 tailscale 网段（绝不入库/回显/复制进任何可提交文件）；只读盘点确认组件未部署与真实 API（MinIO S3/pre-signed、Milvus collection schema、Prometheus query）。为 live gate 建的临时网段不得与 Kube-OVN 172.30.0.0/16 及 Pod/Service CIDR 重叠。镜像拉取慢时配 registry mirror，或在本机 MAC 打包镜像中转上传（docker save→scp→ctr -n k8s.io images import）。按 §153 更新该 slice readiness。
 2. 写/补 real adapter（S05 新建 MinIO ObjectStore adapter；S06 新建 Milvus VectorStore adapter；S07 复用并校验现有 prometheus_instance_observability.go），实现对应 ports 接口；组件 SDK 只在 adapter（allowlist 已含 minio/milvus）。接线 *_PROVIDER 开关 real 分支 + bootstrap/Gateway in-cluster provider 装配（对照 S04 GPU_INVENTORY_PROVIDER=kubernetes_rest / S01 NETWORK_PROVIDER=kubeovn_rest）。
 3. 给该 slice live-gate 校验器补 --live + --production-shaped + evidence 输出与 proof_items（样板：scripts/validate_gpu_inventory_live_gate.py）；proof_items 对齐 deploy/real-k8s-lab/sprint13-production-shaped-gateway-profile.yaml 中该 slice 条目。
 4. 写 adapter 单测（fake/mock，不依赖真实后端）。
