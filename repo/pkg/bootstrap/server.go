@@ -61,7 +61,11 @@ type Config struct {
 	InstanceObservabilityPrometheusURL string
 	InstanceObservabilityExecBaseURL   string
 	KubernetesAPIHost                  string
+	KubernetesServiceHost              string
+	KubernetesServicePort              string
 	KubernetesBearerToken              string
+	KubernetesServiceAccountTokenFile  string
+	KubernetesServiceAccountCAFile     string
 	KubernetesProviderFieldManager     string
 
 	WorkloadReconcileControllerEnabled     bool
@@ -182,8 +186,20 @@ func (c Config) withEnvironmentOverrides() Config {
 	if value := os.Getenv("KUBERNETES_API_HOST"); value != "" {
 		c.KubernetesAPIHost = value
 	}
+	if value := os.Getenv("KUBERNETES_SERVICE_HOST"); value != "" {
+		c.KubernetesServiceHost = value
+	}
+	if value := os.Getenv("KUBERNETES_SERVICE_PORT"); value != "" {
+		c.KubernetesServicePort = value
+	}
 	if value := os.Getenv("KUBERNETES_BEARER_TOKEN"); value != "" {
 		c.KubernetesBearerToken = value
+	}
+	if value := os.Getenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE"); value != "" {
+		c.KubernetesServiceAccountTokenFile = value
+	}
+	if value := os.Getenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE"); value != "" {
+		c.KubernetesServiceAccountCAFile = value
 	}
 	if value := os.Getenv("KUBERNETES_PROVIDER_FIELD_MANAGER"); value != "" {
 		c.KubernetesProviderFieldManager = value

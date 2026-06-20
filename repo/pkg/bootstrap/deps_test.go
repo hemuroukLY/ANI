@@ -1,6 +1,13 @@
 package bootstrap
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -135,6 +142,24 @@ func TestNewCapabilitiesCanWireKubernetesGPUInventoryProvider(t *testing.T) {
 	}
 }
 
+func TestNewCapabilitiesCanWireKubernetesGPUInventoryProviderWithInClusterKubernetesConfig(t *testing.T) {
+	tokenPath, caPath := writeTestKubernetesServiceAccountFiles(t)
+	capabilities, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{
+		GPUInventoryProvider:              "kubernetes_rest",
+		KubernetesServiceHost:             "10.96.0.1",
+		KubernetesServicePort:             "443",
+		KubernetesServiceAccountTokenFile: tokenPath,
+		KubernetesServiceAccountCAFile:    caPath,
+		KubernetesProviderFieldManager:    "ani-test",
+	})
+	if err != nil {
+		t.Fatalf("NewCapabilitiesWithConfig() error = %v", err)
+	}
+	if _, ok := capabilities.GPUInventory.(*runtimeadapter.KubernetesGPUInventory); !ok {
+		t.Fatalf("GPUInventory = %T, want KubernetesGPUInventory", capabilities.GPUInventory)
+	}
+}
+
 func TestNewCapabilitiesCanWireKubeOVNNetworkRouteProvider(t *testing.T) {
 	capabilities, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{
 		NetworkProvider:                "kubeovn_rest",
@@ -143,6 +168,30 @@ func TestNewCapabilitiesCanWireKubeOVNNetworkRouteProvider(t *testing.T) {
 		NetworkProviderPermissionProof: "rbac-scope:networks.routes.write",
 		KubernetesAPIHost:              "https://kubernetes.example.test",
 		KubernetesProviderFieldManager: "ani-test",
+	})
+	if err != nil {
+		t.Fatalf("NewCapabilitiesWithConfig() error = %v", err)
+	}
+	if _, ok := capabilities.NetworkResources.(*runtimeadapter.LocalNetworkService); !ok {
+		t.Fatalf("NetworkResources = %T, want LocalNetworkService with Kube-OVN route provider", capabilities.NetworkResources)
+	}
+	if _, ok := capabilities.NetworkDryRun.(*runtimeadapter.KubeOVNNetworkProviderAdapter); !ok {
+		t.Fatalf("NetworkDryRun = %T, want KubeOVNNetworkProviderAdapter", capabilities.NetworkDryRun)
+	}
+}
+
+func TestNewCapabilitiesCanWireKubeOVNNetworkRouteProviderWithInClusterKubernetesConfig(t *testing.T) {
+	tokenPath, caPath := writeTestKubernetesServiceAccountFiles(t)
+	capabilities, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{
+		NetworkProvider:                   "kubeovn_rest",
+		NetworkProviderApplyEnabled:       true,
+		NetworkProviderUserID:             "ani-core-network-provider",
+		NetworkProviderPermissionProof:    "rbac-scope:networks.routes.write",
+		KubernetesServiceHost:             "10.96.0.1",
+		KubernetesServicePort:             "443",
+		KubernetesServiceAccountTokenFile: tokenPath,
+		KubernetesServiceAccountCAFile:    caPath,
+		KubernetesProviderFieldManager:    "ani-test",
 	})
 	if err != nil {
 		t.Fatalf("NewCapabilitiesWithConfig() error = %v", err)
@@ -172,6 +221,30 @@ func TestNewCapabilitiesCanWireKubernetesStorageProvider(t *testing.T) {
 		StorageProviderPermissionProof: "rbac-scope:storage.write",
 		KubernetesAPIHost:              "https://kubernetes.example.test",
 		KubernetesProviderFieldManager: "ani-test",
+	})
+	if err != nil {
+		t.Fatalf("NewCapabilitiesWithConfig() error = %v", err)
+	}
+	if _, ok := capabilities.StorageResources.(*runtimeadapter.LocalStorageService); !ok {
+		t.Fatalf("StorageResources = %T, want LocalStorageService with Kubernetes storage provider", capabilities.StorageResources)
+	}
+	if _, ok := capabilities.StorageDryRun.(*runtimeadapter.KubernetesStorageProviderAdapter); !ok {
+		t.Fatalf("StorageDryRun = %T, want KubernetesStorageProviderAdapter", capabilities.StorageDryRun)
+	}
+}
+
+func TestNewCapabilitiesCanWireKubernetesStorageProviderWithInClusterKubernetesConfig(t *testing.T) {
+	tokenPath, caPath := writeTestKubernetesServiceAccountFiles(t)
+	capabilities, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{
+		StorageProvider:                   "kubernetes_rest",
+		StorageProviderApplyEnabled:       true,
+		StorageProviderUserID:             "ani-core-storage-provider",
+		StorageProviderPermissionProof:    "rbac-scope:storage.write",
+		KubernetesServiceHost:             "10.96.0.1",
+		KubernetesServicePort:             "443",
+		KubernetesServiceAccountTokenFile: tokenPath,
+		KubernetesServiceAccountCAFile:    caPath,
+		KubernetesProviderFieldManager:    "ani-test",
 	})
 	if err != nil {
 		t.Fatalf("NewCapabilitiesWithConfig() error = %v", err)
@@ -279,6 +352,25 @@ func TestNewCapabilitiesCanWirePrometheusInstanceObservabilityProvider(t *testin
 	}
 }
 
+func TestNewCapabilitiesCanWirePrometheusInstanceObservabilityProviderWithInClusterKubernetesConfig(t *testing.T) {
+	tokenPath, caPath := writeTestKubernetesServiceAccountFiles(t)
+	capabilities, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{
+		InstanceObservabilityProvider:      "prometheus_kubernetes",
+		InstanceObservabilityPrometheusURL: "https://prometheus.example.test",
+		KubernetesServiceHost:              "10.96.0.1",
+		KubernetesServicePort:              "443",
+		KubernetesServiceAccountTokenFile:  tokenPath,
+		KubernetesServiceAccountCAFile:     caPath,
+		InstanceObservabilityExecBaseURL:   "wss://gateway.example.test/api/v1",
+	})
+	if err != nil {
+		t.Fatalf("NewCapabilitiesWithConfig() error = %v", err)
+	}
+	if _, ok := capabilities.InstanceObservability.(*runtimeadapter.PrometheusInstanceObservability); !ok {
+		t.Fatalf("InstanceObservability = %T, want PrometheusInstanceObservability", capabilities.InstanceObservability)
+	}
+}
+
 func TestNewCapabilitiesCanWrapReconcileControllerWithMetadataLeaderElection(t *testing.T) {
 	capabilities, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{
 		WorkloadReconcileLeaderElectionEnabled: true,
@@ -316,4 +408,35 @@ func TestNewCapabilitiesRejectsKubernetesRESTLifecycleWithoutHost(t *testing.T) 
 	if _, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{WorkloadLifecycleProvider: "kubernetes_rest"}); err == nil {
 		t.Fatalf("NewCapabilitiesWithConfig() error = nil, want missing Kubernetes host error")
 	}
+}
+
+func writeTestKubernetesServiceAccountFiles(t *testing.T) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "token")
+	if err := os.WriteFile(tokenPath, []byte("service-account-token\n"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	template := x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		NotBefore:             time.Now().Add(-time.Minute),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	caPath := filepath.Join(dir, "ca.crt")
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	if err := os.WriteFile(caPath, caPEM, 0o600); err != nil {
+		t.Fatalf("write ca: %v", err)
+	}
+	return tokenPath, caPath
 }

@@ -118,6 +118,22 @@ func TestConfigEnvironmentOverridesGPUInventoryProvider(t *testing.T) {
 	}
 }
 
+func TestConfigEnvironmentOverridesInClusterKubernetesServiceAccount(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.96.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+	t.Setenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/token")
+	t.Setenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+
+	cfg := (Config{}).withEnvironmentOverrides()
+
+	if cfg.KubernetesServiceHost != "10.96.0.1" || cfg.KubernetesServicePort != "443" {
+		t.Fatalf("KubernetesServiceHost/Port = %q/%q, want in-cluster service", cfg.KubernetesServiceHost, cfg.KubernetesServicePort)
+	}
+	if cfg.KubernetesServiceAccountTokenFile == "" || cfg.KubernetesServiceAccountCAFile == "" {
+		t.Fatalf("service account token/CA files = %q/%q, want configured files", cfg.KubernetesServiceAccountTokenFile, cfg.KubernetesServiceAccountCAFile)
+	}
+}
+
 func TestStartWorkloadReconcileControllerRequiresOptIn(t *testing.T) {
 	controller := &fakeWorkloadReconcileController{
 		started: make(chan struct{}),

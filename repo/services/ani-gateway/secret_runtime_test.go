@@ -45,6 +45,22 @@ func TestGatewaySecretServiceFromConfigUsesKubernetesRESTProvider(t *testing.T) 
 	}
 }
 
+func TestGatewaySecretRuntimeConfigFromEnvIncludesInClusterKubernetesService(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.96.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+	t.Setenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/token")
+	t.Setenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+
+	cfg := gatewaySecretRuntimeConfigFromEnv()
+
+	if cfg.KubernetesServiceHost != "10.96.0.1" || cfg.KubernetesServicePort != "443" {
+		t.Fatalf("service host/port = %q/%q, want in-cluster Kubernetes service", cfg.KubernetesServiceHost, cfg.KubernetesServicePort)
+	}
+	if cfg.KubernetesServiceAccountTokenFile == "" || cfg.KubernetesServiceAccountCAFile == "" {
+		t.Fatalf("service account token/CA files = %q/%q, want configured files", cfg.KubernetesServiceAccountTokenFile, cfg.KubernetesServiceAccountCAFile)
+	}
+}
+
 func TestGatewaySecretServiceFromConfigRejectsInvalidProvider(t *testing.T) {
 	if _, err := newGatewaySecretService(gatewaySecretRuntimeConfig{ProviderMode: "unknown"}); err == nil {
 		t.Fatalf("newGatewaySecretService() error = nil, want unsupported provider error")

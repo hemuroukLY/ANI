@@ -22,6 +22,22 @@ func TestGatewayK8sClusterServiceFromConfigDefaultsToRouterLocalService(t *testi
 	}
 }
 
+func TestGatewayK8sClusterRuntimeConfigFromEnvIncludesInClusterKubernetesService(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.96.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+	t.Setenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/token")
+	t.Setenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+
+	cfg := gatewayK8sClusterRuntimeConfigFromEnv()
+
+	if cfg.KubernetesServiceHost != "10.96.0.1" || cfg.KubernetesServicePort != "443" {
+		t.Fatalf("service host/port = %q/%q, want in-cluster Kubernetes service", cfg.KubernetesServiceHost, cfg.KubernetesServicePort)
+	}
+	if cfg.KubernetesServiceAccountTokenFile == "" || cfg.KubernetesServiceAccountCAFile == "" {
+		t.Fatalf("service account token/CA files = %q/%q, want configured files", cfg.KubernetesServiceAccountTokenFile, cfg.KubernetesServiceAccountCAFile)
+	}
+}
+
 func TestGatewayK8sClusterServiceFromConfigUsesStaticForwardingTarget(t *testing.T) {
 	transport := &gatewayK8sProxyRoundTripper{
 		statusCode: http.StatusOK,

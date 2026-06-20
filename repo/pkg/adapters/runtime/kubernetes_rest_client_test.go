@@ -90,6 +90,15 @@ func TestKubernetesRESTClientRejectsInClusterConfigWithoutServiceAccountToken(t 
 	}
 }
 
+func TestKubernetesRESTClientDoesNotReadAmbientInClusterEnvironment(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.96.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+
+	if _, err := NewKubernetesRESTClient(KubernetesRESTClientConfig{}); err == nil {
+		t.Fatalf("NewKubernetesRESTClient() error = nil, want explicit Kubernetes host or service host")
+	}
+}
+
 func TestKubernetesRESTClientApplyUsesServerSideApply(t *testing.T) {
 	var gotPath string
 	var gotContentType string

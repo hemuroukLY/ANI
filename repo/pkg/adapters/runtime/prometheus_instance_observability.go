@@ -16,13 +16,17 @@ import (
 )
 
 type PrometheusInstanceObservabilityConfig struct {
-	PrometheusURL          string
-	KubernetesAPIHost      string
-	KubernetesBearerToken  string
-	KubernetesFieldManager string
-	ExecBaseURL            string
-	HTTPClient             *http.Client
-	Now                    func() time.Time
+	PrometheusURL                     string
+	KubernetesAPIHost                 string
+	KubernetesServiceHost             string
+	KubernetesServicePort             string
+	KubernetesBearerToken             string
+	KubernetesServiceAccountTokenFile string
+	KubernetesServiceAccountCAFile    string
+	KubernetesFieldManager            string
+	ExecBaseURL                       string
+	HTTPClient                        *http.Client
+	Now                               func() time.Time
 }
 
 type PrometheusInstanceObservability struct {
@@ -40,11 +44,15 @@ func NewPrometheusInstanceObservability(config PrometheusInstanceObservabilityCo
 		return nil, fmt.Errorf("%w: prometheus_url is required", ports.ErrNotConfigured)
 	}
 	client, err := NewKubernetesRESTClient(KubernetesRESTClientConfig{
-		Host:         config.KubernetesAPIHost,
-		BearerToken:  config.KubernetesBearerToken,
-		FieldManager: firstNonEmpty(config.KubernetesFieldManager, "ani-instance-observability"),
-		HTTPClient:   config.HTTPClient,
-		Now:          config.Now,
+		Host:            config.KubernetesAPIHost,
+		ServiceHost:     config.KubernetesServiceHost,
+		ServicePort:     config.KubernetesServicePort,
+		BearerToken:     config.KubernetesBearerToken,
+		BearerTokenFile: config.KubernetesServiceAccountTokenFile,
+		CAFile:          config.KubernetesServiceAccountCAFile,
+		FieldManager:    firstNonEmpty(config.KubernetesFieldManager, "ani-instance-observability"),
+		HTTPClient:      config.HTTPClient,
+		Now:             config.Now,
 	})
 	if err != nil {
 		return nil, err

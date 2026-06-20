@@ -9,7 +9,7 @@
 
 把 S01-S04 从“只防止误标 production ready”推进到可生产验收的代码和门禁形态：
 
-- Gateway Kubernetes REST client 支持标准 in-cluster ServiceAccount token、CA bundle 与 `KUBERNETES_SERVICE_HOST/PORT`，生产部署不再依赖本机 kubeconfig 或 kubectl proxy。
+- Gateway 与 bootstrap Kubernetes REST provider 支持标准 in-cluster ServiceAccount token、CA bundle 与 `KUBERNETES_SERVICE_HOST/PORT`，生产部署不再依赖本机 kubeconfig 或 kubectl proxy。
 - S01 network route 元数据从 in-memory-only 提升为 metadata store 持久化路径，provider-backed route apply/observe 后可落库。
 - 新增 production-shaped Gateway RBAC/profile，固定最小 ServiceAccount、ClusterRole、ClusterRoleBinding 与 S01-S07 B 轨通过标准。
 - S02/S03/S04 live gate 增加 `--production-shaped` 模式；启用后拒绝 localhost/127、本机 proxy、port-forward/dev gateway 证据，并写入 `production_shape.status=passed` + `proof_items`。
@@ -20,11 +20,17 @@
 | 切片 | 修复内容 | 生产验收影响 |
 |---|---|---|
 | S01 网络路由 Kube-OVN | `NetworkResourceStore.UpsertRoute`、`MetadataNetworkStore.UpsertRoute`、`LocalNetworkService.CreateRoute` 持久化 pending/success/failed route；新增 `network_routes` migration | route provider 不再只有内存态，具备持久 route metadata reconciliation 基础 |
-| S01/S03/S04 Kubernetes provider | `KubernetesRESTClient` 支持 in-cluster ServiceAccount token/CA；Gateway network/storage/gpu runtime 透传 service host/port/token/CA file | Gateway 可用正式 ServiceAccount/RBAC 访问 Kubernetes API |
+| S01/S03/S04 Kubernetes provider | `KubernetesRESTClient` 支持 in-cluster ServiceAccount token/CA；Gateway network/storage/gpu runtime 与 `pkg/bootstrap` provider 装配均透传 service host/port/token/CA file | Gateway 与 bootstrap 能力装配路径均可用正式 ServiceAccount/RBAC 访问 Kubernetes API |
 | S02 K8s workloads vCluster | `validate_vcluster_live_gate.py --production-shaped` 拒绝 `--proxy-server` 与本地 Gateway，要求非本地 metadata target server | 后续 S02 passed evidence 必须证明 per-cluster metadata target + TLS/token |
 | S03 storage Rook-Ceph | `validate_storage_live_gate.py --production-shaped` 拒绝本地 Gateway，并写入 S03 production proof items | 后续 S03 passed evidence 必须经 production gateway / in-cluster RBAC 路径 |
 | S04 GPU inventory/DCGM | `validate_gpu_inventory_live_gate.py --production-shaped` 拒绝 `--kubernetes-nodes-url` 与本地 DCGM/Prometheus URL | 后续 S04 passed evidence 必须经 in-cluster Kubernetes API 与集群 Service/Prometheus |
 | S05-S07 标准 | `sprint13-production-shaped-gateway-profile.yaml` 写入 S05/S06/S07 `slice_proof_items` | 后续 B 轨沿用同一 production-shaped passed 标准 |
+
+## Post-review hardening
+
+深度复审发现：初版 closure 已覆盖 Gateway network/storage/gpu runtime，但 `pkg/bootstrap.Config` 与 `NewCapabilitiesWithConfig` 仍只向 Kubernetes REST provider 传递显式 `KUBERNETES_API_HOST` / bearer token / field manager。已在 `SPRINT13-B-TRACK-PRODUCTION-SHAPED-POST-REVIEW` 中补齐 bootstrap in-cluster ServiceAccount 装配路径，并让 S01 network、S03 storage、S04 GPU inventory 与 S07 Prometheus observability 共用同一显式 Kubernetes REST config helper。
+
+同时，`KubernetesRESTClient` 不再直接读取 ambient process env；环境变量只在 Gateway/bootstrap 配置层读取，adapter 层保持显式 config，避免生产部署和 CI 测试因宿主环境变量产生隐式行为。
 
 ## 新增/更新门禁
 

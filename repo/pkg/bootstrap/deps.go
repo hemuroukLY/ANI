@@ -264,11 +264,7 @@ func gpuInventoryAdapter(cfg Config, kubeClient *runtimeadapter.KubernetesRESTCl
 		client := kubeClient
 		if client == nil {
 			var err error
-			client, err = runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
-				Host:         cfg.KubernetesAPIHost,
-				BearerToken:  cfg.KubernetesBearerToken,
-				FieldManager: cfg.KubernetesProviderFieldManager,
-			})
+			client, err = runtimeadapter.NewKubernetesRESTClient(kubernetesRESTClientConfig(cfg))
 			if err != nil {
 				return nil, err
 			}
@@ -290,11 +286,7 @@ func networkProviderAdapter(cfg Config, kubeClient *runtimeadapter.KubernetesRES
 		client := kubeClient
 		if client == nil {
 			var err error
-			client, err = runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
-				Host:         cfg.KubernetesAPIHost,
-				BearerToken:  cfg.KubernetesBearerToken,
-				FieldManager: cfg.KubernetesProviderFieldManager,
-			})
+			client, err = runtimeadapter.NewKubernetesRESTClient(kubernetesRESTClientConfig(cfg))
 			if err != nil {
 				return nil, err
 			}
@@ -349,11 +341,15 @@ func instanceObservabilityAdapter(cfg Config) (ports.InstanceObservability, erro
 		return runtimeadapter.NewLocalInstanceObservabilityService(), nil
 	case "prometheus_kubernetes":
 		return runtimeadapter.NewPrometheusInstanceObservability(runtimeadapter.PrometheusInstanceObservabilityConfig{
-			PrometheusURL:          cfg.InstanceObservabilityPrometheusURL,
-			KubernetesAPIHost:      cfg.KubernetesAPIHost,
-			KubernetesBearerToken:  cfg.KubernetesBearerToken,
-			KubernetesFieldManager: cfg.KubernetesProviderFieldManager,
-			ExecBaseURL:            cfg.InstanceObservabilityExecBaseURL,
+			PrometheusURL:                     cfg.InstanceObservabilityPrometheusURL,
+			KubernetesAPIHost:                 cfg.KubernetesAPIHost,
+			KubernetesServiceHost:             cfg.KubernetesServiceHost,
+			KubernetesServicePort:             cfg.KubernetesServicePort,
+			KubernetesBearerToken:             cfg.KubernetesBearerToken,
+			KubernetesServiceAccountTokenFile: cfg.KubernetesServiceAccountTokenFile,
+			KubernetesServiceAccountCAFile:    cfg.KubernetesServiceAccountCAFile,
+			KubernetesFieldManager:            cfg.KubernetesProviderFieldManager,
+			ExecBaseURL:                       cfg.InstanceObservabilityExecBaseURL,
 		})
 	default:
 		return nil, fmt.Errorf("%w: unsupported instance observability provider %q", ports.ErrUnsupported, cfg.InstanceObservabilityProvider)
@@ -379,11 +375,7 @@ func workloadProviderAdapters(cfg Config) (ports.WorkloadProviderDryRun, ports.W
 			nil,
 			nil
 	case "kubernetes_rest":
-		client, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
-			Host:         cfg.KubernetesAPIHost,
-			BearerToken:  cfg.KubernetesBearerToken,
-			FieldManager: cfg.KubernetesProviderFieldManager,
-		})
+		client, err := runtimeadapter.NewKubernetesRESTClient(kubernetesRESTClientConfig(cfg))
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -405,11 +397,7 @@ func workloadLifecycleExecutor(cfg Config, kubeClient *runtimeadapter.Kubernetes
 		client := kubeClient
 		if client == nil {
 			var err error
-			client, err = runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
-				Host:         cfg.KubernetesAPIHost,
-				BearerToken:  cfg.KubernetesBearerToken,
-				FieldManager: cfg.KubernetesProviderFieldManager,
-			})
+			client, err = runtimeadapter.NewKubernetesRESTClient(kubernetesRESTClientConfig(cfg))
 			if err != nil {
 				return nil, err
 			}
@@ -431,11 +419,7 @@ func workloadOpsExecutor(cfg Config, kubeClient *runtimeadapter.KubernetesRESTCl
 		client := kubeClient
 		if client == nil {
 			var err error
-			client, err = runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
-				Host:         cfg.KubernetesAPIHost,
-				BearerToken:  cfg.KubernetesBearerToken,
-				FieldManager: cfg.KubernetesProviderFieldManager,
-			})
+			client, err = runtimeadapter.NewKubernetesRESTClient(kubernetesRESTClientConfig(cfg))
 			if err != nil {
 				return nil, err
 			}
@@ -443,6 +427,18 @@ func workloadOpsExecutor(cfg Config, kubeClient *runtimeadapter.KubernetesRESTCl
 		return runtimeadapter.NewKubernetesInstanceOps(client, runtimeadapter.WithKubernetesInstanceOpsEnabled(cfg.WorkloadOpsEnabled)), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported workload ops provider %q", ports.ErrUnsupported, cfg.WorkloadOpsProvider)
+	}
+}
+
+func kubernetesRESTClientConfig(cfg Config) runtimeadapter.KubernetesRESTClientConfig {
+	return runtimeadapter.KubernetesRESTClientConfig{
+		Host:            cfg.KubernetesAPIHost,
+		ServiceHost:     cfg.KubernetesServiceHost,
+		ServicePort:     cfg.KubernetesServicePort,
+		BearerToken:     cfg.KubernetesBearerToken,
+		BearerTokenFile: cfg.KubernetesServiceAccountTokenFile,
+		CAFile:          cfg.KubernetesServiceAccountCAFile,
+		FieldManager:    cfg.KubernetesProviderFieldManager,
 	}
 }
 

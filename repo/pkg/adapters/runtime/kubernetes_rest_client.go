@@ -92,13 +92,7 @@ func kubernetesRESTHost(config KubernetesRESTClientConfig) (string, bool, error)
 		return host, false, nil
 	}
 	serviceHost := strings.TrimSpace(config.ServiceHost)
-	if serviceHost == "" {
-		serviceHost = strings.TrimSpace(os.Getenv("KUBERNETES_SERVICE_HOST"))
-	}
 	servicePort := strings.TrimSpace(config.ServicePort)
-	if servicePort == "" {
-		servicePort = strings.TrimSpace(os.Getenv("KUBERNETES_SERVICE_PORT"))
-	}
 	if serviceHost == "" {
 		return "", false, fmt.Errorf("%w: Kubernetes API host is required", ports.ErrInvalid)
 	}
