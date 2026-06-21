@@ -548,15 +548,42 @@ make test   # 全通
 
 ---
 
-### Sprint 10：2026-09-26 → 2026-09-30
+### Sprint 10：计划窗口 2026-09-26 → 2026-09-30（实际 2026-06-04 Core-only 完成）
 
-**主题：v1.0.0 正式发布**
+**原始主题：v1.0.0 发布窗口 → 实际为 release-prep readiness，`v1.0.0 尚未发布`（不得标 v1.0.0/RC）。**
 
 ```bash
-git tag v1.0.0
-# 离线安装包发布
-# 文档站发布
-# 第一个标杆客户环境部署验收
+# 实际完成：CORE-ARTIFACT-MANIFEST-A / CORE-VERSION-POLICY-A / CORE-FINAL-READINESS-A 等 release-prep 门禁
+make validate-sprint10-release-prep
+# 原始计划项（离线包发布、文档站发布、标杆客户验收）仍属 v1.0.0 发布时执行，当前未发布
+```
+
+> 以下 Sprint 11–13 为原始排期之后实际推进的冲刺；详细真实状态与 evidence 以「[零、状态快照](#零状态快照先读这里)」和 [`repo/CURRENT-SPRINT.md`](repo/CURRENT-SPRINT.md) 为准，本节只给摘要与验收入口。
+
+### Sprint 11：Core 真实部署验证 + Rook-Ceph 正式部署（✅ 已完成，2026-06-05，转历史回归门禁）
+
+**主题：** 三台物理服务器首次真实部署验证；Rook-Ceph 正式块存储部署（CephCluster `Ready/HEALTH_OK`、5 个 SSD OSD、`ani-rbd-ssd` StorageClass、RBD/VM smoke、逐节点 reboot resilience）。明细见 Section 零「当前真实底座环境状态」与 dev-records。
+
+```bash
+make validate-sprint11-real-deployment
+make validate-sprint11-core-doc-consistency
+```
+
+### Sprint 12：Core「Services 支撑 Handler」补齐（✅ Core-only 已完成，2026-06-19，Tier1 local profile）
+
+**主题：** 补齐 19 个 Core handler + 2 个 422（observability / netstore / objvec），逐个关联 OpenAPI operationId、`pkg/ports`、`pkg/adapters`、Gateway handler；仅 Tier1 local profile，不代表 runtime/production ready。契约改动见 [`repo/api/core-contract-changelog-sprint12-13.md`](repo/api/core-contract-changelog-sprint12-13.md)。
+
+```bash
+make validate-architecture
+make test
+```
+
+### Sprint 13：真实 provider / live gate 收敛（🔄 收敛中：S01–S07 production-shaped gate passed）
+
+**主题：** 在 Sprint 12 已闭合的 `pkg/ports` / `pkg/adapters` / Gateway handler 边界接入真实组件（S01 Kube-OVN、S02 vCluster、S03 Rook-Ceph、S04 NVIDIA device-plugin/DCGM、S05 MinIO、S06 Milvus、S07 Prometheus observability），形成可复跑 live gate 与 evidence JSON。`production-shaped acceptance passed` ≠ `full platform production ready`。计划见 [`repo/development-records/sprint13-real-provider-readiness-plan.md`](repo/development-records/sprint13-real-provider-readiness-plan.md)；当前进度以 [`repo/CURRENT-SPRINT.md`](repo/CURRENT-SPRINT.md) 为准。
+
+```bash
+make validate-sprint13-b-track-production-shape
 ```
 
 ---
