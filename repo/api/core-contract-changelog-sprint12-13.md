@@ -11,7 +11,7 @@
 | 契约文件 | 是否变更 | 说明 |
 |---|---|---|
 | `repo/api/openapi/v1.yaml`（**Core 对外 / 跨层控制面契约**） | **是** | 仅在 **Sprint 12** 变更。以 Sprint 11 收尾提交 `d52efda` 为基线，当前 diff 为 **+784 / -5**；其中 Sprint 12 主体提交 `6d052d3` 为 **+742 / -3**，后续对齐提交 `6d052d3..HEAD` 为 **+72 / -32**。Sprint 13 全部为真实 provider / live gate 收敛，**未改契约**。 |
-| `repo/api/openapi/services/v1.yaml`（**Services 业务契约**） | **是（上下文）** | Sprint 12 起点提交 `6d052d3` 同步扩展了 Services 业务契约；`6d052d3..HEAD` 之后未再变更。本文只展开 Core API 对 Services 客户端的影响，不替代 Services 业务契约 changelog。Services 资源仍由外部团队在该文件维护，Core 未回流。 |
+| `repo/api/openapi/services/v1.yaml`（**Services 业务契约**） | **否（本文范围）** | `6d052d3` 中的 Services 变更来自 `repo/services/docs` 的 Phase 2 功能需求对齐，属于双方已达成的 Services 业务契约基线；`6d052d3..HEAD` 之后未再变更。本文不通报 Services 业务契约扩充，只通报在该基线之后 Core 契约对 Services 客户端的影响。Services 资源仍由外部团队在该文件维护，Core 未回流。 |
 
 **Services 团队需要做的事**：先确认新增的 19 个 Core operationId（§3.0）是否已纳入客户端调用面；其中需要改造调用假设的是两类 —— ID 字段类型放宽（§3.4）与卷快照创建改为异步任务（§3.5）。其余均为**向后兼容的新增端点、字段或枚举**，无需破坏性改造即可继续工作。
 
@@ -162,11 +162,11 @@ CoreDevProfileInfo:
 ## 5. 验证与真实来源
 
 - Core 契约：[`repo/api/openapi/v1.yaml`](openapi/v1.yaml)
-- Services 契约：[`repo/api/openapi/services/v1.yaml`](openapi/services/v1.yaml)（Sprint 12 起点同步扩展；本文不展开 Services 业务 API 变更）
+- Services 契约：[`repo/api/openapi/services/v1.yaml`](openapi/services/v1.yaml)（`6d052d3` 的 Services 扩充来自 `repo/services/docs` Phase 2 对齐，视为本文基线；本文不展开 Services 业务 API 变更）
 - Core 差异复核命令：`git diff d52efda..HEAD -- repo/api/openapi/v1.yaml`
 - Core 主体扩展复核命令：`git diff d52efda..6d052d3 -- repo/api/openapi/v1.yaml`
 - Core 后续对齐复核命令：`git diff 6d052d3..HEAD -- repo/api/openapi/v1.yaml`
-- Services 契约上下文复核：`git diff d52efda..HEAD -- repo/api/openapi/services/v1.yaml`；`git diff 6d052d3..HEAD -- repo/api/openapi/services/v1.yaml`（后者输出为空）
+- Services 基线复核：`git show --stat 6d052d3 -- repo/api/openapi/services/v1.yaml repo/services/docs`；`git diff 6d052d3..HEAD -- repo/api/openapi/services/v1.yaml`（后者输出为空）
 
 ---
 
@@ -195,11 +195,14 @@ contract_change_report:
       commits: [6d052d3, 779f84e, dbd1fe8, b78ee4a, e9ae3ec]
     services_openapi:
       path: repo/api/openapi/services/v1.yaml
-      changed: true
-      context_only: true
-      diff_range: d52efda..HEAD
-      changed_at_sprint12_start: 6d052d3
-      changed_after_sprint12_start: false
+      in_scope_for_this_notice: false
+      changed_by_this_notice: false
+      baseline_context:
+        commit: 6d052d3
+        source: repo/services/docs Phase 2 requirements alignment
+        meaning: "Services API expansion was part of the agreed Services business contract baseline, not a Core follow-up contract drift."
+      changed_after_baseline: false
+      verify_no_post_baseline_change: "git diff 6d052d3..HEAD -- repo/api/openapi/services/v1.yaml"
   changes:
     - id: sprint12-new-core-operations
       type: additive
