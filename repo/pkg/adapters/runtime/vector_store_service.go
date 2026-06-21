@@ -13,11 +13,12 @@ import (
 )
 
 type LocalVectorStoreService struct {
-	mu          sync.RWMutex
-	now         func() time.Time
-	backend     ports.VectorStore
-	stores      map[string]ports.VectorStoreRecord
-	idempotency map[string]string
+	mu                sync.RWMutex
+	now               func() time.Time
+	backend           ports.VectorStore
+	stores            map[string]ports.VectorStoreRecord
+	idempotency       map[string]string
+	insertIdempotency map[string]ports.VectorStoreDocumentInsertResult
 }
 
 type VectorStoreServiceOption func(*LocalVectorStoreService)
@@ -38,9 +39,10 @@ func WithVectorStoreBackend(backend ports.VectorStore) VectorStoreServiceOption 
 
 func NewLocalVectorStoreService(options ...VectorStoreServiceOption) *LocalVectorStoreService {
 	service := &LocalVectorStoreService{
-		now:         func() time.Time { return time.Now().UTC() },
-		stores:      map[string]ports.VectorStoreRecord{},
-		idempotency: map[string]string{},
+		now:               func() time.Time { return time.Now().UTC() },
+		stores:            map[string]ports.VectorStoreRecord{},
+		idempotency:       map[string]string{},
+		insertIdempotency: map[string]ports.VectorStoreDocumentInsertResult{},
 	}
 	for _, option := range options {
 		option(service)
@@ -74,18 +76,24 @@ func (s *LocalVectorStoreService) CreateVectorStore(ctx context.Context, request
 	s.mu.Unlock()
 
 	now := s.now().UTC()
+	state := ports.VectorStoreReady
+	reason := "created by local vector store profile"
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(request.Name)), "pending-") {
+		state = ports.VectorStorePending
+		reason = "local vector store profile is still building the index"
+	}
 	record := ports.VectorStoreRecord{
 		TenantID:  request.TenantID,
 		StoreID:   "vst_" + uuid.NewString(),
 		Name:      strings.TrimSpace(request.Name),
 		Dimension: request.Dimension,
 		Metric:    metric,
-		State:     ports.VectorStoreReady,
-		Reason:    "created by local vector store profile",
+		State:     state,
+		Reason:    reason,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if s.backend != nil {
+	if s.backend != nil && record.State == ports.VectorStoreReady {
 		if err := s.backend.EnsureCollection(ctx, vectorCollectionRef(record), record.Dimension); err != nil {
 			return ports.VectorStoreRecord{}, err
 		}
@@ -140,6 +148,9 @@ func (s *LocalVectorStoreService) SearchVectorStore(ctx context.Context, request
 	if err != nil {
 		return nil, err
 	}
+	if record.State != ports.VectorStoreReady {
+		return nil, fmt.Errorf("%w: vector store is not ready", ports.ErrFailedPrecondition)
+	}
 	if len(request.Vector) != record.Dimension {
 		return nil, fmt.Errorf("%w: vector dimension does not match vector store dimension", ports.ErrInvalid)
 	}
@@ -161,6 +172,74 @@ func (s *LocalVectorStoreService) SearchVectorStore(ctx context.Context, request
 	})
 }
 
+func (s *LocalVectorStoreService) InsertDocuments(ctx context.Context, request ports.VectorStoreDocumentInsertRequest) (ports.VectorStoreDocumentInsertResult, error) {
+	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
+	if err != nil {
+		return ports.VectorStoreDocumentInsertResult{}, err
+	}
+	if len(request.Documents) == 0 {
+		return ports.VectorStoreDocumentInsertResult{}, fmt.Errorf("%w: documents are required", ports.ErrInvalid)
+	}
+	if len(request.Documents) > 100 {
+		return ports.VectorStoreDocumentInsertResult{}, fmt.Errorf("%w: documents must not exceed 100", ports.ErrInvalid)
+	}
+
+	s.mu.RLock()
+	if result, ok := s.insertIdempotency[idemKey]; ok {
+		s.mu.RUnlock()
+		return result, nil
+	}
+	s.mu.RUnlock()
+
+	record, err := s.GetVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: request.TenantID, ResourceID: request.ResourceID})
+	if err != nil {
+		return ports.VectorStoreDocumentInsertResult{}, err
+	}
+	if record.State != ports.VectorStoreReady {
+		return ports.VectorStoreDocumentInsertResult{}, fmt.Errorf("%w: vector store is not ready", ports.ErrFailedPrecondition)
+	}
+
+	vectorRecords := make([]ports.VectorRecord, 0, len(request.Documents))
+	for i, document := range request.Documents {
+		content := strings.TrimSpace(document.Content)
+		if content == "" {
+			return ports.VectorStoreDocumentInsertResult{}, fmt.Errorf("%w: document content is required", ports.ErrInvalid)
+		}
+		metadata := cloneStringMap(document.Metadata)
+		if metadata == nil {
+			metadata = map[string]string{}
+		}
+		metadata["content"] = content
+		documentID := strings.TrimSpace(document.ID)
+		if documentID == "" {
+			documentID = "doc_" + uuid.NewString()
+		}
+		vectorRecords = append(vectorRecords, ports.VectorRecord{
+			ID:       documentID,
+			Vector:   localDocumentVector(content, record.Dimension, i),
+			Metadata: metadata,
+		})
+	}
+	if s.backend != nil {
+		if err := s.backend.Upsert(ctx, vectorCollectionRef(record), vectorRecords); err != nil {
+			return ports.VectorStoreDocumentInsertResult{}, err
+		}
+	}
+
+	result := ports.VectorStoreDocumentInsertResult{
+		InsertedCount: len(vectorRecords),
+		TaskID:        uuid.NewString(),
+		Status:        "completed",
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.insertIdempotency[idemKey]; ok {
+		return existing, nil
+	}
+	s.insertIdempotency[idemKey] = result
+	return result, nil
+}
+
 func requireVectorStoreTenantAndName(tenantID string, name string) error {
 	if strings.TrimSpace(tenantID) == "" {
 		return fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
@@ -169,6 +248,18 @@ func requireVectorStoreTenantAndName(tenantID string, name string) error {
 		return fmt.Errorf("%w: name is required", ports.ErrInvalid)
 	}
 	return nil
+}
+
+func localDocumentVector(content string, dimension int, ordinal int) []float32 {
+	vector := make([]float32, dimension)
+	if dimension == 0 {
+		return vector
+	}
+	seed := len(content) + ordinal + 1
+	for i := range vector {
+		vector[i] = float32((seed+i)%17) / 17
+	}
+	return vector
 }
 
 func vectorCollectionRef(record ports.VectorStoreRecord) ports.VectorCollectionRef {

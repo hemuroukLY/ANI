@@ -40,6 +40,10 @@ EXPECTED_PATHS = {
         "get": ("getNetworkLoadBalancer", "scope:networks:read", {"200", "401", "403", "404"}),
         "delete": ("deleteNetworkLoadBalancer", "scope:networks:delete", {"200", "401", "403", "404"}),
     },
+    "/networks/routes": {
+        "get": ("listNetworkRoutes", "scope:networks:read", {"200", "401", "403"}),
+        "post": ("createNetworkRoute", "scope:networks:create", {"201", "400", "401", "403", "404"}),
+    },
 }
 
 EXPECTED_SCHEMAS = {
@@ -54,6 +58,9 @@ EXPECTED_SCHEMAS = {
     "CreateNetworkSubnetRequest",
     "CreateNetworkSecurityGroupRequest",
     "CreateNetworkLoadBalancerRequest",
+    "NetworkRoute",
+    "NetworkRouteListResponse",
+    "CreateNetworkRouteRequest",
 }
 
 EXPECTED_FIELDS = {
@@ -61,6 +68,8 @@ EXPECTED_FIELDS = {
     "NetworkSubnet": {"id", "tenant_id", "vpc_id", "name", "cidr", "gateway", "state", "reason", "created_at", "updated_at"},
     "NetworkSecurityGroup": {"id", "tenant_id", "name", "description", "rules", "state", "reason", "created_at", "updated_at"},
     "NetworkLoadBalancer": {"id", "tenant_id", "name", "vpc_id", "subnet_id", "scheme", "vip", "listeners", "state", "reason", "created_at", "updated_at"},
+    "NetworkRoute": {"id", "vpc_id", "destination_cidr", "next_hop_type", "next_hop_id", "description", "created_at", "dev_profile"},
+    "NetworkRouteListResponse": {"items", "total", "next_cursor"},
 }
 
 EXPECTED_ROUTES = {
@@ -74,6 +83,8 @@ EXPECTED_ROUTES = {
     'v1.POST("/networks/security-groups"',
     'v1.GET("/networks/load-balancers"',
     'v1.POST("/networks/load-balancers"',
+    'v1.GET("/networks/routes"',
+    'v1.POST("/networks/routes"',
 }
 
 
@@ -145,12 +156,12 @@ def validate_gateway(root: Path, errors: list[str]) -> None:
     for route in EXPECTED_ROUTES:
         if route not in routes_go:
             errors.append(f"network_resources.go missing route token {route}")
-    if "registerNetworkResources(v1)" not in router_go:
+    if "registerNetworkResources(v1)" not in router_go and "registerNetworkResourcesWithService(v1, options.NetworkService)" not in router_go:
         errors.append("router.go must register network resources")
-    for token in ("NetworkService interface", "NetworkResourceStore interface", "NetworkProviderRenderer interface", "NetworkProviderDryRun interface", "NetworkProviderApply interface", "NetworkProviderStatusReader interface", "NetworkStatusReconciler interface", "NetworkVPCRecord", "NetworkSubnetRecord", "NetworkLoadBalancerRecord"):
+    for token in ("NetworkService interface", "NetworkResourceStore interface", "NetworkProviderRenderer interface", "NetworkProviderDryRun interface", "NetworkProviderApply interface", "NetworkProviderStatusReader interface", "NetworkStatusReconciler interface", "NetworkVPCRecord", "NetworkSubnetRecord", "NetworkLoadBalancerRecord", "NetworkRouteRecord", "NetworkRouteCreateRequest", "NetworkRouteListRequest"):
         if token not in ports_go:
             errors.append(f"pkg/ports/network_resources.go missing token {token}")
-    for token in ("NewLocalNetworkService", "WithNetworkResourceStore", "CreateVPC", "CreateSubnet", "CreateSecurityGroup", "CreateLoadBalancer"):
+    for token in ("NewLocalNetworkService", "WithNetworkResourceStore", "CreateVPC", "CreateSubnet", "CreateSecurityGroup", "CreateLoadBalancer", "CreateRoute", "ListRoutes"):
         if token not in adapter_go:
             errors.append(f"network_service.go missing token {token}")
     for token in ("MetadataNetworkStore", "UpsertVPC", "UpsertSubnet", "UpsertSecurityGroup", "UpsertLoadBalancer", "UpdateResourceState"):

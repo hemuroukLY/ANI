@@ -80,6 +80,20 @@ type NetworkLoadBalancerRecord struct {
 	UpdatedAt      time.Time
 }
 
+type NetworkRouteRecord struct {
+	TenantID        string
+	RouteID         string
+	VPCID           string
+	DestinationCIDR string
+	NextHopType     string
+	NextHopID       string
+	Description     string
+	State           NetworkResourceState
+	Provider        string
+	RealProvider    bool
+	CreatedAt       time.Time
+}
+
 type NetworkVPCCreateRequest struct {
 	TenantID       string
 	IdempotencyKey string
@@ -114,6 +128,16 @@ type NetworkLoadBalancerCreateRequest struct {
 	Listeners      []NetworkLoadBalancerListener
 }
 
+type NetworkRouteCreateRequest struct {
+	TenantID        string
+	IdempotencyKey  string
+	VPCID           string
+	DestinationCIDR string
+	NextHopType     string
+	NextHopID       string
+	Description     string
+}
+
 type NetworkResourceGetRequest struct {
 	TenantID   string
 	ResourceID string
@@ -121,6 +145,13 @@ type NetworkResourceGetRequest struct {
 
 type NetworkResourceListRequest struct {
 	TenantID string
+	Limit    int
+	Cursor   string
+}
+
+type NetworkRouteListRequest struct {
+	TenantID string
+	VPCID    string
 	Limit    int
 	Cursor   string
 }
@@ -145,6 +176,9 @@ type NetworkService interface {
 	ListLoadBalancers(ctx context.Context, request NetworkResourceListRequest) ([]NetworkLoadBalancerRecord, error)
 	GetLoadBalancer(ctx context.Context, request NetworkResourceGetRequest) (NetworkLoadBalancerRecord, error)
 	DeleteLoadBalancer(ctx context.Context, request NetworkResourceGetRequest) (NetworkLoadBalancerRecord, error)
+
+	CreateRoute(ctx context.Context, request NetworkRouteCreateRequest) (NetworkRouteRecord, error)
+	ListRoutes(ctx context.Context, request NetworkRouteListRequest) ([]NetworkRouteRecord, error)
 }
 
 type NetworkResourceStore interface {
@@ -152,6 +186,7 @@ type NetworkResourceStore interface {
 	UpsertSubnet(ctx context.Context, record NetworkSubnetRecord) error
 	UpsertSecurityGroup(ctx context.Context, record NetworkSecurityGroupRecord) error
 	UpsertLoadBalancer(ctx context.Context, record NetworkLoadBalancerRecord) error
+	UpsertRoute(ctx context.Context, record NetworkRouteRecord) error
 	UpdateResourceState(ctx context.Context, request NetworkResourceStateUpdateRequest) error
 }
 
@@ -160,6 +195,7 @@ type NetworkProviderRenderer interface {
 	RenderSubnet(ctx context.Context, record NetworkSubnetRecord) ([]WorkloadManifest, error)
 	RenderSecurityGroup(ctx context.Context, record NetworkSecurityGroupRecord) ([]WorkloadManifest, error)
 	RenderLoadBalancer(ctx context.Context, record NetworkLoadBalancerRecord) ([]WorkloadManifest, error)
+	RenderRoute(ctx context.Context, record NetworkRouteRecord) ([]WorkloadManifest, error)
 }
 
 type NetworkProviderOperation string

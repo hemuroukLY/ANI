@@ -22,6 +22,22 @@ func TestGatewayK8sClusterServiceFromConfigDefaultsToRouterLocalService(t *testi
 	}
 }
 
+func TestGatewayK8sClusterRuntimeConfigFromEnvIncludesInClusterKubernetesService(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.96.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+	t.Setenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/token")
+	t.Setenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+
+	cfg := gatewayK8sClusterRuntimeConfigFromEnv()
+
+	if cfg.KubernetesServiceHost != "10.96.0.1" || cfg.KubernetesServicePort != "443" {
+		t.Fatalf("service host/port = %q/%q, want in-cluster Kubernetes service", cfg.KubernetesServiceHost, cfg.KubernetesServicePort)
+	}
+	if cfg.KubernetesServiceAccountTokenFile == "" || cfg.KubernetesServiceAccountCAFile == "" {
+		t.Fatalf("service account token/CA files = %q/%q, want configured files", cfg.KubernetesServiceAccountTokenFile, cfg.KubernetesServiceAccountCAFile)
+	}
+}
+
 func TestGatewayK8sClusterServiceFromConfigUsesStaticForwardingTarget(t *testing.T) {
 	transport := &gatewayK8sProxyRoundTripper{
 		statusCode: http.StatusOK,
@@ -74,6 +90,7 @@ func TestGatewayK8sClusterServiceFromConfigUsesStaticForwardingTarget(t *testing
 }
 
 func TestGatewayK8sClusterServiceFromConfigUsesMetadataForwardingTarget(t *testing.T) {
+	tenantID := "11111111-1111-4111-8111-111111111111"
 	transport := &gatewayK8sProxyRoundTripper{
 		statusCode: http.StatusCreated,
 		headers:    http.Header{"X-Upstream": []string{"metadata-vcluster"}},
@@ -81,7 +98,7 @@ func TestGatewayK8sClusterServiceFromConfigUsesMetadataForwardingTarget(t *testi
 	}
 	store := &gatewayK8sProxyMetadataStore{
 		target: ports.K8sClusterProxyTarget{
-			TenantID:    "tenant-a",
+			TenantID:    tenantID,
 			Server:      "https://metadata-vcluster.example",
 			BearerToken: "metadata-token",
 		},
@@ -95,7 +112,7 @@ func TestGatewayK8sClusterServiceFromConfigUsesMetadataForwardingTarget(t *testi
 		t.Fatalf("newGatewayK8sClusterService() error = %v", err)
 	}
 	cluster, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
-		TenantID:       "tenant-a",
+		TenantID:       tenantID,
 		IdempotencyKey: "create-vc-a",
 		Name:           "vc-a",
 		Version:        "v1.30.0",
@@ -106,7 +123,7 @@ func TestGatewayK8sClusterServiceFromConfigUsesMetadataForwardingTarget(t *testi
 	store.target.ClusterID = cluster.ClusterID
 
 	got, err := service.Proxy(context.Background(), ports.K8sClusterProxyRequest{
-		TenantID:       "tenant-a",
+		TenantID:       tenantID,
 		ClusterID:      cluster.ClusterID,
 		IdempotencyKey: "proxy-vc-a",
 		Method:         "POST",
@@ -132,13 +149,14 @@ func TestGatewayK8sClusterServiceFromConfigUsesMetadataForwardingTarget(t *testi
 }
 
 func TestGatewayK8sClusterRuntimeFromConfigConnectsMetadataStore(t *testing.T) {
+	tenantID := "11111111-1111-4111-8111-111111111111"
 	transport := &gatewayK8sProxyRoundTripper{
 		statusCode: http.StatusOK,
 		body:       `{"kind":"PodList"}`,
 	}
 	store := &gatewayK8sProxyMetadataStore{
 		target: ports.K8sClusterProxyTarget{
-			TenantID:    "tenant-a",
+			TenantID:    tenantID,
 			Server:      "https://metadata-vcluster.example",
 			BearerToken: "metadata-token",
 		},
@@ -161,7 +179,7 @@ func TestGatewayK8sClusterRuntimeFromConfigConnectsMetadataStore(t *testing.T) {
 	defer closeRuntime()
 
 	cluster, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
-		TenantID:       "tenant-a",
+		TenantID:       tenantID,
 		IdempotencyKey: "create-vc-a",
 		Name:           "vc-a",
 		Version:        "v1.30.0",
@@ -172,7 +190,7 @@ func TestGatewayK8sClusterRuntimeFromConfigConnectsMetadataStore(t *testing.T) {
 	store.target.ClusterID = cluster.ClusterID
 
 	if _, err := service.Proxy(context.Background(), ports.K8sClusterProxyRequest{
-		TenantID:       "tenant-a",
+		TenantID:       tenantID,
 		ClusterID:      cluster.ClusterID,
 		IdempotencyKey: "proxy-vc-a",
 		Method:         "GET",
@@ -191,9 +209,9 @@ func TestGatewayK8sClusterServiceFromConfigUsesVClusterHelmProvider(t *testing.T
 	service, err := newGatewayK8sClusterService(gatewayK8sClusterRuntimeConfig{
 		ProviderMode:                     "vcluster_helm",
 		VClusterHelmRunner:               runner,
-		VClusterProxyServerTemplate:      "https://{cluster_id}.{namespace}.svc:443",
+		VClusterProxyServerTemplate:      "https://{cluster_id}.{namespace}:443",
 		VClusterProxyBearerToken:         "tenant-token",
-		VClusterKubeconfigServerTemplate: "https://{cluster_id}.{namespace}.svc:443",
+		VClusterKubeconfigServerTemplate: "https://{cluster_id}.{namespace}:443",
 	})
 	if err != nil {
 		t.Fatalf("newGatewayK8sClusterService() error = %v", err)
@@ -226,7 +244,7 @@ func TestGatewayK8sClusterServiceFromConfigUsesVClusterHelmProvider(t *testing.T
 	if runner.binary != "vcluster" || len(runner.args) == 0 || runner.args[0] != "connect" {
 		t.Fatalf("vcluster runner was not called for kubeconfig: %s %#v", runner.binary, runner.args)
 	}
-	if kubeconfig.Server != "https://"+record.ClusterID+".ani-tenant-tenant-a.svc:443" || kubeconfig.Token != "tenant-token" {
+	if kubeconfig.Server != "https://"+record.ClusterID+".ani-tenant-tenant-a:443" || kubeconfig.Token != "tenant-token" {
 		t.Fatalf("kubeconfig = %+v, want provider-backed vCluster kubeconfig", kubeconfig)
 	}
 }
@@ -260,7 +278,7 @@ func TestGatewayK8sClusterServiceFromConfigUsesClusterAPINodePoolProvider(t *tes
 		NodePoolInfrastructureRefNameTemplate: "{cluster_name}-{node_pool_name}",
 		NodePoolInfrastructureRefNamespace:    "{namespace}",
 		VClusterHelmRunner:                    runner,
-		VClusterKubeconfigServerTemplate:      "https://{cluster_id}.{namespace}.svc:443",
+		VClusterKubeconfigServerTemplate:      "https://{cluster_id}.{namespace}:443",
 		HTTPClient:                            &http.Client{Transport: transport},
 	})
 	if err != nil {
@@ -411,12 +429,15 @@ type gatewayK8sProxyMetadataRow struct {
 }
 
 func (r gatewayK8sProxyMetadataRow) Scan(dest ...any) error {
-	if len(dest) != 4 {
+	if len(dest) != 7 {
 		return errors.New("unexpected metadata scan destination count")
 	}
 	*(dest[0].(*string)) = r.target.TenantID
 	*(dest[1].(*string)) = r.target.ClusterID
 	*(dest[2].(*string)) = r.target.Server
 	*(dest[3].(*string)) = r.target.BearerToken
+	*(dest[4].(*string)) = r.target.CAData
+	*(dest[5].(*string)) = r.target.ClientCertificateData
+	*(dest[6].(*string)) = r.target.ClientKeyData
 	return nil
 }

@@ -19,7 +19,11 @@ type gatewayK8sClusterRuntimeConfig struct {
 	ProviderMode                            string
 	NodePoolProviderMode                    string
 	KubernetesAPIHost                       string
+	KubernetesServiceHost                   string
+	KubernetesServicePort                   string
 	KubernetesBearerToken                   string
+	KubernetesServiceAccountTokenFile       string
+	KubernetesServiceAccountCAFile          string
 	KubernetesProviderManager               string
 	TargetServer                            string
 	TargetBearerToken                       string
@@ -31,6 +35,7 @@ type gatewayK8sClusterRuntimeConfig struct {
 	VClusterBinary                          string
 	VClusterChartName                       string
 	VClusterChartRepo                       string
+	VClusterHelmSetValues                   []string
 	VClusterProxyServerTemplate             string
 	VClusterProxyBearerToken                string
 	VClusterKubeconfigServerTemplate        string
@@ -53,7 +58,11 @@ func gatewayK8sClusterRuntimeConfigFromEnv() gatewayK8sClusterRuntimeConfig {
 		ProviderMode:                            os.Getenv("K8S_CLUSTER_PROVIDER_MODE"),
 		NodePoolProviderMode:                    os.Getenv("K8S_CLUSTER_NODE_POOL_PROVIDER_MODE"),
 		KubernetesAPIHost:                       os.Getenv("KUBERNETES_API_HOST"),
+		KubernetesServiceHost:                   os.Getenv("KUBERNETES_SERVICE_HOST"),
+		KubernetesServicePort:                   os.Getenv("KUBERNETES_SERVICE_PORT"),
 		KubernetesBearerToken:                   os.Getenv("KUBERNETES_BEARER_TOKEN"),
+		KubernetesServiceAccountTokenFile:       os.Getenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE"),
+		KubernetesServiceAccountCAFile:          os.Getenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE"),
 		KubernetesProviderManager:               os.Getenv("KUBERNETES_PROVIDER_FIELD_MANAGER"),
 		TargetServer:                            os.Getenv("K8S_CLUSTER_PROXY_TARGET_SERVER"),
 		TargetBearerToken:                       os.Getenv("K8S_CLUSTER_PROXY_BEARER_TOKEN"),
@@ -62,6 +71,7 @@ func gatewayK8sClusterRuntimeConfigFromEnv() gatewayK8sClusterRuntimeConfig {
 		VClusterBinary:                          os.Getenv("VCLUSTER_BINARY"),
 		VClusterChartName:                       os.Getenv("VCLUSTER_CHART_NAME"),
 		VClusterChartRepo:                       os.Getenv("VCLUSTER_CHART_REPO"),
+		VClusterHelmSetValues:                   splitGatewayCSVEnv(os.Getenv("VCLUSTER_HELM_SET_VALUES")),
 		VClusterProxyServerTemplate:             os.Getenv("VCLUSTER_PROXY_SERVER_TEMPLATE"),
 		VClusterProxyBearerToken:                os.Getenv("VCLUSTER_PROXY_BEARER_TOKEN"),
 		VClusterKubeconfigServerTemplate:        os.Getenv("VCLUSTER_KUBECONFIG_SERVER_TEMPLATE"),
@@ -180,6 +190,7 @@ func newGatewayK8sClusterBaseService(cfg gatewayK8sClusterRuntimeConfig, targetS
 			VClusterBinary:           cfg.VClusterBinary,
 			ChartName:                cfg.VClusterChartName,
 			ChartRepo:                cfg.VClusterChartRepo,
+			HelmSetValues:            cfg.VClusterHelmSetValues,
 			Runner:                   cfg.VClusterHelmRunner,
 			ProxyServerTemplate:      cfg.VClusterProxyServerTemplate,
 			ProxyBearerToken:         cfg.VClusterProxyBearerToken,
@@ -198,10 +209,14 @@ func newGatewayK8sClusterNodePoolProvider(cfg gatewayK8sClusterRuntimeConfig) (p
 		return nil, nil
 	case "clusterapi_kubernetes_rest":
 		client, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
-			Host:         cfg.KubernetesAPIHost,
-			BearerToken:  cfg.KubernetesBearerToken,
-			FieldManager: cfg.KubernetesProviderManager,
-			HTTPClient:   cfg.HTTPClient,
+			Host:            cfg.KubernetesAPIHost,
+			ServiceHost:     cfg.KubernetesServiceHost,
+			ServicePort:     cfg.KubernetesServicePort,
+			BearerToken:     cfg.KubernetesBearerToken,
+			BearerTokenFile: cfg.KubernetesServiceAccountTokenFile,
+			CAFile:          cfg.KubernetesServiceAccountCAFile,
+			FieldManager:    cfg.KubernetesProviderManager,
+			HTTPClient:      cfg.HTTPClient,
 		})
 		if err != nil {
 			return nil, err
@@ -224,6 +239,18 @@ func newGatewayK8sClusterNodePoolProvider(cfg gatewayK8sClusterRuntimeConfig) (p
 	default:
 		return nil, fmt.Errorf("%w: unsupported K8S_CLUSTER_NODE_POOL_PROVIDER_MODE %q", ports.ErrUnsupported, mode)
 	}
+}
+
+func splitGatewayCSVEnv(value string) []string {
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
 }
 
 type staticGatewayK8sProxyTargetResolver struct {

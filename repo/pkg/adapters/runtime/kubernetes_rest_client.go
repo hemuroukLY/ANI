@@ -3,11 +3,15 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -16,12 +20,21 @@ import (
 
 const kubernetesApplyPatchContentType = "application/apply-patch+yaml"
 
+const (
+	defaultKubernetesServiceAccountTokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	defaultKubernetesServiceAccountCAFile    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+)
+
 type KubernetesRESTClientConfig struct {
-	Host         string
-	BearerToken  string
-	FieldManager string
-	HTTPClient   *http.Client
-	Now          func() time.Time
+	Host            string
+	ServiceHost     string
+	ServicePort     string
+	BearerToken     string
+	BearerTokenFile string
+	CAFile          string
+	FieldManager    string
+	HTTPClient      *http.Client
+	Now             func() time.Time
 }
 
 type KubernetesRESTClient struct {
@@ -33,17 +46,27 @@ type KubernetesRESTClient struct {
 }
 
 func NewKubernetesRESTClient(config KubernetesRESTClientConfig) (*KubernetesRESTClient, error) {
-	host := strings.TrimRight(strings.TrimSpace(config.Host), "/")
-	if host == "" {
-		return nil, fmt.Errorf("%w: Kubernetes API host is required", ports.ErrInvalid)
+	host, inCluster, err := kubernetesRESTHost(config)
+	if err != nil {
+		return nil, err
 	}
 	if _, err := url.ParseRequestURI(host); err != nil {
 		return nil, fmt.Errorf("%w: invalid Kubernetes API host: %v", ports.ErrInvalid, err)
 	}
 
+	bearerToken := strings.TrimSpace(config.BearerToken)
+	if bearerToken == "" && inCluster {
+		bearerToken, err = readKubernetesServiceAccountToken(config.BearerTokenFile)
+		if err != nil {
+			return nil, err
+		}
+	}
 	client := config.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client, err = kubernetesHTTPClient(config.CAFile, inCluster)
+		if err != nil {
+			return nil, err
+		}
 	}
 	now := config.Now
 	if now == nil {
@@ -56,11 +79,64 @@ func NewKubernetesRESTClient(config KubernetesRESTClientConfig) (*KubernetesREST
 
 	return &KubernetesRESTClient{
 		host:         host,
-		bearerToken:  strings.TrimSpace(config.BearerToken),
+		bearerToken:  bearerToken,
 		fieldManager: fieldManager,
 		httpClient:   client,
 		now:          now,
 	}, nil
+}
+
+func kubernetesRESTHost(config KubernetesRESTClientConfig) (string, bool, error) {
+	host := strings.TrimRight(strings.TrimSpace(config.Host), "/")
+	if host != "" {
+		return host, false, nil
+	}
+	serviceHost := strings.TrimSpace(config.ServiceHost)
+	servicePort := strings.TrimSpace(config.ServicePort)
+	if serviceHost == "" {
+		return "", false, fmt.Errorf("%w: Kubernetes API host is required", ports.ErrInvalid)
+	}
+	if servicePort == "" {
+		servicePort = "443"
+	}
+	return "https://" + net.JoinHostPort(serviceHost, servicePort), true, nil
+}
+
+func readKubernetesServiceAccountToken(path string) (string, error) {
+	tokenFile := strings.TrimSpace(path)
+	if tokenFile == "" {
+		tokenFile = defaultKubernetesServiceAccountTokenFile
+	}
+	data, err := os.ReadFile(tokenFile)
+	if err != nil {
+		return "", fmt.Errorf("%w: Kubernetes in-cluster service account token is required: %v", ports.ErrInvalid, err)
+	}
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", fmt.Errorf("%w: Kubernetes in-cluster service account token is empty", ports.ErrInvalid)
+	}
+	return token, nil
+}
+
+func kubernetesHTTPClient(caFile string, inCluster bool) (*http.Client, error) {
+	if !inCluster {
+		return http.DefaultClient, nil
+	}
+	caPath := strings.TrimSpace(caFile)
+	if caPath == "" {
+		caPath = defaultKubernetesServiceAccountCAFile
+	}
+	caData, err := os.ReadFile(caPath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: Kubernetes in-cluster CA bundle is required: %v", ports.ErrInvalid, err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caData) {
+		return nil, fmt.Errorf("%w: Kubernetes in-cluster CA bundle is invalid", ports.ErrInvalid)
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	return &http.Client{Transport: transport}, nil
 }
 
 func (c *KubernetesRESTClient) ServerSideDryRun(ctx context.Context, manifests []ports.WorkloadManifest) (ports.WorkloadProviderDryRunResult, error) {
@@ -73,8 +149,8 @@ func (c *KubernetesRESTClient) ServerSideDryRun(ctx context.Context, manifests [
 		if err != nil {
 			return ports.WorkloadProviderDryRunResult{}, err
 		}
-		endpoint := c.collectionURL(resource, "dryRun=All")
-		if _, err := c.do(ctx, http.MethodPost, endpoint, "application/json", []byte(manifest.Content)); err != nil {
+		query := "fieldManager=" + url.QueryEscape(c.fieldManager) + "&force=true&dryRun=All"
+		if _, err := c.do(ctx, http.MethodPatch, c.resourceURL(resource, query), kubernetesApplyPatchContentType, []byte(manifest.Content)); err != nil {
 			return ports.WorkloadProviderDryRunResult{}, err
 		}
 	}
@@ -362,6 +438,8 @@ func resourceMapping(provider string, apiVersion string, kind string) (kubernete
 		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "services", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/PersistentVolumeClaim":
 		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "persistentvolumeclaims", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/VolumeSnapshot":
+		return kubernetesResource{Provider: provider, APIGroup: "snapshot.storage.k8s.io", APIVersion: "v1", Resource: "volumesnapshots", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/Secret":
 		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "secrets", Kind: kind, Namespaced: true}, nil
 	case "kubevirt/VirtualMachine":

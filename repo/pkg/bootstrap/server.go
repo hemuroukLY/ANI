@@ -27,15 +27,47 @@ type Config struct {
 	HealthPort  int
 	ServiceName string
 
-	WorkloadProvider               string
-	WorkloadProviderApplyEnabled   bool
-	WorkloadLifecycleProvider      string
-	WorkloadLifecycleApplyEnabled  bool
-	WorkloadOpsProvider            string
-	WorkloadOpsEnabled             bool
-	KubernetesAPIHost              string
-	KubernetesBearerToken          string
-	KubernetesProviderFieldManager string
+	ObjectStoreProvider        string
+	ObjectStoreEndpoint        string
+	ObjectStorePublicEndpoint  string
+	ObjectStoreAccessKeyID     string
+	ObjectStoreSecretAccessKey string
+	ObjectStoreSessionToken    string
+	ObjectStoreRegion          string
+	ObjectStoreSecure          bool
+	ObjectStoreBucketPrefix    string
+
+	VectorStoreProvider         string
+	VectorStoreEndpoint         string
+	VectorStoreToken            string
+	VectorStoreDatabase         string
+	VectorStoreCollectionPrefix string
+
+	WorkloadProvider                   string
+	WorkloadProviderApplyEnabled       bool
+	GPUInventoryProvider               string
+	NetworkProvider                    string
+	NetworkProviderApplyEnabled        bool
+	NetworkProviderUserID              string
+	NetworkProviderPermissionProof     string
+	StorageProvider                    string
+	StorageProviderApplyEnabled        bool
+	StorageProviderUserID              string
+	StorageProviderPermissionProof     string
+	WorkloadLifecycleProvider          string
+	WorkloadLifecycleApplyEnabled      bool
+	WorkloadOpsProvider                string
+	WorkloadOpsEnabled                 bool
+	InstanceObservabilityProvider      string
+	InstanceObservabilityPrometheusURL string
+	InstanceObservabilityExecBaseURL   string
+	KubernetesAPIHost                  string
+	KubernetesServiceHost              string
+	KubernetesServicePort              string
+	KubernetesBearerToken              string
+	KubernetesServiceAccountTokenFile  string
+	KubernetesServiceAccountCAFile     string
+	KubernetesProviderFieldManager     string
 
 	WorkloadReconcileControllerEnabled     bool
 	WorkloadReconcileNormalInterval        int
@@ -104,6 +136,33 @@ func (c Config) withEnvironmentOverrides() Config {
 	if value := os.Getenv("WORKLOAD_PROVIDER_APPLY_ENABLED"); value != "" {
 		c.WorkloadProviderApplyEnabled = parseBool(value)
 	}
+	if value := os.Getenv("GPU_INVENTORY_PROVIDER"); value != "" {
+		c.GPUInventoryProvider = value
+	}
+	if value := os.Getenv("NETWORK_PROVIDER"); value != "" {
+		c.NetworkProvider = value
+	}
+	if value := os.Getenv("NETWORK_PROVIDER_APPLY_ENABLED"); value != "" {
+		c.NetworkProviderApplyEnabled = parseBool(value)
+	}
+	if value := os.Getenv("NETWORK_PROVIDER_USER_ID"); value != "" {
+		c.NetworkProviderUserID = value
+	}
+	if value := os.Getenv("NETWORK_PROVIDER_PERMISSION_PROOF"); value != "" {
+		c.NetworkProviderPermissionProof = value
+	}
+	if value := os.Getenv("STORAGE_PROVIDER"); value != "" {
+		c.StorageProvider = value
+	}
+	if value := os.Getenv("STORAGE_PROVIDER_APPLY_ENABLED"); value != "" {
+		c.StorageProviderApplyEnabled = parseBool(value)
+	}
+	if value := os.Getenv("STORAGE_PROVIDER_USER_ID"); value != "" {
+		c.StorageProviderUserID = value
+	}
+	if value := os.Getenv("STORAGE_PROVIDER_PERMISSION_PROOF"); value != "" {
+		c.StorageProviderPermissionProof = value
+	}
 	if value := os.Getenv("WORKLOAD_LIFECYCLE_PROVIDER"); value != "" {
 		c.WorkloadLifecycleProvider = value
 	}
@@ -116,14 +175,77 @@ func (c Config) withEnvironmentOverrides() Config {
 	if value := os.Getenv("WORKLOAD_OPS_ENABLED"); value != "" {
 		c.WorkloadOpsEnabled = parseBool(value)
 	}
+	if value := os.Getenv("INSTANCE_OBSERVABILITY_PROVIDER"); value != "" {
+		c.InstanceObservabilityProvider = value
+	}
+	if value := os.Getenv("INSTANCE_OBSERVABILITY_PROMETHEUS_URL"); value != "" {
+		c.InstanceObservabilityPrometheusURL = value
+	}
+	if value := os.Getenv("INSTANCE_OBSERVABILITY_EXEC_BASE_URL"); value != "" {
+		c.InstanceObservabilityExecBaseURL = value
+	}
 	if value := os.Getenv("KUBERNETES_API_HOST"); value != "" {
 		c.KubernetesAPIHost = value
+	}
+	if value := os.Getenv("KUBERNETES_SERVICE_HOST"); value != "" {
+		c.KubernetesServiceHost = value
+	}
+	if value := os.Getenv("KUBERNETES_SERVICE_PORT"); value != "" {
+		c.KubernetesServicePort = value
 	}
 	if value := os.Getenv("KUBERNETES_BEARER_TOKEN"); value != "" {
 		c.KubernetesBearerToken = value
 	}
+	if value := os.Getenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE"); value != "" {
+		c.KubernetesServiceAccountTokenFile = value
+	}
+	if value := os.Getenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE"); value != "" {
+		c.KubernetesServiceAccountCAFile = value
+	}
 	if value := os.Getenv("KUBERNETES_PROVIDER_FIELD_MANAGER"); value != "" {
 		c.KubernetesProviderFieldManager = value
+	}
+	if value := os.Getenv("OBJECT_STORE_PROVIDER"); value != "" {
+		c.ObjectStoreProvider = value
+	}
+	if value := os.Getenv("OBJECT_STORE_ENDPOINT"); value != "" {
+		c.ObjectStoreEndpoint = value
+	}
+	if value := os.Getenv("OBJECT_STORE_PUBLIC_ENDPOINT"); value != "" {
+		c.ObjectStorePublicEndpoint = value
+	}
+	if value := os.Getenv("OBJECT_STORE_ACCESS_KEY_ID"); value != "" {
+		c.ObjectStoreAccessKeyID = value
+	}
+	if value := os.Getenv("OBJECT_STORE_SECRET_ACCESS_KEY"); value != "" {
+		c.ObjectStoreSecretAccessKey = value
+	}
+	if value := os.Getenv("OBJECT_STORE_SESSION_TOKEN"); value != "" {
+		c.ObjectStoreSessionToken = value
+	}
+	if value := os.Getenv("OBJECT_STORE_REGION"); value != "" {
+		c.ObjectStoreRegion = value
+	}
+	if value := os.Getenv("OBJECT_STORE_SECURE"); value != "" {
+		c.ObjectStoreSecure = parseBool(value)
+	}
+	if value := os.Getenv("OBJECT_STORE_BUCKET_PREFIX"); value != "" {
+		c.ObjectStoreBucketPrefix = value
+	}
+	if value := os.Getenv("VECTOR_STORE_PROVIDER"); value != "" {
+		c.VectorStoreProvider = value
+	}
+	if value := os.Getenv("VECTOR_STORE_ENDPOINT"); value != "" {
+		c.VectorStoreEndpoint = value
+	}
+	if value := os.Getenv("VECTOR_STORE_TOKEN"); value != "" {
+		c.VectorStoreToken = value
+	}
+	if value := os.Getenv("VECTOR_STORE_DATABASE"); value != "" {
+		c.VectorStoreDatabase = value
+	}
+	if value := os.Getenv("VECTOR_STORE_COLLECTION_PREFIX"); value != "" {
+		c.VectorStoreCollectionPrefix = value
 	}
 	if value := os.Getenv("WORKLOAD_RECONCILE_CONTROLLER_ENABLED"); value != "" {
 		c.WorkloadReconcileControllerEnabled = parseBool(value)

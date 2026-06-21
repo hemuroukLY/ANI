@@ -353,9 +353,9 @@ components:
         id:               { type: string, format: uuid }
         idempotency_key:  { type: string, description: "客户端提供的幂等键" }
         task_type:        { type: string, example: "model.import",
-                            enum: [model.import, kb.parse, kb.index, inference.deploy] }
+                            enum: [model.import, kb.parse, kb.index, inference.deploy, volume.snapshot.create] }
         resource_type:    { type: string, nullable: true,
-                            enum: [inference_service, kb_document, model_version] }
+                            enum: [inference_service, kb_document, model_version, volume_snapshot] }
         resource_id:      { type: string, format: uuid, nullable: true }
         status:           { type: string,
                             enum: [pending, running, completed, failed, cancelled, dead_letter] }
@@ -1414,10 +1414,13 @@ components:
 
     InstanceLogListResponse:
       type: object
-      required: [items]
+      required: [items, total, dev_profile]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/InstanceLogEntry' } }
+        total:       { type: integer }
         next_cursor: { type: string, nullable: true }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     InstanceEvent:
       type: object
@@ -1433,14 +1436,17 @@ components:
 
     InstanceEventListResponse:
       type: object
-      required: [items]
+      required: [items, total, dev_profile]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/InstanceEvent' } }
+        total:       { type: integer }
         next_cursor: { type: string, nullable: true }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     InstanceMetrics:
       type: object
-      required: [instance_id, timestamp]
+      required: [instance_id, timestamp, dev_profile]
       properties:
         instance_id:          { type: string, format: uuid }
         timestamp:            { type: string, format: date-time }
@@ -1452,6 +1458,8 @@ components:
         gpu_memory_total_mb:  { type: number, nullable: true }
         network_rx_bytes:     { type: integer, nullable: true }
         network_tx_bytes:     { type: integer, nullable: true }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     InstanceSecurityEvent:
       type: object
@@ -1466,20 +1474,25 @@ components:
 
     InstanceSecurityEventListResponse:
       type: object
-      required: [items]
+      required: [items, total, dev_profile]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/InstanceSecurityEvent' } }
+        total:       { type: integer }
         next_cursor: { type: string, nullable: true }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     InstanceExecSession:
       type: object
-      required: [id, instance_id, ws_url, expires_at]
+      required: [id, instance_id, ws_url, expires_at, dev_profile]
       properties:
         id:          { type: string, format: uuid }
         instance_id: { type: string, format: uuid }
         ws_url:      { type: string, format: uri }
         token:       { type: string }
         expires_at:  { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     CreateInstanceExecSessionRequest:
       type: object
@@ -1497,21 +1510,24 @@ components:
 
     NetworkRoute:
       type: object
-      required: [id, vpc_id, destination_cidr, next_hop_type, next_hop_id, created_at]
+      required: [id, vpc_id, destination_cidr, next_hop_type, next_hop_id, created_at, dev_profile]
       properties:
-        id:               { type: string, format: uuid }
-        vpc_id:           { type: string, format: uuid }
+        id:               { type: string }
+        vpc_id:           { type: string }
         destination_cidr: { type: string }
         next_hop_type:    { type: string, enum: [gateway, instance, nat] }
-        next_hop_id:      { type: string, format: uuid }
+        next_hop_id:      { type: string }
         description:      { type: string, nullable: true }
         created_at:       { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     NetworkRouteListResponse:
       type: object
-      required: [items]
+      required: [items, total]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/NetworkRoute' } }
+        total:       { type: integer }
         next_cursor: { type: string, nullable: true }
 
     CreateNetworkRouteRequest:
@@ -1519,28 +1535,31 @@ components:
       required: [idempotency_key, vpc_id, destination_cidr, next_hop_type, next_hop_id]
       properties:
         idempotency_key:  { type: string }
-        vpc_id:           { type: string, format: uuid }
+        vpc_id:           { type: string }
         destination_cidr: { type: string }
         next_hop_type:    { type: string, enum: [gateway, instance, nat] }
-        next_hop_id:      { type: string, format: uuid }
+        next_hop_id:      { type: string }
         description:      { type: string }
 
     VolumeSnapshotRecord:
       type: object
-      required: [id, volume_id, name, status, size_bytes, created_at]
+      required: [id, volume_id, name, status, size_bytes, created_at, dev_profile]
       properties:
-        id:         { type: string, format: uuid }
-        volume_id:  { type: string, format: uuid }
+        id:         { type: string }
+        volume_id:  { type: string }
         name:       { type: string }
         status:     { type: string, enum: [creating, available, error, deleting] }
         size_bytes: { type: integer }
         created_at: { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     VolumeSnapshotListResponse:
       type: object
-      required: [items]
+      required: [items, total]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/VolumeSnapshotRecord' } }
+        total:       { type: integer }
         next_cursor: { type: string, nullable: true }
 
     CreateVolumeSnapshotRequest:
@@ -1553,20 +1572,23 @@ components:
 
     FilesystemMountTarget:
       type: object
-      required: [id, filesystem_id, subnet_id, ip_address, status, created_at]
+      required: [id, filesystem_id, subnet_id, ip_address, status, created_at, dev_profile]
       properties:
-        id:            { type: string, format: uuid }
-        filesystem_id: { type: string, format: uuid }
-        subnet_id:     { type: string, format: uuid }
+        id:            { type: string }
+        filesystem_id: { type: string }
+        subnet_id:     { type: string }
         ip_address:    { type: string }
         status:        { type: string, enum: [creating, available, deleting, error] }
         created_at:    { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     FilesystemMountTargetListResponse:
       type: object
-      required: [items]
+      required: [items, total]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/FilesystemMountTarget' } }
+        total:       { type: integer }
         next_cursor: { type: string, nullable: true }
 
     StorageBucketRecord:
@@ -1583,9 +1605,10 @@ components:
 
     StorageBucketListResponse:
       type: object
-      required: [items]
+      required: [items, total]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/StorageBucketRecord' } }
+        total:       { type: integer }
         next_cursor: { type: string, nullable: true }
 
     CreateStorageBucketRequest:
@@ -1650,7 +1673,7 @@ components:
 
     K8sClusterWorkload:
       type: object
-      required: [name, namespace, kind, replicas, ready_replicas, status, created_at]
+      required: [name, namespace, kind, replicas, ready_replicas, status, created_at, dev_profile]
       properties:
         name:           { type: string }
         namespace:      { type: string }
@@ -1660,10 +1683,12 @@ components:
         image:          { type: string, nullable: true }
         status:         { type: string, enum: [running, pending, failed, succeeded] }
         created_at:     { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     K8sClusterWorkloadListResponse:
       type: object
-      required: [items]
+      required: [items, total]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/K8sClusterWorkload' } }
         next_cursor: { type: string, nullable: true }
@@ -1671,7 +1696,7 @@ components:
 
     GPUInventoryRecord:
       type: object
-      required: [id, node_name, gpu_type, gpu_index, status]
+      required: [id, node_name, gpu_type, gpu_index, status, dev_profile]
       properties:
         id:              { type: string, format: uuid }
         node_name:       { type: string }
@@ -1682,18 +1707,22 @@ components:
         status:          { type: string, enum: [available, in_use, fault, maintenance] }
         tenant_id:       { type: string, format: uuid, nullable: true }
         instance_id:     { type: string, format: uuid, nullable: true }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     GPUInventoryListResponse:
       type: object
-      required: [items]
+      required: [items, total, dev_profile]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/GPUInventoryRecord' } }
         next_cursor: { type: string, nullable: true }
         total:       { type: integer }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     GPUOccupancyStats:
       type: object
-      required: [total, in_use, available, fault]
+      required: [total, in_use, available, fault, dev_profile]
       properties:
         total:     { type: integer }
         in_use:    { type: integer }
@@ -1708,10 +1737,12 @@ components:
               total:     { type: integer }
               in_use:    { type: integer }
               available: { type: integer }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     SandboxTemplate:
       type: object
-      required: [id, name, image, created_at]
+      required: [id, name, image, created_at, dev_profile]
       properties:
         id:          { type: string, format: uuid }
         name:        { type: string }
@@ -1722,13 +1753,18 @@ components:
         storage_gb:  { type: number, nullable: true }
         is_builtin:  { type: boolean, default: false }
         created_at:  { type: string, format: date-time }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     SandboxTemplateListResponse:
       type: object
-      required: [items]
+      required: [items, total, dev_profile]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/SandboxTemplate' } }
+        total:       { type: integer }
         next_cursor: { type: string, nullable: true }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
   # 公共响应
   responses:
@@ -2650,9 +2686,13 @@ paths:
       responses:
         "202":
           description: 快照创建任务已提交
+          headers:
+            Location:
+              schema: { type: string }
+              description: 任务轮询 URL
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/VolumeSnapshotRecord' }
+              schema: { $ref: '#/components/schemas/AsyncTask' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }

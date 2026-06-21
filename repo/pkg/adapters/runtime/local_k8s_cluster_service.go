@@ -498,6 +498,49 @@ func (s *localK8sClusterService) Proxy(_ context.Context, req ports.K8sClusterPr
 	}, nil
 }
 
+func (s *localK8sClusterService) ListWorkloads(_ context.Context, req ports.K8sClusterWorkloadListRequest) ([]ports.K8sClusterWorkloadRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, err := s.requireRunningClusterLocked(req.TenantID, req.ClusterID, "list workloads")
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	items := []ports.K8sClusterWorkloadRecord{
+		{
+			Name:          rec.Name + "-api",
+			Namespace:     "default",
+			Kind:          "Deployment",
+			Replicas:      2,
+			ReadyReplicas: 2,
+			Image:         "registry.local/ani/core-api:dev",
+			Status:        ports.K8sWorkloadRunning,
+			CreatedAt:     now.Add(-30 * time.Minute),
+		},
+		{
+			Name:          rec.Name + "-worker",
+			Namespace:     "ani-system",
+			Kind:          "StatefulSet",
+			Replicas:      1,
+			ReadyReplicas: 1,
+			Image:         "registry.local/ani/core-worker:dev",
+			Status:        ports.K8sWorkloadRunning,
+			CreatedAt:     now.Add(-25 * time.Minute),
+		},
+	}
+	filtered := make([]ports.K8sClusterWorkloadRecord, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(req.Namespace) != "" && item.Namespace != strings.TrimSpace(req.Namespace) {
+			continue
+		}
+		if strings.TrimSpace(req.Kind) != "" && item.Kind != strings.TrimSpace(req.Kind) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered, nil
+}
+
 func (s *localK8sClusterService) requireTenantClusterLocked(tenantID string, clusterID string) (ports.K8sClusterRecord, error) {
 	rec, ok := s.byID[clusterID]
 	if !ok || rec.TenantID != tenantID {

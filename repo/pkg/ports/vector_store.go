@@ -54,6 +54,25 @@ type VectorStoreResourceSearchRequest struct {
 	Filter     map[string]string
 }
 
+type VectorDocumentInput struct {
+	ID       string
+	Content  string
+	Metadata map[string]string
+}
+
+type VectorStoreDocumentInsertRequest struct {
+	TenantID       string
+	ResourceID     string
+	IdempotencyKey string
+	Documents      []VectorDocumentInput
+}
+
+type VectorStoreDocumentInsertResult struct {
+	InsertedCount int
+	TaskID        string
+	Status        string
+}
+
 type VectorCollectionRef struct {
 	TenantID string
 	KBID     string
@@ -97,4 +116,5 @@ type VectorStoreService interface {
 	GetVectorStore(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreRecord, error)
 	DeleteVectorStore(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreRecord, error)
 	SearchVectorStore(ctx context.Context, request VectorStoreResourceSearchRequest) ([]VectorSearchResult, error)
+	InsertDocuments(ctx context.Context, request VectorStoreDocumentInsertRequest) (VectorStoreDocumentInsertResult, error)
 }

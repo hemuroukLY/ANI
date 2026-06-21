@@ -1,0 +1,88 @@
+profile: SPRINT13-B-TRACK-PRODUCTION-SHAPED-GATEWAY
+status: contract
+description: >
+  Production-shaped acceptance profile for Sprint 13 S01-S04 B-track closure
+  and the required passing standard for later S05-S07 B-track live evidence.
+
+gateway:
+  deployment_mode: in_cluster
+  namespace: ani-system
+  service_account: ani-gateway
+  rbac_manifest: deploy/real-k8s-lab/sprint13-production-shaped-gateway-rbac.yaml
+  deployment_manifest: deploy/real-k8s-lab/sprint13-production-shaped-gateway-deployment.yaml
+  kubernetes_client:
+    host_source: in_cluster_service
+    token_source: service_account_projected_token
+    ca_source: service_account_ca_bundle
+    forbidden_sources:
+      - lab_kubeconfig
+      - kubectl_proxy
+      - local_port_forward
+      - dev_gateway
+
+transport_profiles:
+  production_gateway:
+    required: true
+    forbidden:
+      - 127.0.0.1
+      - localhost
+      - kubectl proxy
+      - port-forward
+  in_cluster_serviceaccount:
+    required: true
+    required_env:
+      - KUBERNETES_SERVICE_HOST
+      - KUBERNETES_SERVICE_PORT
+    required_files:
+      - /var/run/secrets/kubernetes.io/serviceaccount/token
+      - /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+  metadata_target_tls:
+    required_for:
+      - S02
+    forbidden:
+      - static localhost proxy target
+      - proxy-server evidence
+  cluster_service_or_prometheus:
+    required_for:
+      - S04
+      - S07
+    forbidden:
+      - local DCGM port-forward
+      - local Prometheus port-forward
+
+slice_proof_items:
+  S01:
+    - production_gateway
+    - in_cluster_serviceaccount_rbac
+    - persistent_route_metadata_reconciliation
+  S02:
+    - production_gateway
+    - production_per_cluster_metadata_target
+    - production_tls_and_token_management
+  S03:
+    - production_gateway
+    - in_cluster_serviceaccount_rbac
+    - tenant_storage_lifecycle_and_backup_restore
+  S04:
+    - production_gateway
+    - in_cluster_kubernetes_api
+    - production_dcgm_service_or_prometheus_query
+  S05:
+    - production_gateway
+    - production_object_store_credentials
+    - production_presigned_url_endpoint
+  S06:
+    - production_gateway
+    - production_vector_store_credentials
+    - production_vector_collection_lifecycle
+  S07:
+    - production_gateway
+    - production_prometheus_service_or_query
+    - production_kubelet_or_kubernetes_api_access
+
+evidence_rules:
+  production_shape_status_passed_requires:
+    - transport_profile_without_lab_local_or_dev_gateway
+    - missing_items_empty
+    - proof_items_include_slice_required_items
+    - no_credentials_or_internal_ips_in_evidence

@@ -1,0 +1,22 @@
+{
+  "cleanup": "deleted",
+  "core_cluster_id": "k8sclu-60c3ae97-8fa0-4a84-8c45-3061ef495009",
+  "id": "vcluster-live-gate",
+  "kubectl_version": "v1.35.0",
+  "production_shape": {
+    "missing_items": [],
+    "proof_items": [
+      "production_gateway",
+      "production_per_cluster_metadata_target",
+      "production_tls_and_token_management"
+    ],
+    "status": "passed",
+    "transport_profile": "metadata_target_tls"
+  },
+  "profile": "M1-K8S-LIVE-A",
+  "proxy_status": 200,
+  "status": "passed",
+  "workload_count": 1,
+  "workload_name": "ani-s02-live-workload",
+  "workloads_status": 200
+}

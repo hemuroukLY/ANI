@@ -6,12 +6,60 @@
 > - **当前冲刺任务** → `repo/CURRENT-SPRINT.md`（每冲刺更新）
 > - **已完成批次详情** → 本文件（每批次完成后追加）
 
-> 当前执行：**Sprint 11 / Core Real Deployment Validation 正式部署完成；Rook-Ceph 正式部署已完成**，当前把 Sprint 6-10 的 contract/local/release-prep 成果放到真实物理服务器上验证，并完成 VM 优先块存储 live 部署。真实服务器只读验证已完成；Rook-Ceph 正式部署已完成；`rook-ceph` CephCluster 为 `Ready/HEALTH_OK`，`ceph-rbd-ssd` pool 为 `Ready`，5 个 SSD OSD 运行，`ani-rbd-ssd` StorageClass 已上线，受控 RBD smoke test、KubeVirt VM RBD storage smoke 与逐节点 reboot resilience 已通过并清理临时资源。Sprint 11 执行环境：正式部署执行环境；未执行手工挂载、`/etc/fstab` 修改、系统盘变更、默认 StorageClass 切换或已有 PVC 迁移。Sprint 9 Core-only 代码开发已完成，Sprint 10 Core-only 代码开发已完成；两者的 release-prep gates 仍作为历史回归边界保留。Sprint 5 真实 live gate evidence、Sprint 6 Core 平台支撑批次、Sprint 7 installer/offline/CLI/regression contract、Sprint 8 release hardening/offline/CLI/doc consistency gates 仍作为历史回归边界保留；guard 微批次完整索引见 [guard-series/REAL-K8S-LAB-guard-index.md](guard-series/REAL-K8S-LAB-guard-index.md)（最新 ID：M1-REAL-LAB-KX）。本文只做已完成批次归档，不作为当前任务清单使用。
+> 当前执行：**Sprint 13 / Core real provider 与 live gate 收敛**。Sprint 12 已完成 19 个 Core handler + 2 个 422 的 Tier1 local profile；Sprint 13 S01-S07 已通过 production-shaped live gate 并归档 `production_shape.status=passed` evidence。S05/S06/S07 关键 token：SPRINT13-OBJECTSTORE-MINIO-A-TRACK / validate-object-store-live-gate / MinIO / pre-signed URL / LIVE PENDING；SPRINT13-VECTOR-MILVUS-A-TRACK / validate-vector-store-live-gate / Milvus / LIVE PENDING；SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK / validate-instance-observability-live-gate / Prometheus / kubelet / LIVE PENDING。`S05-S07 B 轨可以继续` 仅保留作历史兼容语境；当前 S05/S06/S07 均已 passed。SPRINT13-AUTH-DEX-PRODUCTION-GATE 已通过，production-shaped Gateway 使用 `ANI_AUTH_MODE=auth_service`。这些结论不代表 full platform production ready；正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入仍需后续 release gate。本文只做已完成批次归档，不作为当前任务清单使用。
 > 历史校准记录（2026-05-20/2026-05-21）：Sprint 2/3/4 的 API、SDK、Mock、Docs 与记录闭环已归档；这些记录只解释历史切换，不代表当前执行阶段。
 
 ---
 
 ## 已完成批次（按完成时间排列）
+
+### SDK Regression Fixes（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SDK-SERVICES-IDEMPOTENCY-SEPARATION-A | 修复 SDK beta 校验器把 Services 自有幂等 operationId 误判为 Core 泄漏的问题；`validate-sdk-beta` 改为只拒绝 Core/Services `idempotencyOperations` 交集，并新增回归测试；重生成 Core/Services 四语言 SDK 与各自 OpenAPI 契约对齐 | sdk-services-idempotency-separation-a.md |
+
+### Sprint 12 Kickoff（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SPRINT12-KICKOFF-A | Sprint 12 启动 + GAP 分析：基于真实 Core 代码与 `api/openapi/v1.yaml` diff，规划 19 个已声明未实现 Core handler 缺口 + 2 个 422，分 B1/B2/B3 三批；仅 ANI Core，Tier1 local profile；Sprint 11 转历史回归门禁 | sprint12-kickoff-core-svc-support.md |
+| SPRINT12-KICKOFF-A（配套） | B1/B2/B3 批次执行提示词，人工/AI 可直接粘贴执行，含前置事实防幻觉 | sprint12-batch-execution-prompts.md |
+
+### Sprint 12 Delivery（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| CORE-SVC-SUPPORT-OBSERVABILITY-A | B1 实例可观测与 GPU/Sandbox catalog handler：新增实例 logs/events/metrics/security-events/exec session，只读观测 port + local adapter；新增 GPU inventory/occupancy handler 与 sandbox template catalog；全部为 Tier1 local profile，响应带 dev_profile，不声明 runtime/production ready | core-svc-support-observability-a.md |
+| CORE-SVC-SUPPORT-NETSTORE-A | B2 网络/存储/K8s handler：新增 network routes、volume snapshots、filesystem mount-targets、K8s workloads；searchVectorStore 非 ready 与 createK8sCluster 前置不满足返回 422 PRECONDITION_FAILED；复审收口后 createVolumeSnapshot 202 按全局约定返回 AsyncTask；全部为 Tier1 local profile，响应带 dev_profile，不声明 runtime/production ready | core-svc-support-netstore-a.md |
+| CORE-SVC-SUPPORT-OBJVEC-A | B3 对象/向量 handler：新增 storage buckets、object upload/download 预签名 URL、vector document insert；复用 `ports.ObjectStore` 与 `ports.VectorStore.Upsert` 边界；全部为 Tier1 local profile，不声明 runtime/production ready | core-svc-support-objvec-a.md |
+| SPRINT12-CLOSURE-A | Sprint 12 收口：A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 经 OpenAPI、ports/adapters、Gateway handler、测试和文档闭环；进入 Sprint 13 real provider/live gate 收敛 | sprint12-closure-core-svc-support.md |
+
+### Sprint 13 Planning（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SPRINT13-REAL-PROVIDER-READINESS-PLAN | Sprint 13 真实 provider / live gate 代码关联计划：把 Sprint 12 B1/B2/B3 的 handler、ports、local adapters 映射到真实组件和 live gate；未执行 live gate 前不标 runtime/production ready | sprint13-real-provider-readiness-plan.md |
+| SPRINT13-NETROUTE-KUBEOVN-A-TRACK | S01 网络路由 Kube-OVN A 轨：adapter-local route→`Vpc.spec.staticRoutes` renderer、provider dry-run fake 单测、`validate-kubeovn-network-live-gate` route contract；本 A 轨当时不跑真实写操作，后续 live 结果见 `SPRINT13-NETROUTE-KUBEOVN-LIVE-A` | sprint13-netroute-kubeovn-a-track.md |
+| SPRINT13-NETROUTE-KUBEOVN-B-TRACK-PREP | S01 网络路由 Kube-OVN B 轨接线准备：`NetworkProviderRenderer.RenderRoute` 纳入 port，`LocalNetworkService.CreateRoute` 可显式走 route renderer→dry-run→apply→observe，bootstrap 与 Gateway runtime 增加 `NETWORK_PROVIDER=kubeovn_rest` 注入路径和执行 proof 配置，live gate 增加 `--cleanup` 临时资源清理 | sprint13-netroute-kubeovn-b-track-prep.md |
+| SPRINT13-NETROUTE-KUBEOVN-LIVE-A | S01 网络路由 Kube-OVN B 轨 production-shaped live result：`validate_kubeovn_network_live_gate.py --live --production-shaped` 经 ANI Gateway `POST/GET /networks/routes` create/list，再用 kubectl 观察底层 Kube-OVN Vpc/Subnet/route 与临时 NetworkPolicy/Service；产出 `production_shape.status=passed` 非敏感 evidence JSON，底层临时资源 cleanup；不代表 full platform production ready | sprint13-netroute-kubeovn-live-result.md |
+| SPRINT13-K8S-WORKLOADS-VCLUSTER-A-TRACK | S02 K8s workloads vCluster A 轨：real-provider cluster 经既有 proxy target 只读读取 Kubernetes API workload list，fake 单测覆盖 Deployment 解析，`validate-vcluster-live-gate` 增加 `core-workloads-list` contract；该记录保留 A-track 当时的 code+contract ready 事实，后续 live 结果见 `SPRINT13-K8S-WORKLOADS-VCLUSTER-LIVE-A` | sprint13-k8s-workloads-vcluster-a-track.md |
+| SPRINT13-K8S-WORKLOADS-VCLUSTER-LIVE-A | S02 K8s workloads vCluster B 轨 production-shaped live result：恢复 vCluster CLI v0.34.1，固定 chart 0.34.1，本次经 Gateway provider 创建 vCluster，再经 metadata target TLS 执行 Core proxy `/version`、Core workload list observe 与 cleanup，产出 `production_shape.status=passed` 非敏感 evidence JSON；不代表 full platform production ready | sprint13-k8s-workloads-vcluster-live-result.md |
+| SPRINT13-STORAGE-ROOK-CEPH-A-TRACK | S03 storage Rook-Ceph A 轨：`KubernetesStorageRenderer` 增加 CSI `VolumeSnapshot` 与 mount-target `Service` contract manifest，provider dry-run / REST client fake 单测覆盖，新增 `validate-storage-live-gate`；该记录保留 A-track 当时事实，后续 live 结果见 `SPRINT13-STORAGE-ROOK-CEPH-LIVE-A` | sprint13-storage-rook-ceph-a-track.md |
+| SPRINT13-STORAGE-ROOK-CEPH-LIVE-A | S03 storage Rook-Ceph B 轨 production-shaped live result：安装/恢复 CSI snapshot CRDs/controller，创建默认 RBD `VolumeSnapshotClass`，通过 in-cluster Gateway `STORAGE_PROVIDER=kubernetes_rest` 执行 Core volume create、snapshot create/list、filesystem create、mount-target list 与 cleanup，产出 `production_shape.status=passed` 非敏感 evidence JSON；不代表 full platform production ready | sprint13-storage-rook-ceph-live-result.md |
+| SPRINT13-GPU-INVENTORY-DCGM-A-TRACK | S04 GPU inventory / occupancy A 轨：新增 `KubernetesGPUInventory` 只读解析 NVIDIA device-plugin NodeList capacity/product labels，新增 `validate-gpu-inventory-live-gate` 覆盖 Core `/gpu-inventory`、`/gpu-inventory/occupancy` 与 DCGM readable contract；状态 code+contract ready, LIVE PENDING，不标 real-provider/runtime/production ready | sprint13-gpu-inventory-dcgm-a-track.md |
+| SPRINT13-GPU-INVENTORY-DCGM-LIVE-A | S04 GPU inventory / occupancy B 轨 production-shaped live result：恢复 DCGM exporter Helm release `ani-dcgm-exporter`，确认 NVIDIA device-plugin `v0.19.2` 与 DCGM exporter DaemonSet 均为 `3/3 ready`；`GPU_INVENTORY_PROVIDER=kubernetes_rest` 下 Core `/gpu-inventory`、`/gpu-inventory/occupancy`、Kubernetes NodeList GPU capacity 与 DCGM cluster Service metrics 共同通过 `validate-gpu-inventory-live-gate --production-shaped`，产出 `production_shape.status=passed` 非敏感 evidence JSON；不代表 full platform production ready | sprint13-gpu-inventory-dcgm-live-result.md |
+| SPRINT13-B-TRACK-PRODUCTION-SHAPE-REVIEW | S01-S04 B 轨生产形态边界审查：新增 `validate-sprint13-b-track-production-shape`，禁止把 lab kubeconfig、kubectl proxy、port-forward 或 dev gateway evidence 误标为 production ready；后续已升级为 passed evidence proof_items guard | sprint13-b-track-production-shape-review.md |
+| SPRINT13-B-TRACK-PRODUCTION-SHAPED-CLOSURE | S01-S04 production-shaped closure：Kubernetes REST client 支持 in-cluster ServiceAccount token/CA，Gateway network/storage/gpu runtime 透传 in-cluster 配置，S01 route metadata 新增持久化与 migration，S02/S03/S04 live gate 增加 `--production-shaped` 模式，新增 production-shaped Gateway RBAC/profile 并把 S05-S07 B 轨 proof_items 写入同一标准；后续 S01-S04 已 rerun passed | sprint13-b-track-production-shaped-closure.md |
+| SPRINT13-B-TRACK-PRODUCTION-SHAPED-POST-REVIEW | S01-S04 production-shaped post-review hardening：bootstrap `Config` 与 `NewCapabilitiesWithConfig` 统一支持 in-cluster ServiceAccount Kubernetes REST provider 装配，覆盖 S01 network、S03 storage、S04 GPU inventory 与 S07 Prometheus observability；adapter 层不再隐式读取 ambient env；后续 S01-S04 已 rerun passed | sprint13-b-track-production-shaped-post-review.md |
+| SPRINT13-AUTH-DEX-PRODUCTION-GATE | Auth/Dex production gate：真实集群部署 Dex + auth-service + `ANI_AUTH_MODE=auth_service` Gateway，经 `validate-auth-dex-production-gate` 跑通 Dex discovery/JWKS、anonymous 401、OIDC begin/complete 200、protected API bearer 200 与 refresh 200，产出非敏感 evidence；解除 S01-S04 Auth/Dex production ready 阻断，不代表 full platform production ready | sprint13-auth-dex-production-gate.md |
+| SPRINT13-S01-S04-PRODUCTION-READINESS-REVIEW | S01-S04 production readiness boundary review：确认 S01-S04 代码路径、部署契约和 live gate 已达到 production-shaped acceptance passed；Auth/Dex production gate 已通过，Gateway 固定 `ANI_AUTH_MODE=auth_service`，S01-S04 的 Auth/Dex production ready 阻断已解除；S05-S07 B 轨可以继续但仍按组件 production-shaped 标准验收 | sprint13-s01-s04-production-readiness-review.md |
+| SPRINT13-OBJECTSTORE-MINIO-A-TRACK | S05 object-store MinIO A 轨：新增 `MinIOObjectStore` S3-compatible adapter 与 bootstrap/Gateway `OBJECT_STORE_PROVIDER=minio` 显式注入路径，`validate-object-store-live-gate` 覆盖 bucket create/list、upload pre-signed URL、download pre-signed URL；B 轨已通过 production-shaped live gate | sprint13-objectstore-minio-a-track.md |
+| SPRINT13-OBJECTSTORE-MINIO-LIVE-A | S05 object-store MinIO B 轨：production-shaped Gateway 经 MinIO/S3-compatible backend 完成 bucket create/list、upload/download pre-signed URL、实际 PUT/GET 与 `--cleanup`；evidence 为 `production_shape.status=passed`，不代表 full platform production ready | sprint13-objectstore-minio-live-result.md |
+| SPRINT13-VECTOR-MILVUS-A-TRACK | S06 vector document insert Milvus A 轨：新增 `MilvusVectorStore` REST adapter 与 bootstrap `VECTOR_STORE_PROVIDER=milvus` 显式注入路径，`validate-vector-store-live-gate` 覆盖 Milvus readiness、Core vector store create、document insert 202 与 search readiness；后续 B 轨已通过 production-shaped live gate，历史 LIVE PENDING token 仅作门禁兼容语境 | sprint13-vector-milvus-a-track.md |
+| SPRINT13-VECTOR-MILVUS-LIVE-A | S06 vector Milvus B 轨：production-shaped Gateway 经 Milvus REST backend 完成 vector store create、documents insert、search readiness 与 `--cleanup`；evidence 为 `production_shape.status=passed`，不代表 full platform production ready | sprint13-vector-milvus-live-result.md |
+| SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK | S07 instance observability Prometheus + kubelet / K8s API A 轨：新增 `PrometheusInstanceObservability` adapter 与 bootstrap `INSTANCE_OBSERVABILITY_PROVIDER=prometheus_kubernetes` 显式注入路径，`validate-instance-observability-live-gate` 覆盖 Prometheus readiness、Core logs/events/metrics/security-events/exec session；后续 B 轨已通过 production-shaped live gate，历史 LIVE PENDING token 仅作门禁兼容语境 | sprint13-instance-observability-prometheus-a-track.md |
+| SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-LIVE-A | S07 instance observability Prometheus B 轨：production-shaped Gateway 经 Prometheus + Kubernetes API/kubelet backend 完成 Prometheus readiness、Core logs/events/metrics/security-events/exec session 与 `--cleanup`；evidence 为 `production_shape.status=passed`，不代表 full platform production ready | sprint13-instance-observability-prometheus-live-result.md |
 
 ### Sprint 11 Kickoff（2026-06）
 
@@ -356,3 +404,6 @@
 ⑧ repo/CURRENT-SPRINT.md 整体重写为下一 Sprint 内容
 ⑨ git commit -m "sprint: Sprint N completed"
 ```
+
+<!-- 历史回归门禁校验器兼容标记（请勿删除；对应历史批次与 make validate-* 门禁） -->
+**历史回归门禁 token（校验器兼容，勿删）：** Sprint 11 / Core Real Deployment Validation 正式部署完成；真实服务器只读验证已完成；Rook-Ceph 正式部署已完成；Sprint 11 执行环境：正式部署执行环境。

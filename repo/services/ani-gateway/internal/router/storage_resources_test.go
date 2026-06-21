@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -73,5 +74,128 @@ func TestStorageAPIServiceKeepsTenantIsolation(t *testing.T) {
 		ResourceID: volume.VolumeID,
 	}); err == nil {
 		t.Fatalf("GetVolume from another tenant succeeded, want isolation error")
+	}
+}
+
+func TestStorageAPIUsesInjectedService(t *testing.T) {
+	service := runtimeadapter.NewLocalStorageService()
+	api := newStorageAPIWithService(service)
+	if api.service != service {
+		t.Fatalf("api.service = %T, want injected storage service", api.service)
+	}
+	volume, err := api.service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-injected-volume",
+		Name:           "injected",
+		SizeGiB:        1,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume error = %v", err)
+	}
+	if volume.VolumeID == "" {
+		t.Fatalf("volume = %+v, want injected service to create volume", volume)
+	}
+}
+
+func TestStorageAPIDevProfileSnapshotAndMountTarget(t *testing.T) {
+	api := newStorageAPI()
+	volume, err := api.service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-snapshot-volume-a",
+		Name:           "db-data",
+		SizeGiB:        16,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume error = %v", err)
+	}
+	snapshot, err := api.service.CreateVolumeSnapshot(context.Background(), ports.VolumeSnapshotCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-snapshot-a",
+		VolumeID:       volume.VolumeID,
+		Name:           "db-data-snap",
+	})
+	if err != nil {
+		t.Fatalf("CreateVolumeSnapshot error = %v", err)
+	}
+	if got := storageSnapshotFromRecord(snapshot); got.ID == "" || got.VolumeID != volume.VolumeID || got.Status != "available" || got.SizeBytes <= 0 {
+		t.Fatalf("snapshot response = %+v, want available snapshot", got)
+	}
+	task := storageSnapshotTaskFromRecord(snapshot, "api-snapshot-a", "00000000-0000-0000-0000-000000000123")
+	if task.TaskType != "volume.snapshot.create" || task.ResourceType != "volume_snapshot" || task.Status != "completed" || task.ProgressPct != 100 {
+		t.Fatalf("snapshot task = %+v, want completed volume snapshot task", task)
+	}
+	taskSnapshot, ok := task.Result["snapshot"].(storageSnapshotResponse)
+	if !ok || taskSnapshot.ID != snapshot.SnapshotID || taskSnapshot.VolumeID != volume.VolumeID {
+		t.Fatalf("snapshot task result = %+v, want embedded snapshot response", task.Result)
+	}
+	filesystem, err := api.service.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-mount-fs-a",
+		Name:           "shared",
+		SizeGiB:        64,
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystem error = %v", err)
+	}
+	targets, err := api.service.ListFilesystemMountTargets(context.Background(), ports.FilesystemMountTargetListRequest{
+		TenantID:     "tenant-a",
+		FilesystemID: filesystem.FilesystemID,
+	})
+	if err != nil {
+		t.Fatalf("ListFilesystemMountTargets error = %v", err)
+	}
+	if got := storageMountTargetFromRecord(targets[0]); got.ID == "" || got.FilesystemID != filesystem.FilesystemID || got.Status != "available" || got.IPAddress == "" {
+		t.Fatalf("mount target response = %+v, want available mount target", got)
+	}
+}
+
+func TestStorageAPIBucketAndSignedURLResponsesMatchCoreSchema(t *testing.T) {
+	api := newStorageAPI()
+	bucket, err := api.service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-bucket-a",
+		Name:           "models-a",
+		Region:         "local",
+		AccessMode:     "private",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket error = %v", err)
+	}
+	if got := storageBucketFromRecord(bucket); got.ID == "" || got.Name != "models-a" || got.AccessMode != "private" || got.CreatedAt == "" {
+		t.Fatalf("bucket response = %+v, want StorageBucketRecord fields", got)
+	}
+
+	upload, err := api.service.CreateStorageObjectUpload(context.Background(), ports.StorageObjectUploadRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-upload-a",
+		BucketID:       bucket.BucketID,
+		Key:            "llm/model.bin",
+		ContentType:    "application/octet-stream",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageObjectUpload error = %v", err)
+	}
+	if got := storageObjectUploadFromRecord(upload); got.ObjectID == "" || got.UploadURL == "" || got.ExpiresAt == "" {
+		t.Fatalf("upload response = %+v, want StorageObjectUploadResponse fields", got)
+	}
+
+	download, err := api.service.GetStorageObjectDownload(context.Background(), ports.StorageObjectDownloadRequest{
+		TenantID:       "tenant-a",
+		ObjectID:       upload.ObjectID,
+		ExpiresSeconds: 3600,
+	})
+	if err != nil {
+		t.Fatalf("GetStorageObjectDownload error = %v", err)
+	}
+	if got := storageObjectDownloadFromRecord(download); got.DownloadURL == "" || got.ExpiresAt == "" || got.ContentType != "application/octet-stream" {
+		t.Fatalf("download response = %+v, want StorageObjectDownloadInfo fields", got)
+	}
+
+	buckets, err := api.service.ListStorageBuckets(context.Background(), ports.StorageResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListStorageBuckets error = %v", err)
+	}
+	if got := storageBucketListFromRecords(buckets); got.Total != 1 || got.NextCursor != nil || len(got.Items) != 1 || got.Items[0].Name != "models-a" {
+		t.Fatalf("bucket list response = %+v, want items,total,next_cursor aligned with StorageBucketListResponse", got)
 	}
 }

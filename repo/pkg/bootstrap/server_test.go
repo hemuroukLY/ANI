@@ -64,6 +64,76 @@ func TestConfigEnvironmentOverridesWorkloadReconcileController(t *testing.T) {
 	}
 }
 
+func TestConfigEnvironmentOverridesNetworkProvider(t *testing.T) {
+	t.Setenv("NETWORK_PROVIDER", "kubeovn_rest")
+	t.Setenv("NETWORK_PROVIDER_APPLY_ENABLED", "true")
+	t.Setenv("NETWORK_PROVIDER_USER_ID", "ani-core-network-provider")
+	t.Setenv("NETWORK_PROVIDER_PERMISSION_PROOF", "rbac-scope:networks.write")
+
+	cfg := (Config{}).withEnvironmentOverrides()
+
+	if cfg.NetworkProvider != "kubeovn_rest" {
+		t.Fatalf("NetworkProvider = %q, want kubeovn_rest", cfg.NetworkProvider)
+	}
+	if !cfg.NetworkProviderApplyEnabled {
+		t.Fatalf("NetworkProviderApplyEnabled = false, want true")
+	}
+	if cfg.NetworkProviderUserID != "ani-core-network-provider" {
+		t.Fatalf("NetworkProviderUserID = %q, want ani-core-network-provider", cfg.NetworkProviderUserID)
+	}
+	if cfg.NetworkProviderPermissionProof != "rbac-scope:networks.write" {
+		t.Fatalf("NetworkProviderPermissionProof = %q, want rbac scope proof", cfg.NetworkProviderPermissionProof)
+	}
+}
+
+func TestConfigEnvironmentOverridesStorageProvider(t *testing.T) {
+	t.Setenv("STORAGE_PROVIDER", "kubernetes_rest")
+	t.Setenv("STORAGE_PROVIDER_APPLY_ENABLED", "true")
+	t.Setenv("STORAGE_PROVIDER_USER_ID", "ani-core-storage-provider")
+	t.Setenv("STORAGE_PROVIDER_PERMISSION_PROOF", "rbac-scope:storage.write")
+
+	cfg := (Config{}).withEnvironmentOverrides()
+
+	if cfg.StorageProvider != "kubernetes_rest" {
+		t.Fatalf("StorageProvider = %q, want kubernetes_rest", cfg.StorageProvider)
+	}
+	if !cfg.StorageProviderApplyEnabled {
+		t.Fatalf("StorageProviderApplyEnabled = false, want true")
+	}
+	if cfg.StorageProviderUserID != "ani-core-storage-provider" {
+		t.Fatalf("StorageProviderUserID = %q, want ani-core-storage-provider", cfg.StorageProviderUserID)
+	}
+	if cfg.StorageProviderPermissionProof != "rbac-scope:storage.write" {
+		t.Fatalf("StorageProviderPermissionProof = %q, want storage write proof", cfg.StorageProviderPermissionProof)
+	}
+}
+
+func TestConfigEnvironmentOverridesGPUInventoryProvider(t *testing.T) {
+	t.Setenv("GPU_INVENTORY_PROVIDER", "kubernetes_rest")
+
+	cfg := (Config{}).withEnvironmentOverrides()
+
+	if cfg.GPUInventoryProvider != "kubernetes_rest" {
+		t.Fatalf("GPUInventoryProvider = %q, want kubernetes_rest", cfg.GPUInventoryProvider)
+	}
+}
+
+func TestConfigEnvironmentOverridesInClusterKubernetesServiceAccount(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.96.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+	t.Setenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/token")
+	t.Setenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+
+	cfg := (Config{}).withEnvironmentOverrides()
+
+	if cfg.KubernetesServiceHost != "10.96.0.1" || cfg.KubernetesServicePort != "443" {
+		t.Fatalf("KubernetesServiceHost/Port = %q/%q, want in-cluster service", cfg.KubernetesServiceHost, cfg.KubernetesServicePort)
+	}
+	if cfg.KubernetesServiceAccountTokenFile == "" || cfg.KubernetesServiceAccountCAFile == "" {
+		t.Fatalf("service account token/CA files = %q/%q, want configured files", cfg.KubernetesServiceAccountTokenFile, cfg.KubernetesServiceAccountCAFile)
+	}
+}
+
 func TestStartWorkloadReconcileControllerRequiresOptIn(t *testing.T) {
 	controller := &fakeWorkloadReconcileController{
 		started: make(chan struct{}),

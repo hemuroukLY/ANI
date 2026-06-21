@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -16,15 +17,32 @@ type LocalStorageService struct {
 	mu                sync.RWMutex
 	now               func() time.Time
 	store             ports.StorageResourceStore
+	objectStore       ports.ObjectStore
+	providerRenderer  ports.StorageProviderRenderer
+	providerDryRun    ports.StorageProviderDryRun
+	providerApply     ports.StorageProviderApply
+	providerStatus    ports.StorageProviderStatusReader
+	providerExecution StorageProviderExecutionConfig
 	volumes           map[string]ports.StorageVolumeRecord
 	filesystems       map[string]ports.StorageFilesystemRecord
 	objects           map[string]ports.StorageObjectRecord
+	buckets           map[string]ports.StorageBucketRecord
+	snapshots         map[string]ports.VolumeSnapshotRecord
+	mountTargets      map[string]ports.FilesystemMountTargetRecord
 	volumeIdempotency map[string]string
 	fsIdempotency     map[string]string
 	objectIdempotency map[string]string
+	bucketIdem        map[string]string
+	uploadIdem        map[string]string
+	snapshotIdem      map[string]string
 }
 
 type StorageServiceOption func(*LocalStorageService)
+
+type StorageProviderExecutionConfig struct {
+	UserID          string
+	PermissionProof string
+}
 
 func WithStorageServiceClock(now func() time.Time) StorageServiceOption {
 	return func(service *LocalStorageService) {
@@ -40,15 +58,43 @@ func WithStorageResourceStore(store ports.StorageResourceStore) StorageServiceOp
 	}
 }
 
+func WithStorageObjectStore(store ports.ObjectStore) StorageServiceOption {
+	return func(service *LocalStorageService) {
+		service.objectStore = store
+	}
+}
+
+func WithStorageProvider(
+	renderer ports.StorageProviderRenderer,
+	dryRun ports.StorageProviderDryRun,
+	apply ports.StorageProviderApply,
+	status ports.StorageProviderStatusReader,
+	execution StorageProviderExecutionConfig,
+) StorageServiceOption {
+	return func(service *LocalStorageService) {
+		service.providerRenderer = renderer
+		service.providerDryRun = dryRun
+		service.providerApply = apply
+		service.providerStatus = status
+		service.providerExecution = execution
+	}
+}
+
 func NewLocalStorageService(options ...StorageServiceOption) *LocalStorageService {
 	service := &LocalStorageService{
 		now:               func() time.Time { return time.Now().UTC() },
 		volumes:           map[string]ports.StorageVolumeRecord{},
 		filesystems:       map[string]ports.StorageFilesystemRecord{},
 		objects:           map[string]ports.StorageObjectRecord{},
+		buckets:           map[string]ports.StorageBucketRecord{},
+		snapshots:         map[string]ports.VolumeSnapshotRecord{},
+		mountTargets:      map[string]ports.FilesystemMountTargetRecord{},
 		volumeIdempotency: map[string]string{},
 		fsIdempotency:     map[string]string{},
 		objectIdempotency: map[string]string{},
+		bucketIdem:        map[string]string{},
+		uploadIdem:        map[string]string{},
+		snapshotIdem:      map[string]string{},
 	}
 	for _, option := range options {
 		option(service)
@@ -68,9 +114,9 @@ func (s *LocalStorageService) CreateVolume(ctx context.Context, request ports.St
 		return ports.StorageVolumeRecord{}, fmt.Errorf("%w: volume size_gib must be greater than zero", ports.ErrInvalid)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if id, ok := s.volumeIdempotency[idemKey]; ok {
 		if record, exists := s.volumes[id]; exists {
+			s.mu.Unlock()
 			return record, nil
 		}
 	}
@@ -86,6 +132,20 @@ func (s *LocalStorageService) CreateVolume(ctx context.Context, request ports.St
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
+	s.mu.Unlock()
+	if s.storageProviderConfigured() {
+		observation, err := s.executeStorageProvider(ctx, "volume", record.VolumeID, func() ([]ports.WorkloadManifest, error) {
+			return s.providerRenderer.RenderVolume(ctx, record)
+		})
+		if err != nil {
+			return ports.StorageVolumeRecord{}, err
+		}
+		record.State = observation.State
+		record.Reason = observation.Reason
+		record.UpdatedAt = observation.ObservedAt
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.volumes[record.VolumeID] = record
 	s.volumeIdempotency[idemKey] = record.VolumeID
 	if err := s.upsertVolume(ctx, record); err != nil {
@@ -153,9 +213,9 @@ func (s *LocalStorageService) CreateFilesystem(ctx context.Context, request port
 		return ports.StorageFilesystemRecord{}, fmt.Errorf("%w: unsupported filesystem protocol %q", ports.ErrUnsupported, request.Protocol)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if id, ok := s.fsIdempotency[idemKey]; ok {
 		if record, exists := s.filesystems[id]; exists {
+			s.mu.Unlock()
 			return record, nil
 		}
 	}
@@ -172,6 +232,20 @@ func (s *LocalStorageService) CreateFilesystem(ctx context.Context, request port
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
+	s.mu.Unlock()
+	if s.storageProviderConfigured() {
+		observation, err := s.executeStorageProvider(ctx, "filesystem", record.FilesystemID, func() ([]ports.WorkloadManifest, error) {
+			return s.providerRenderer.RenderFilesystem(ctx, record)
+		})
+		if err != nil {
+			return ports.StorageFilesystemRecord{}, err
+		}
+		record.State = observation.State
+		record.Reason = observation.Reason
+		record.UpdatedAt = observation.ObservedAt
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.filesystems[record.FilesystemID] = record
 	s.fsIdempotency[idemKey] = record.FilesystemID
 	if err := s.upsertFilesystem(ctx, record); err != nil {
@@ -286,12 +360,28 @@ func (s *LocalStorageService) GetObject(_ context.Context, request ports.Storage
 }
 
 func (s *LocalStorageService) DeleteObject(ctx context.Context, request ports.StorageResourceGetRequest) (ports.StorageObjectRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
 	record, ok := s.objects[request.ResourceID]
 	if !ok || record.TenantID != request.TenantID || record.State == ports.StorageResourceDeleted {
+		s.mu.RUnlock()
 		return ports.StorageObjectRecord{}, ports.ErrNotFound
 	}
+	objectStore := s.objectStore
+	s.mu.RUnlock()
+
+	if objectStore != nil {
+		if err := objectStore.DeleteObject(ctx, storageObjectRef(record)); err != nil && err != ports.ErrNotFound {
+			return ports.StorageObjectRecord{}, err
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.objects[request.ResourceID]
+	if !ok || current.TenantID != request.TenantID || current.State == ports.StorageResourceDeleted {
+		return ports.StorageObjectRecord{}, ports.ErrNotFound
+	}
+	record = current
 	record.State = ports.StorageResourceDeleted
 	record.Reason = "deleted by local storage profile"
 	record.UpdatedAt = s.now().UTC()
@@ -300,6 +390,257 @@ func (s *LocalStorageService) DeleteObject(ctx context.Context, request ports.St
 		return ports.StorageObjectRecord{}, err
 	}
 	return record, nil
+}
+
+func (s *LocalStorageService) CreateStorageBucket(ctx context.Context, request ports.StorageBucketCreateRequest) (ports.StorageBucketRecord, error) {
+	if err := requireStorageTenantAndName(request.TenantID, request.Name); err != nil {
+		return ports.StorageBucketRecord{}, err
+	}
+	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
+	if err != nil {
+		return ports.StorageBucketRecord{}, err
+	}
+	accessMode := firstNetworkNonEmpty(strings.ToLower(strings.TrimSpace(request.AccessMode)), "private")
+	if accessMode != "private" && accessMode != "public_read" {
+		return ports.StorageBucketRecord{}, fmt.Errorf("%w: unsupported bucket access_mode %q", ports.ErrUnsupported, request.AccessMode)
+	}
+
+	s.mu.Lock()
+	if id, ok := s.bucketIdem[idemKey]; ok {
+		if record, exists := s.buckets[id]; exists {
+			s.mu.Unlock()
+			return record, nil
+		}
+	}
+	for _, record := range s.buckets {
+		if record.TenantID == request.TenantID && record.Name == strings.TrimSpace(request.Name) {
+			s.mu.Unlock()
+			return ports.StorageBucketRecord{}, fmt.Errorf("%w: bucket name already exists", ports.ErrConflict)
+		}
+	}
+	s.mu.Unlock()
+
+	bucketClass := ports.BucketClass(strings.TrimSpace(request.Name))
+	if s.objectStore != nil {
+		if err := s.objectStore.EnsureBucket(ctx, bucketClass); err != nil {
+			return ports.StorageBucketRecord{}, err
+		}
+	}
+
+	now := s.now().UTC()
+	record := ports.StorageBucketRecord{
+		TenantID:   request.TenantID,
+		BucketID:   uuid.NewString(),
+		Name:       strings.TrimSpace(request.Name),
+		Region:     strings.TrimSpace(request.Region),
+		AccessMode: accessMode,
+		CreatedAt:  now,
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.buckets[record.BucketID] = record
+	s.bucketIdem[idemKey] = record.BucketID
+	return record, nil
+}
+
+func (s *LocalStorageService) ListStorageBuckets(_ context.Context, request ports.StorageResourceListRequest) ([]ports.StorageBucketRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]ports.StorageBucketRecord, 0, len(s.buckets))
+	for _, bucket := range s.buckets {
+		if bucket.TenantID != request.TenantID {
+			continue
+		}
+		bucket.ObjectCount = 0
+		bucket.SizeBytes = 0
+		for _, object := range s.objects {
+			if object.TenantID == bucket.TenantID && object.Bucket == bucket.Name && object.State != ports.StorageResourceDeleted {
+				bucket.ObjectCount++
+				bucket.SizeBytes += object.SizeBytes
+			}
+		}
+		items = append(items, bucket)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
+}
+
+func (s *LocalStorageService) CreateStorageObjectUpload(ctx context.Context, request ports.StorageObjectUploadRequest) (ports.StorageObjectUploadRecord, error) {
+	if strings.TrimSpace(request.TenantID) == "" {
+		return ports.StorageObjectUploadRecord{}, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
+	if err != nil {
+		return ports.StorageObjectUploadRecord{}, err
+	}
+	if strings.TrimSpace(request.BucketID) == "" || strings.TrimSpace(request.Key) == "" {
+		return ports.StorageObjectUploadRecord{}, fmt.Errorf("%w: bucket_id and key are required", ports.ErrInvalid)
+	}
+
+	s.mu.RLock()
+	if id, ok := s.uploadIdem[idemKey]; ok {
+		if object, exists := s.objects[id]; exists && object.TenantID == request.TenantID && object.State != ports.StorageResourceDeleted {
+			s.mu.RUnlock()
+			return s.signedUploadForObject(ctx, object, request.ExpiresSeconds)
+		}
+	}
+	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
+	s.mu.RUnlock()
+	if !ok || bucket.TenantID != request.TenantID {
+		return ports.StorageObjectUploadRecord{}, fmt.Errorf("%w: bucket not found", ports.ErrNotFound)
+	}
+
+	now := s.now().UTC()
+	object := ports.StorageObjectRecord{
+		TenantID:    request.TenantID,
+		ObjectID:    uuid.NewString(),
+		Bucket:      bucket.Name,
+		Key:         strings.TrimSpace(request.Key),
+		ContentType: firstNetworkNonEmpty(request.ContentType, "application/octet-stream"),
+		State:       ports.StorageResourceAvailable,
+		Reason:      "created by local storage upload profile",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	result, err := s.signedUploadForObject(ctx, object, request.ExpiresSeconds)
+	if err != nil {
+		return ports.StorageObjectUploadRecord{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.objects[object.ObjectID] = object
+	s.uploadIdem[idemKey] = object.ObjectID
+	return result, nil
+}
+
+func (s *LocalStorageService) GetStorageObjectDownload(ctx context.Context, request ports.StorageObjectDownloadRequest) (ports.StorageObjectDownloadRecord, error) {
+	s.mu.RLock()
+	object, ok := s.objects[strings.TrimSpace(request.ObjectID)]
+	s.mu.RUnlock()
+	if !ok || object.TenantID != request.TenantID || object.State == ports.StorageResourceDeleted {
+		return ports.StorageObjectDownloadRecord{}, ports.ErrNotFound
+	}
+	ttl := storageSignedURLTTL(request.ExpiresSeconds)
+	ref := storageObjectRef(object)
+	signed, err := s.signedDownloadURL(ctx, ref, ttl)
+	if err != nil {
+		return ports.StorageObjectDownloadRecord{}, err
+	}
+	return ports.StorageObjectDownloadRecord{
+		DownloadURL: signed.URL,
+		ExpiresAt:   signed.ExpiresAt,
+		ContentType: object.ContentType,
+		SizeBytes:   object.SizeBytes,
+	}, nil
+}
+
+func (s *LocalStorageService) CreateVolumeSnapshot(ctx context.Context, request ports.VolumeSnapshotCreateRequest) (ports.VolumeSnapshotRecord, error) {
+	if err := requireStorageTenantAndName(request.TenantID, request.Name); err != nil {
+		return ports.VolumeSnapshotRecord{}, err
+	}
+	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
+	if err != nil {
+		return ports.VolumeSnapshotRecord{}, err
+	}
+	if strings.TrimSpace(request.VolumeID) == "" {
+		return ports.VolumeSnapshotRecord{}, fmt.Errorf("%w: volume_id is required", ports.ErrInvalid)
+	}
+	s.mu.Lock()
+	if id, ok := s.snapshotIdem[idemKey]; ok {
+		if record, exists := s.snapshots[id]; exists {
+			s.mu.Unlock()
+			return record, nil
+		}
+	}
+	volume, ok := s.volumes[strings.TrimSpace(request.VolumeID)]
+	if !ok || volume.TenantID != request.TenantID || volume.State == ports.StorageResourceDeleted {
+		s.mu.Unlock()
+		return ports.VolumeSnapshotRecord{}, fmt.Errorf("%w: volume not found", ports.ErrNotFound)
+	}
+	record := ports.VolumeSnapshotRecord{
+		TenantID:    request.TenantID,
+		SnapshotID:  "snap_" + uuid.NewString(),
+		VolumeID:    volume.VolumeID,
+		Name:        strings.TrimSpace(request.Name),
+		Description: strings.TrimSpace(request.Description),
+		Status:      ports.VolumeSnapshotAvailable,
+		SizeBytes:   volume.SizeGiB * 1024 * 1024 * 1024,
+		CreatedAt:   s.now().UTC(),
+	}
+	s.mu.Unlock()
+	if s.storageProviderConfigured() {
+		observation, err := s.executeStorageProvider(ctx, "volume_snapshot", record.SnapshotID, func() ([]ports.WorkloadManifest, error) {
+			return s.providerRenderer.RenderVolumeSnapshot(ctx, record)
+		})
+		if err != nil {
+			return ports.VolumeSnapshotRecord{}, err
+		}
+		record.Status = volumeSnapshotStatusFromStorageState(observation.State)
+		if !observation.ObservedAt.IsZero() {
+			record.CreatedAt = observation.ObservedAt
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshots[record.SnapshotID] = record
+	s.snapshotIdem[idemKey] = record.SnapshotID
+	return record, nil
+}
+
+func (s *LocalStorageService) ListVolumeSnapshots(_ context.Context, request ports.VolumeSnapshotListRequest) ([]ports.VolumeSnapshotRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	volume, ok := s.volumes[strings.TrimSpace(request.VolumeID)]
+	if !ok || volume.TenantID != request.TenantID || volume.State == ports.StorageResourceDeleted {
+		return nil, ports.ErrNotFound
+	}
+	items := make([]ports.VolumeSnapshotRecord, 0, len(s.snapshots))
+	for _, record := range s.snapshots {
+		if record.TenantID == request.TenantID && record.VolumeID == request.VolumeID {
+			items = append(items, record)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
+}
+
+func (s *LocalStorageService) ListFilesystemMountTargets(ctx context.Context, request ports.FilesystemMountTargetListRequest) ([]ports.FilesystemMountTargetRecord, error) {
+	s.mu.Lock()
+	filesystem, ok := s.filesystems[strings.TrimSpace(request.FilesystemID)]
+	if !ok || filesystem.TenantID != request.TenantID || filesystem.State == ports.StorageResourceDeleted {
+		s.mu.Unlock()
+		return nil, ports.ErrNotFound
+	}
+	if target, ok := s.mountTargets[filesystem.FilesystemID]; ok {
+		s.mu.Unlock()
+		return []ports.FilesystemMountTargetRecord{target}, nil
+	}
+	target := ports.FilesystemMountTargetRecord{
+		TenantID:      filesystem.TenantID,
+		MountTargetID: "mt_" + uuid.NewString(),
+		FilesystemID:  filesystem.FilesystemID,
+		SubnetID:      "local-subnet",
+		IPAddress:     "127.0.0.1",
+		Status:        ports.MountTargetAvailable,
+		CreatedAt:     s.now().UTC(),
+	}
+	s.mu.Unlock()
+	if s.storageProviderConfigured() {
+		observation, err := s.executeStorageProvider(ctx, "filesystem_mount_target", target.MountTargetID, func() ([]ports.WorkloadManifest, error) {
+			return s.providerRenderer.RenderFilesystemMountTarget(ctx, target)
+		})
+		if err != nil {
+			return nil, err
+		}
+		target.Status = mountTargetStatusFromStorageState(observation.State)
+		if !observation.ObservedAt.IsZero() {
+			target.CreatedAt = observation.ObservedAt
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mountTargets[filesystem.FilesystemID] = target
+	return []ports.FilesystemMountTargetRecord{target}, nil
 }
 
 func (s *LocalStorageService) upsertVolume(ctx context.Context, record ports.StorageVolumeRecord) error {
@@ -321,6 +662,158 @@ func (s *LocalStorageService) upsertObject(ctx context.Context, record ports.Sto
 		return nil
 	}
 	return s.store.UpsertObject(ctx, record)
+}
+
+func (s *LocalStorageService) storageProviderConfigured() bool {
+	return s.providerRenderer != nil || s.providerDryRun != nil || s.providerApply != nil || s.providerStatus != nil
+}
+
+func (s *LocalStorageService) executeStorageProvider(ctx context.Context, resourceKind string, resourceID string, render func() ([]ports.WorkloadManifest, error)) (ports.StorageProviderStatusResult, error) {
+	if s.providerRenderer == nil || s.providerDryRun == nil || s.providerApply == nil || s.providerStatus == nil {
+		return ports.StorageProviderStatusResult{}, fmt.Errorf("%w: storage provider renderer, dry-run, apply and status reader are required", ports.ErrNotConfigured)
+	}
+	manifests, err := render()
+	if err != nil {
+		return ports.StorageProviderStatusResult{}, err
+	}
+	now := s.now().UTC()
+	dryRun, err := s.providerDryRun.DryRun(ctx, ports.StorageProviderDryRunRequest{
+		TenantID:        tenantIDFromStorageResource(resourceID, manifests),
+		UserID:          s.providerExecution.UserID,
+		ResourceKind:    resourceKind,
+		ResourceID:      resourceID,
+		Operation:       ports.StorageProviderOperationCreate,
+		Manifests:       manifests,
+		PermissionProof: s.providerExecution.PermissionProof,
+		RequestedAt:     now,
+	})
+	if err != nil {
+		return ports.StorageProviderStatusResult{}, err
+	}
+	apply, err := s.providerApply.Apply(ctx, ports.StorageProviderApplyRequest{
+		TenantID:        tenantIDFromStorageResource(resourceID, manifests),
+		UserID:          s.providerExecution.UserID,
+		ResourceKind:    resourceKind,
+		ResourceID:      resourceID,
+		Operation:       ports.StorageProviderOperationCreate,
+		Manifests:       manifests,
+		PermissionProof: s.providerExecution.PermissionProof,
+		DryRunResult:    dryRun,
+		RequestedAt:     now,
+	})
+	if err != nil {
+		return ports.StorageProviderStatusResult{}, err
+	}
+	return s.providerStatus.Observe(ctx, ports.StorageProviderStatusRequest{
+		TenantID:        tenantIDFromStorageResource(resourceID, manifests),
+		UserID:          s.providerExecution.UserID,
+		ResourceKind:    resourceKind,
+		ResourceID:      resourceID,
+		ApplyResult:     apply,
+		PermissionProof: s.providerExecution.PermissionProof,
+		RequestedAt:     now,
+	})
+}
+
+func tenantIDFromStorageResource(_ string, manifests []ports.WorkloadManifest) string {
+	if len(manifests) == 0 {
+		return ""
+	}
+	doc, err := parseManifestDocument(manifests[0].Content)
+	if err != nil {
+		return ""
+	}
+	metadata, _ := doc["metadata"].(map[string]any)
+	labels, _ := metadata["labels"].(map[string]any)
+	if tenantID, _ := labels["ani.kubercloud.io/tenant-id"].(string); tenantID != "" {
+		return tenantID
+	}
+	return ""
+}
+
+func volumeSnapshotStatusFromStorageState(state ports.StorageResourceState) ports.VolumeSnapshotStatus {
+	switch state {
+	case ports.StorageResourceAvailable:
+		return ports.VolumeSnapshotAvailable
+	case ports.StorageResourceFailed:
+		return ports.VolumeSnapshotError
+	case ports.StorageResourceDeleting, ports.StorageResourceDeleted:
+		return ports.VolumeSnapshotDeleting
+	default:
+		return ports.VolumeSnapshotCreating
+	}
+}
+
+func mountTargetStatusFromStorageState(state ports.StorageResourceState) ports.MountTargetStatus {
+	switch state {
+	case ports.StorageResourceAvailable:
+		return ports.MountTargetAvailable
+	case ports.StorageResourceFailed:
+		return ports.MountTargetError
+	case ports.StorageResourceDeleting, ports.StorageResourceDeleted:
+		return ports.MountTargetDeleting
+	default:
+		return ports.MountTargetCreating
+	}
+}
+
+func (s *LocalStorageService) signedUploadForObject(ctx context.Context, object ports.StorageObjectRecord, expiresSeconds int) (ports.StorageObjectUploadRecord, error) {
+	ttl := storageSignedURLTTL(expiresSeconds)
+	signed, err := s.signedUploadURL(ctx, storageObjectRef(object), ttl)
+	if err != nil {
+		return ports.StorageObjectUploadRecord{}, err
+	}
+	return ports.StorageObjectUploadRecord{
+		ObjectID:  object.ObjectID,
+		UploadURL: signed.URL,
+		ExpiresAt: signed.ExpiresAt,
+	}, nil
+}
+
+func (s *LocalStorageService) signedUploadURL(ctx context.Context, ref ports.ObjectRef, ttl time.Duration) (ports.SignedURL, error) {
+	if s.objectStore != nil {
+		return s.objectStore.SignedUploadURL(ctx, ref, ttl)
+	}
+	return ports.SignedURL{
+		URL:       localStorageSignedURL("upload", ref),
+		ExpiresAt: s.now().UTC().Add(ttl),
+	}, nil
+}
+
+func (s *LocalStorageService) signedDownloadURL(ctx context.Context, ref ports.ObjectRef, ttl time.Duration) (ports.SignedURL, error) {
+	if s.objectStore != nil {
+		return s.objectStore.SignedDownloadURL(ctx, ref, ttl)
+	}
+	return ports.SignedURL{
+		URL:       localStorageSignedURL("download", ref),
+		ExpiresAt: s.now().UTC().Add(ttl),
+	}, nil
+}
+
+func storageObjectRef(object ports.StorageObjectRecord) ports.ObjectRef {
+	return ports.ObjectRef{
+		TenantID:    object.TenantID,
+		BucketClass: ports.BucketClass(object.Bucket),
+		ObjectKey:   object.Key,
+		Version:     object.ObjectID,
+	}
+}
+
+func storageSignedURLTTL(expiresSeconds int) time.Duration {
+	if expiresSeconds <= 0 {
+		expiresSeconds = 3600
+	}
+	if expiresSeconds < 60 {
+		expiresSeconds = 60
+	}
+	if expiresSeconds > 86400 {
+		expiresSeconds = 86400
+	}
+	return time.Duration(expiresSeconds) * time.Second
+}
+
+func localStorageSignedURL(action string, ref ports.ObjectRef) string {
+	return "https://local-object-store.dev/" + action + "/" + url.PathEscape(string(ref.BucketClass)) + "/" + url.PathEscape(ref.ObjectKey)
 }
 
 func requireStorageTenantAndName(tenantID string, name string) error {

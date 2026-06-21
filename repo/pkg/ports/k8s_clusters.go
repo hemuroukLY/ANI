@@ -151,11 +151,43 @@ type K8sClusterProxyRecord struct {
 	ProxiedAt  int64
 }
 
+type K8sWorkloadStatus string
+
+const (
+	K8sWorkloadRunning   K8sWorkloadStatus = "running"
+	K8sWorkloadPending   K8sWorkloadStatus = "pending"
+	K8sWorkloadFailed    K8sWorkloadStatus = "failed"
+	K8sWorkloadSucceeded K8sWorkloadStatus = "succeeded"
+)
+
+type K8sClusterWorkloadRecord struct {
+	Name          string
+	Namespace     string
+	Kind          string
+	Replicas      int
+	ReadyReplicas int
+	Image         string
+	Status        K8sWorkloadStatus
+	CreatedAt     time.Time
+}
+
+type K8sClusterWorkloadListRequest struct {
+	TenantID  string
+	ClusterID string
+	Namespace string
+	Kind      string
+	Limit     int
+	Cursor    string
+}
+
 type K8sClusterProxyTarget struct {
-	TenantID    string
-	ClusterID   string
-	Server      string
-	BearerToken string
+	TenantID              string
+	ClusterID             string
+	Server                string
+	BearerToken           string
+	CAData                string
+	ClientCertificateData string
+	ClientKeyData         string
 }
 
 type K8sClusterProxyTargetResolver interface {
@@ -258,4 +290,5 @@ type K8sClusterService interface {
 	DeleteNodePool(ctx context.Context, req K8sClusterNodePoolGetRequest) (K8sClusterNodePoolRecord, error)
 	GetKubeconfig(ctx context.Context, req K8sClusterKubeconfigRequest) (K8sClusterKubeconfigRecord, error)
 	Proxy(ctx context.Context, req K8sClusterProxyRequest) (K8sClusterProxyRecord, error)
+	ListWorkloads(ctx context.Context, req K8sClusterWorkloadListRequest) ([]K8sClusterWorkloadRecord, error)
 }

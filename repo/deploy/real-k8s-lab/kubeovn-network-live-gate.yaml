@@ -2,7 +2,7 @@ profile: M1-NETWORK-LIVE-A
 status: contract
 description: >
   Sprint 5 Kube-OVN network live validation gate for proving the real lab can
-  create and observe Kube-OVN Vpc/Subnet plus Kubernetes NetworkPolicy and
+  create and observe Kube-OVN Vpc/Subnet/static route plus Kubernetes NetworkPolicy and
   Service/LB resources used by ANI network provider rendering, including the
   REAL-K8S-LAB-A external LoadBalancer IP reachability path.
 
@@ -26,6 +26,9 @@ live_checks:
   - id: kubeovn-subnet-created
     command: kubectl apply -f kubeovn-subnet.yaml && kubectl get subnet {subnet_name} -o json
     pass_condition: kubeovn_subnet_exists_and_ready_or_observable
+  - id: kubeovn-route-created
+    command: kubectl apply -f kubeovn-route-vpc-patch.yaml && kubectl get vpc {vpc_name} -o json
+    pass_condition: kubeovn_vpc_static_routes_include_destination_and_next_hop
   - id: networkpolicy-created
     command: kubectl apply -f networkpolicy.yaml && kubectl get networkpolicy {security_group_name} -n {namespace} -o json
     pass_condition: networkpolicy_exists_in_tenant_namespace
@@ -40,4 +43,4 @@ readiness_levels:
   contract:
     meaning: Gate definition and local validator exist; no live Kube-OVN resource proof.
   live:
-    meaning: Kube-OVN CRD checks plus Vpc/Subnet, NetworkPolicy, Service/LB and external LoadBalancer IP reachability checks passed against REAL-K8S-LAB-A.
+    meaning: Kube-OVN CRD checks plus Vpc/Subnet/static route, NetworkPolicy, Service/LB and external LoadBalancer IP reachability checks passed against REAL-K8S-LAB-A.

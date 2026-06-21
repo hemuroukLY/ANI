@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -28,6 +29,17 @@ type searchVectorStoreRequest struct {
 	Filter map[string]string `json:"filter"`
 }
 
+type vectorStoreDocumentInsertRequest struct {
+	IdempotencyKey string                    `json:"idempotency_key"`
+	Documents      []vectorDocumentInputBody `json:"documents"`
+}
+
+type vectorDocumentInputBody struct {
+	ID       string         `json:"id,omitempty"`
+	Content  string         `json:"content"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
 type vectorStoreResponse struct {
 	ID         string                 `json:"id"`
 	TenantID   string                 `json:"tenant_id"`
@@ -47,17 +59,35 @@ type vectorSearchHitResponse struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
+type vectorStoreDocumentInsertResponse struct {
+	InsertedCount int    `json:"inserted_count"`
+	TaskID        string `json:"task_id"`
+	Status        string `json:"status"`
+}
+
 func newVectorStoreAPI() *vectorStoreAPI {
-	return &vectorStoreAPI{service: runtimeadapter.NewLocalVectorStoreService()}
+	return newVectorStoreAPIWithService(nil)
 }
 
 func registerVectorStoreResources(v1 *route.RouterGroup) {
-	api := newVectorStoreAPI()
+	registerVectorStoreResourcesWithService(v1, nil)
+}
+
+func newVectorStoreAPIWithService(service ports.VectorStoreService) *vectorStoreAPI {
+	if service == nil {
+		service = runtimeadapter.NewLocalVectorStoreService()
+	}
+	return &vectorStoreAPI{service: service}
+}
+
+func registerVectorStoreResourcesWithService(v1 *route.RouterGroup, service ports.VectorStoreService) {
+	api := newVectorStoreAPIWithService(service)
 	v1.GET("/vector-stores", api.listVectorStores)
 	v1.POST("/vector-stores", api.createVectorStore)
 	v1.GET("/vector-stores/:vector_store_id", api.getVectorStore)
 	v1.DELETE("/vector-stores/:vector_store_id", api.deleteVectorStore)
 	v1.POST("/vector-stores/:vector_store_id/search", api.searchVectorStore)
+	v1.POST("/vector-stores/:vector_store_id/documents", api.insertVectorStoreDocuments)
 }
 
 func (api *vectorStoreAPI) createVectorStore(ctx context.Context, c *app.RequestContext) {
@@ -139,6 +169,34 @@ func (api *vectorStoreAPI) searchVectorStore(ctx context.Context, c *app.Request
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
 
+func (api *vectorStoreAPI) insertVectorStoreDocuments(ctx context.Context, c *app.RequestContext) {
+	var req vectorStoreDocumentInsertRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector document insert request")
+		return
+	}
+	documents := make([]ports.VectorDocumentInput, 0, len(req.Documents))
+	for _, document := range req.Documents {
+		documents = append(documents, ports.VectorDocumentInput{
+			ID:       document.ID,
+			Content:  document.Content,
+			Metadata: stringMetadata(document.Metadata),
+		})
+	}
+	result, err := api.service.InsertDocuments(ctx, ports.VectorStoreDocumentInsertRequest{
+		TenantID:       demoTenantID(c),
+		ResourceID:     c.Param("vector_store_id"),
+		IdempotencyKey: req.IdempotencyKey,
+		Documents:      documents,
+	})
+	if err != nil {
+		writeVectorStoreError(c, err)
+		return
+	}
+	c.Response.Header.Set("Location", "/api/v1/tasks/"+result.TaskID)
+	c.JSON(http.StatusAccepted, vectorStoreDocumentInsertFromResult(result))
+}
+
 func vectorStoreFromRecord(record ports.VectorStoreRecord) vectorStoreResponse {
 	return vectorStoreResponse{
 		ID:         record.StoreID,
@@ -154,12 +212,37 @@ func vectorStoreFromRecord(record ports.VectorStoreRecord) vectorStoreResponse {
 	}
 }
 
+func vectorStoreDocumentInsertFromResult(result ports.VectorStoreDocumentInsertResult) vectorStoreDocumentInsertResponse {
+	return vectorStoreDocumentInsertResponse{
+		InsertedCount: result.InsertedCount,
+		TaskID:        result.TaskID,
+		Status:        result.Status,
+	}
+}
+
+func stringMetadata(metadata map[string]any) map[string]string {
+	if len(metadata) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		if value == nil {
+			result[key] = ""
+			continue
+		}
+		result[key] = fmt.Sprint(value)
+	}
+	return result
+}
+
 func writeVectorStoreError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrNotFound):
 		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrUnsupported):
 		writeDemoError(c, http.StatusBadRequest, "UNSUPPORTED", err.Error())
+	case errors.Is(err, ports.ErrFailedPrecondition):
+		writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
 	case errors.Is(err, ports.ErrInvalid):
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:

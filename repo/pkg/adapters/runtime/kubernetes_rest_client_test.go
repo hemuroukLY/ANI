@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,11 +20,14 @@ func TestKubernetesRESTClientServerSideDryRunUsesDryRunAll(t *testing.T) {
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		gotPath = r.URL.String()
 		gotAuth = r.Header.Get("Authorization")
-		if r.Method != http.MethodPost {
-			t.Fatalf("method = %s, want POST", r.Method)
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s, want PATCH", r.Method)
 		}
 		if r.URL.Query().Get("dryRun") != "All" {
 			t.Fatalf("dryRun = %q, want All", r.URL.Query().Get("dryRun"))
+		}
+		if r.Header.Get("Content-Type") != kubernetesApplyPatchContentType {
+			t.Fatalf("content-type = %q, want apply patch", r.Header.Get("Content-Type"))
 		}
 		return jsonResponse(http.StatusCreated, `{"kind":"Deployment"}`), nil
 	})
@@ -36,11 +41,64 @@ func TestKubernetesRESTClientServerSideDryRunUsesDryRunAll(t *testing.T) {
 	if !result.Accepted || result.Provider != "kubernetes" {
 		t.Fatalf("result = %#v, want accepted kubernetes dry-run", result)
 	}
-	if !strings.Contains(gotPath, "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments") {
-		t.Fatalf("path = %q, want Deployment collection path", gotPath)
+	if !strings.Contains(gotPath, "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/app-01") {
+		t.Fatalf("path = %q, want Deployment resource path", gotPath)
 	}
 	if gotAuth != "Bearer token-a" {
 		t.Fatalf("Authorization = %q, want bearer token", gotAuth)
+	}
+}
+
+func TestKubernetesRESTClientUsesInClusterServiceAccountWhenHostOmitted(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenPath, []byte("service-account-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var gotURL string
+	var gotAuth string
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotURL = r.URL.String()
+		gotAuth = r.Header.Get("Authorization")
+		return jsonResponse(http.StatusCreated, `{"kind":"Deployment"}`), nil
+	})
+
+	client, err := NewKubernetesRESTClient(KubernetesRESTClientConfig{
+		ServiceHost:     "10.96.0.1",
+		ServicePort:     "443",
+		BearerTokenFile: tokenPath,
+		HTTPClient:      &http.Client{Transport: transport},
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient() error = %v", err)
+	}
+	if _, err := client.ServerSideDryRun(context.Background(), renderedDeployment(t)); err != nil {
+		t.Fatalf("ServerSideDryRun() error = %v", err)
+	}
+	if !strings.HasPrefix(gotURL, "https://10.96.0.1:443/apis/apps/v1/") {
+		t.Fatalf("url = %q, want in-cluster Kubernetes service URL", gotURL)
+	}
+	if gotAuth != "Bearer service-account-token" {
+		t.Fatalf("Authorization = %q, want service account token", gotAuth)
+	}
+}
+
+func TestKubernetesRESTClientRejectsInClusterConfigWithoutServiceAccountToken(t *testing.T) {
+	_, err := NewKubernetesRESTClient(KubernetesRESTClientConfig{
+		ServiceHost:     "10.96.0.1",
+		ServicePort:     "443",
+		BearerTokenFile: filepath.Join(t.TempDir(), "missing-token"),
+	})
+	if err == nil {
+		t.Fatalf("NewKubernetesRESTClient() error = nil, want missing service account token error")
+	}
+}
+
+func TestKubernetesRESTClientDoesNotReadAmbientInClusterEnvironment(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.96.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+
+	if _, err := NewKubernetesRESTClient(KubernetesRESTClientConfig{}); err == nil {
+		t.Fatalf("NewKubernetesRESTClient() error = nil, want explicit Kubernetes host or service host")
 	}
 }
 
@@ -126,6 +184,46 @@ func TestKubernetesRESTClientApplyManifestsSupportsSecret(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, `"stringData"`) || strings.Contains(gotBody, `"data"`) {
 		t.Fatalf("body = %s, want stringData and no base64 data", gotBody)
+	}
+}
+
+func TestKubernetesRESTClientApplyManifestsSupportsVolumeSnapshot(t *testing.T) {
+	var gotPath string
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotPath = r.URL.String()
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s, want PATCH", r.Method)
+		}
+		return jsonResponse(http.StatusOK, `{"kind":"VolumeSnapshot"}`), nil
+	})
+
+	client := newTestKubernetesRESTClient(t, transport)
+	refs, err := client.ApplyManifests(context.Background(), []ports.WorkloadManifest{{
+		Provider: "kubernetes",
+		Kind:     "VolumeSnapshot",
+		Name:     "snap-daily",
+		Content: `{
+  "apiVersion": "snapshot.storage.k8s.io/v1",
+  "kind": "VolumeSnapshot",
+  "metadata": {
+    "name": "snap-daily",
+    "namespace": "ani-tenant-tenant-a"
+  },
+  "spec": {
+    "source": {
+      "persistentVolumeClaimName": "vol-data"
+    }
+  }
+}`,
+	}})
+	if err != nil {
+		t.Fatalf("ApplyManifests(VolumeSnapshot) error = %v", err)
+	}
+	if len(refs) != 1 || refs[0] != "kubernetes/VolumeSnapshot/snap-daily" {
+		t.Fatalf("refs = %#v, want VolumeSnapshot ref", refs)
+	}
+	if !strings.Contains(gotPath, "/apis/snapshot.storage.k8s.io/v1/namespaces/ani-tenant-tenant-a/volumesnapshots/snap-daily") {
+		t.Fatalf("path = %q, want VolumeSnapshot resource path", gotPath)
 	}
 }
 
@@ -267,8 +365,8 @@ func TestKubernetesRESTClientSupportsKubeOVNNetworkResources(t *testing.T) {
 	if len(paths) != 2 {
 		t.Fatalf("paths = %#v, want dry-run and apply calls", paths)
 	}
-	if !strings.Contains(paths[0], "/apis/kubeovn.io/v1/vpcs?dryRun=All") {
-		t.Fatalf("dry-run path = %q, want KubeOVN Vpc collection", paths[0])
+	if !strings.Contains(paths[0], "/apis/kubeovn.io/v1/vpcs/vpc-vpc-main") || !strings.Contains(paths[0], "dryRun=All") {
+		t.Fatalf("dry-run path = %q, want KubeOVN Vpc resource dry-run", paths[0])
 	}
 	if !strings.Contains(paths[1], "/apis/kubeovn.io/v1/vpcs/vpc-vpc-main") {
 		t.Fatalf("apply path = %q, want KubeOVN Vpc resource", paths[1])

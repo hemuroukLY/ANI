@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -89,4 +90,79 @@ func TestNetworkAPIServiceKeepsTenantIsolation(t *testing.T) {
 	}); err == nil {
 		t.Fatalf("GetVPC from another tenant succeeded, want isolation error")
 	}
+}
+
+func TestNetworkAPIDevProfileRoute(t *testing.T) {
+	api := newNetworkAPI()
+	vpc, err := api.service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-route-vpc-a",
+		Name:           "route-vpc",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	route, err := api.service.CreateRoute(context.Background(), ports.NetworkRouteCreateRequest{
+		TenantID:        "tenant-a",
+		IdempotencyKey:  "api-route-a",
+		VPCID:           vpc.VPCID,
+		DestinationCIDR: "0.0.0.0/0",
+		NextHopType:     "gateway",
+		NextHopID:       "11111111-1111-1111-1111-111111111111",
+		Description:     "default route",
+	})
+	if err != nil {
+		t.Fatalf("CreateRoute error = %v", err)
+	}
+	got := networkRouteFromRecord(route)
+	if got.ID == "" || got.VPCID != vpc.VPCID || got.DestinationCIDR != "0.0.0.0/0" || got.NextHopType != "gateway" {
+		t.Fatalf("route response = %+v, want route schema fields", got)
+	}
+	requireLocalCoreDevProfile(t, got.DevProfile, "local-network-service")
+}
+
+func TestNetworkAPIRouteResponseMarksRealProvider(t *testing.T) {
+	got := networkRouteFromRecord(ports.NetworkRouteRecord{
+		RouteID:         "rt-real",
+		VPCID:           "vpc-real",
+		DestinationCIDR: "10.250.0.0/16",
+		NextHopType:     "gateway",
+		NextHopID:       "10.244.180.1",
+		Provider:        "kubeovn",
+		RealProvider:    true,
+	})
+	if got.DevProfile.Mode != "real" || !got.DevProfile.RealProvider || got.DevProfile.Provider != "kubeovn" {
+		t.Fatalf("route dev_profile = %+v, want Kube-OVN real provider", got.DevProfile)
+	}
+}
+
+func TestNetworkAPIUsesInjectedService(t *testing.T) {
+	service := newFakeNetworkService()
+	api := newNetworkAPIWithService(service)
+
+	_, err := api.service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-injected-vpc",
+		Name:           "injected",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	if service.createVPCCalls != 1 {
+		t.Fatalf("injected service createVPCCalls = %d, want 1", service.createVPCCalls)
+	}
+}
+
+type fakeNetworkService struct {
+	ports.NetworkService
+	createVPCCalls int
+}
+
+func newFakeNetworkService() *fakeNetworkService {
+	return &fakeNetworkService{NetworkService: runtimeadapter.NewLocalNetworkService()}
+}
+
+func (s *fakeNetworkService) CreateVPC(ctx context.Context, request ports.NetworkVPCCreateRequest) (ports.NetworkVPCRecord, error) {
+	s.createVPCCalls++
+	return s.NetworkService.CreateVPC(ctx, request)
 }

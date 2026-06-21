@@ -161,6 +161,42 @@ func (s *MetadataNetworkStore) UpsertLoadBalancer(ctx context.Context, record po
 	})
 }
 
+func (s *MetadataNetworkStore) UpsertRoute(ctx context.Context, record ports.NetworkRouteRecord) error {
+	if s.store == nil {
+		return ports.ErrNotConfigured
+	}
+	if err := requireNetworkRecord(record.TenantID, record.RouteID, record.DestinationCIDR, record.State); err != nil {
+		return err
+	}
+	if strings.TrimSpace(record.VPCID) == "" {
+		return fmt.Errorf("%w: vpc_id is required", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(record.NextHopType) == "" || strings.TrimSpace(record.NextHopID) == "" {
+		return fmt.Errorf("%w: next_hop_type and next_hop_id are required", ports.ErrInvalid)
+	}
+	createdAt, updatedAt := networkRecordTimes(s.now, record.CreatedAt, time.Time{})
+	return s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO network_routes (tenant_id, route_id, vpc_id, destination_cidr, next_hop_type, next_hop_id, description, state, provider, real_provider, created_at, updated_at)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, NULLIF($9, ''), $10, $11, $12)
+			ON CONFLICT (tenant_id, route_id) DO UPDATE SET
+				vpc_id = EXCLUDED.vpc_id,
+				destination_cidr = EXCLUDED.destination_cidr,
+				next_hop_type = EXCLUDED.next_hop_type,
+				next_hop_id = EXCLUDED.next_hop_id,
+				description = EXCLUDED.description,
+				state = EXCLUDED.state,
+				provider = EXCLUDED.provider,
+				real_provider = EXCLUDED.real_provider,
+				updated_at = EXCLUDED.updated_at
+		`, record.TenantID, record.RouteID, record.VPCID, record.DestinationCIDR, record.NextHopType, record.NextHopID, record.Description, string(record.State), record.Provider, record.RealProvider, createdAt, updatedAt)
+		if err != nil {
+			return fmt.Errorf("upsert network route: %w", err)
+		}
+		return nil
+	})
+}
+
 func (s *MetadataNetworkStore) UpdateResourceState(ctx context.Context, request ports.NetworkResourceStateUpdateRequest) error {
 	if s.store == nil {
 		return ports.ErrNotConfigured
@@ -233,6 +269,8 @@ func networkResourceStateTable(resourceKind string) (string, string, error) {
 		return "network_security_groups", "security_group_id", nil
 	case "load-balancer":
 		return "network_load_balancers", "load_balancer_id", nil
+	case "route":
+		return "network_routes", "route_id", nil
 	default:
 		return "", "", fmt.Errorf("%w: unsupported network resource kind %q", ports.ErrUnsupported, resourceKind)
 	}

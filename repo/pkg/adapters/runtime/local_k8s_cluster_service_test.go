@@ -293,6 +293,35 @@ func TestLocalK8sClusterServiceManagesNodePools(t *testing.T) {
 	}
 }
 
+func TestLocalK8sClusterServiceListsWorkloads(t *testing.T) {
+	service := NewLocalK8sClusterService()
+	cluster, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "workloads-cluster-a",
+		Name:           "tenant-a-dev",
+		Version:        "v1.31.0",
+	})
+	if err != nil {
+		t.Fatalf("CreateCluster error = %v", err)
+	}
+	workloads, err := service.ListWorkloads(context.Background(), ports.K8sClusterWorkloadListRequest{
+		TenantID:  "tenant-a",
+		ClusterID: cluster.ClusterID,
+		Namespace: "default",
+		Kind:      "Deployment",
+	})
+	if err != nil {
+		t.Fatalf("ListWorkloads error = %v", err)
+	}
+	if len(workloads) != 1 {
+		t.Fatalf("workloads = %+v, want one filtered Deployment", workloads)
+	}
+	got := workloads[0]
+	if got.Name == "" || got.Namespace != "default" || got.Kind != "Deployment" || got.Status != ports.K8sWorkloadRunning {
+		t.Fatalf("workload = %+v, want running default Deployment", got)
+	}
+}
+
 func TestLocalK8sClusterServiceKeepsNodePoolsLocalWithoutNodePoolProvider(t *testing.T) {
 	clusterProvider := &fakeK8sClusterProviderApply{
 		result: ports.K8sClusterProviderApplyResult{

@@ -99,3 +99,32 @@ func TestKubeOVNNetworkRendererRendersLoadBalancerService(t *testing.T) {
 		}
 	}
 }
+
+func TestKubeOVNNetworkRendererRendersRouteAsVpcStaticRoute(t *testing.T) {
+	renderer := NewKubeOVNNetworkRenderer()
+
+	manifests, err := renderer.RenderRoute(context.Background(), ports.NetworkRouteRecord{
+		TenantID:        "tenant-a",
+		RouteID:         "rt_default",
+		VPCID:           "vpc_main",
+		DestinationCIDR: "0.0.0.0/0",
+		NextHopType:     "gateway",
+		NextHopID:       "10.40.1.1",
+		Description:     "default route",
+		State:           ports.NetworkResourceAvailable,
+	})
+	if err != nil {
+		t.Fatalf("RenderRoute() error = %v", err)
+	}
+	if len(manifests) != 1 {
+		t.Fatalf("RenderRoute() manifests = %d, want 1", len(manifests))
+	}
+	if manifests[0].Kind != "Vpc" || manifests[0].Provider != "kubeovn" || manifests[0].Name != "vpc-vpc-main" {
+		t.Fatalf("RenderRoute() manifest = %+v, want kubeovn Vpc vpc-vpc-main", manifests[0])
+	}
+	for _, want := range []string{`"kind": "Vpc"`, `"staticRoutes"`, `"cidr": "0.0.0.0/0"`, `"nextHopIP": "10.40.1.1"`, `"policy": "policyDst"`, "rt_default"} {
+		if !strings.Contains(manifests[0].Content, want) {
+			t.Fatalf("rendered route missing %q:\n%s", want, manifests[0].Content)
+		}
+	}
+}

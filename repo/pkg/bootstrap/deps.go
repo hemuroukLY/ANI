@@ -25,43 +25,44 @@ import (
 // Capabilities exposes ANI-defined ports for loosely-coupled component access.
 // Existing raw clients stay available during the ARCH-ADAPTER migration window.
 type Capabilities struct {
-	Metadata             ports.MetadataStore
-	MessageBus           ports.MessageBus
-	Cache                ports.CacheStore
-	ObjectStore          ports.ObjectStore
-	VectorStore          ports.VectorStore
-	VectorStoreResources ports.VectorStoreService
-	ImageRegistry        ports.ImageRegistry
-	GPUInventory         ports.GPUInventory
-	WorkloadRuntime      ports.WorkloadRuntime
-	WorkloadRenderer     ports.WorkloadRenderer
-	WorkloadAdmission    ports.WorkloadAdmission
-	WorkloadPlanAudit    ports.WorkloadPlanAuditStore
-	WorkloadDryRun       ports.WorkloadProviderDryRun
-	WorkloadApply        ports.WorkloadProviderApply
-	WorkloadReconcile    ports.WorkloadStatusReconciler
-	WorkloadController   ports.WorkloadReconcileController
-	WorkloadStatus       ports.WorkloadProviderStatusReader
-	WorkloadInstances    ports.WorkloadInstanceOrchestrator
-	WorkloadStore        ports.WorkloadInstanceStore
-	WorkloadOperations   ports.WorkloadOperationStore
-	WorkloadIdentity     ports.WorkloadIdentityService
-	InstanceService      ports.WorkloadInstanceService
-	InstanceOps          ports.WorkloadInstanceOps
-	NetworkStore         ports.NetworkResourceStore
-	NetworkRenderer      ports.NetworkProviderRenderer
-	NetworkDryRun        ports.NetworkProviderDryRun
-	NetworkApply         ports.NetworkProviderApply
-	NetworkStatus        ports.NetworkProviderStatusReader
-	NetworkReconcile     ports.NetworkStatusReconciler
-	NetworkResources     ports.NetworkService
-	StorageStore         ports.StorageResourceStore
-	StorageRenderer      ports.StorageProviderRenderer
-	StorageDryRun        ports.StorageProviderDryRun
-	StorageApply         ports.StorageProviderApply
-	StorageStatus        ports.StorageProviderStatusReader
-	StorageReconcile     ports.StorageStatusReconciler
-	StorageResources     ports.StorageService
+	Metadata              ports.MetadataStore
+	MessageBus            ports.MessageBus
+	Cache                 ports.CacheStore
+	ObjectStore           ports.ObjectStore
+	VectorStore           ports.VectorStore
+	VectorStoreResources  ports.VectorStoreService
+	ImageRegistry         ports.ImageRegistry
+	GPUInventory          ports.GPUInventory
+	WorkloadRuntime       ports.WorkloadRuntime
+	WorkloadRenderer      ports.WorkloadRenderer
+	WorkloadAdmission     ports.WorkloadAdmission
+	WorkloadPlanAudit     ports.WorkloadPlanAuditStore
+	WorkloadDryRun        ports.WorkloadProviderDryRun
+	WorkloadApply         ports.WorkloadProviderApply
+	WorkloadReconcile     ports.WorkloadStatusReconciler
+	WorkloadController    ports.WorkloadReconcileController
+	WorkloadStatus        ports.WorkloadProviderStatusReader
+	WorkloadInstances     ports.WorkloadInstanceOrchestrator
+	WorkloadStore         ports.WorkloadInstanceStore
+	WorkloadOperations    ports.WorkloadOperationStore
+	WorkloadIdentity      ports.WorkloadIdentityService
+	InstanceService       ports.WorkloadInstanceService
+	InstanceOps           ports.WorkloadInstanceOps
+	InstanceObservability ports.InstanceObservability
+	NetworkStore          ports.NetworkResourceStore
+	NetworkRenderer       ports.NetworkProviderRenderer
+	NetworkDryRun         ports.NetworkProviderDryRun
+	NetworkApply          ports.NetworkProviderApply
+	NetworkStatus         ports.NetworkProviderStatusReader
+	NetworkReconcile      ports.NetworkStatusReconciler
+	NetworkResources      ports.NetworkService
+	StorageStore          ports.StorageResourceStore
+	StorageRenderer       ports.StorageProviderRenderer
+	StorageDryRun         ports.StorageProviderDryRun
+	StorageApply          ports.StorageProviderApply
+	StorageStatus         ports.StorageProviderStatusReader
+	StorageReconcile      ports.StorageStatusReconciler
+	StorageResources      ports.StorageService
 }
 
 // Deps holds all initialized external dependencies.
@@ -90,19 +91,26 @@ func NewCapabilities(db *pgxpool.Pool, js nats.JetStreamContext, redisClient *re
 
 func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redisClient *redis.Client, cfg Config) (Capabilities, error) {
 	metadata := postgresadapter.NewMetadataStore(db)
-	gpuInventory := gpu.NotConfigured{}
-	planner := runtimeadapter.NewPlanningRuntime(runtimeadapter.WithGPUInventory(gpuInventory))
 	admission := runtimeadapter.NewLocalAdmissionGuard()
 	audit := runtimeadapter.NewMetadataPlanAuditStore(metadata)
 	dryRun, apply, statusReader, kubeClient, err := workloadProviderAdapters(cfg)
 	if err != nil {
 		return Capabilities{}, err
 	}
+	gpuInventory, err := gpuInventoryAdapter(cfg, kubeClient)
+	if err != nil {
+		return Capabilities{}, err
+	}
+	planner := runtimeadapter.NewPlanningRuntime(runtimeadapter.WithGPUInventory(gpuInventory))
 	lifecycle, err := workloadLifecycleExecutor(cfg, kubeClient)
 	if err != nil {
 		return Capabilities{}, err
 	}
 	instanceOps, err := workloadOpsExecutor(cfg, kubeClient)
+	if err != nil {
+		return Capabilities{}, err
+	}
+	instanceObservability, err := instanceObservabilityAdapter(cfg)
 	if err != nil {
 		return Capabilities{}, err
 	}
@@ -125,9 +133,68 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	workloadIdentity := runtimeadapter.NewMetadataWorkloadIdentityService(metadata)
 	networkStore := runtimeadapter.NewMetadataNetworkStore(metadata)
 	networkRenderer := runtimeadapter.NewKubeOVNNetworkRenderer()
-	networkProvider := runtimeadapter.NewKubeOVNNetworkProviderAdapter(kubeClient)
+	networkProvider, err := networkProviderAdapter(cfg, kubeClient)
+	if err != nil {
+		return Capabilities{}, err
+	}
+	networkServiceOptions := []runtimeadapter.NetworkServiceOption{
+		runtimeadapter.WithNetworkResourceStore(networkStore),
+	}
+	if strings.TrimSpace(cfg.NetworkProvider) == "kubeovn_rest" {
+		networkServiceOptions = append(networkServiceOptions, runtimeadapter.WithNetworkRouteProvider(
+			networkRenderer,
+			networkProvider,
+			networkProvider,
+			networkProvider,
+			runtimeadapter.NetworkProviderExecutionConfig{
+				UserID:          cfg.NetworkProviderUserID,
+				PermissionProof: cfg.NetworkProviderPermissionProof,
+			},
+		))
+	}
 	storageStore := runtimeadapter.NewMetadataStorageStore(metadata)
 	storageProvider := runtimeadapter.NewKubernetesStorageProviderAdapter(kubeClient)
+	objectStore, err := objectStoreAdapter(cfg)
+	if err != nil {
+		return Capabilities{}, err
+	}
+	storageServiceOptions := []runtimeadapter.StorageServiceOption{
+		runtimeadapter.WithStorageResourceStore(storageStore),
+	}
+	switch strings.TrimSpace(cfg.StorageProvider) {
+	case "", "local", "not_configured":
+	case "kubernetes_rest":
+		if strings.TrimSpace(cfg.StorageProviderUserID) == "" || strings.TrimSpace(cfg.StorageProviderPermissionProof) == "" {
+			return Capabilities{}, fmt.Errorf("%w: storage provider requires STORAGE_PROVIDER_USER_ID and STORAGE_PROVIDER_PERMISSION_PROOF", ports.ErrInvalid)
+		}
+		storageProvider = runtimeadapter.NewKubernetesStorageProviderAdapter(
+			kubeClient,
+			runtimeadapter.WithKubernetesStorageProviderApplyEnabled(cfg.StorageProviderApplyEnabled),
+		)
+		storageServiceOptions = append(storageServiceOptions, runtimeadapter.WithStorageProvider(
+			runtimeadapter.NewKubernetesStorageRenderer(),
+			storageProvider,
+			storageProvider,
+			storageProvider,
+			runtimeadapter.StorageProviderExecutionConfig{
+				UserID:          cfg.StorageProviderUserID,
+				PermissionProof: cfg.StorageProviderPermissionProof,
+			},
+		))
+	default:
+		return Capabilities{}, fmt.Errorf("%w: unsupported storage provider %q", ports.ErrUnsupported, cfg.StorageProvider)
+	}
+	if strings.TrimSpace(cfg.ObjectStoreProvider) == "minio" {
+		storageServiceOptions = append(storageServiceOptions, runtimeadapter.WithStorageObjectStore(objectStore))
+	}
+	vectorStore, err := vectorStoreAdapter(cfg)
+	if err != nil {
+		return Capabilities{}, err
+	}
+	vectorStoreServiceOptions := []runtimeadapter.VectorStoreServiceOption{}
+	if strings.TrimSpace(cfg.VectorStoreProvider) == "milvus" {
+		vectorStoreServiceOptions = append(vectorStoreServiceOptions, runtimeadapter.WithVectorStoreBackend(vectorStore))
+	}
 	orchestrator := runtimeadapter.NewLocalInstanceOrchestrator(
 		planner,
 		runtimeadapter.NewKubernetesDryRunRenderer(planner),
@@ -144,9 +211,9 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		Metadata:             metadata,
 		MessageBus:           natsadapter.NewMessageBus(js),
 		Cache:                redisadapter.NewCacheStore(redisClient),
-		ObjectStore:          objectstore.NotConfigured{},
-		VectorStore:          vectorstore.NotConfigured{},
-		VectorStoreResources: runtimeadapter.NewLocalVectorStoreService(),
+		ObjectStore:          objectStore,
+		VectorStore:          vectorStore,
+		VectorStoreResources: runtimeadapter.NewLocalVectorStoreService(vectorStoreServiceOptions...),
 		ImageRegistry:        registry.NotConfigured{},
 		GPUInventory:         gpuInventory,
 		WorkloadRuntime:      planner,
@@ -170,22 +237,124 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 			runtimeadapter.WithInstanceLifecycleExecutor(lifecycle),
 			runtimeadapter.WithWorkloadIdentityService(workloadIdentity),
 		),
-		InstanceOps:      instanceOps,
-		NetworkStore:     networkStore,
-		NetworkRenderer:  networkRenderer,
-		NetworkDryRun:    networkProvider,
-		NetworkApply:     networkProvider,
-		NetworkStatus:    networkProvider,
-		NetworkReconcile: runtimeadapter.NewLocalNetworkStatusReconciler(networkStore),
-		NetworkResources: runtimeadapter.NewLocalNetworkService(runtimeadapter.WithNetworkResourceStore(networkStore)),
-		StorageStore:     storageStore,
-		StorageRenderer:  runtimeadapter.NewKubernetesStorageRenderer(),
-		StorageDryRun:    storageProvider,
-		StorageApply:     storageProvider,
-		StorageStatus:    storageProvider,
-		StorageReconcile: runtimeadapter.NewLocalStorageStatusReconciler(storageStore),
-		StorageResources: runtimeadapter.NewLocalStorageService(runtimeadapter.WithStorageResourceStore(storageStore)),
+		InstanceOps:           instanceOps,
+		InstanceObservability: instanceObservability,
+		NetworkStore:          networkStore,
+		NetworkRenderer:       networkRenderer,
+		NetworkDryRun:         networkProvider,
+		NetworkApply:          networkProvider,
+		NetworkStatus:         networkProvider,
+		NetworkReconcile:      runtimeadapter.NewLocalNetworkStatusReconciler(networkStore),
+		NetworkResources:      runtimeadapter.NewLocalNetworkService(networkServiceOptions...),
+		StorageStore:          storageStore,
+		StorageRenderer:       runtimeadapter.NewKubernetesStorageRenderer(),
+		StorageDryRun:         storageProvider,
+		StorageApply:          storageProvider,
+		StorageStatus:         storageProvider,
+		StorageReconcile:      runtimeadapter.NewLocalStorageStatusReconciler(storageStore),
+		StorageResources:      runtimeadapter.NewLocalStorageService(storageServiceOptions...),
 	}, nil
+}
+
+func gpuInventoryAdapter(cfg Config, kubeClient *runtimeadapter.KubernetesRESTClient) (ports.GPUInventory, error) {
+	switch strings.TrimSpace(cfg.GPUInventoryProvider) {
+	case "", "local", "not_configured":
+		return gpu.NotConfigured{}, nil
+	case "kubernetes_rest":
+		client := kubeClient
+		if client == nil {
+			var err error
+			client, err = runtimeadapter.NewKubernetesRESTClient(kubernetesRESTClientConfig(cfg))
+			if err != nil {
+				return nil, err
+			}
+		}
+		return runtimeadapter.NewKubernetesGPUInventory(client), nil
+	default:
+		return nil, fmt.Errorf("%w: unsupported GPU inventory provider %q", ports.ErrUnsupported, cfg.GPUInventoryProvider)
+	}
+}
+
+func networkProviderAdapter(cfg Config, kubeClient *runtimeadapter.KubernetesRESTClient) (*runtimeadapter.KubeOVNNetworkProviderAdapter, error) {
+	switch strings.TrimSpace(cfg.NetworkProvider) {
+	case "", "local", "not_configured":
+		return runtimeadapter.NewKubeOVNNetworkProviderAdapter(kubeClient), nil
+	case "kubeovn_rest":
+		if strings.TrimSpace(cfg.NetworkProviderUserID) == "" || strings.TrimSpace(cfg.NetworkProviderPermissionProof) == "" {
+			return nil, fmt.Errorf("%w: network provider requires NETWORK_PROVIDER_USER_ID and NETWORK_PROVIDER_PERMISSION_PROOF", ports.ErrInvalid)
+		}
+		client := kubeClient
+		if client == nil {
+			var err error
+			client, err = runtimeadapter.NewKubernetesRESTClient(kubernetesRESTClientConfig(cfg))
+			if err != nil {
+				return nil, err
+			}
+		}
+		return runtimeadapter.NewKubeOVNNetworkProviderAdapter(
+			client,
+			runtimeadapter.WithKubeOVNNetworkProviderApplyEnabled(cfg.NetworkProviderApplyEnabled),
+		), nil
+	default:
+		return nil, fmt.Errorf("%w: unsupported network provider %q", ports.ErrUnsupported, cfg.NetworkProvider)
+	}
+}
+
+func objectStoreAdapter(cfg Config) (ports.ObjectStore, error) {
+	switch strings.TrimSpace(cfg.ObjectStoreProvider) {
+	case "", "local", "not_configured":
+		return objectstore.NotConfigured{}, nil
+	case "minio":
+		return objectstore.NewMinIOObjectStore(objectstore.MinIOObjectStoreConfig{
+			Endpoint:        cfg.ObjectStoreEndpoint,
+			PublicEndpoint:  cfg.ObjectStorePublicEndpoint,
+			AccessKeyID:     cfg.ObjectStoreAccessKeyID,
+			SecretAccessKey: cfg.ObjectStoreSecretAccessKey,
+			SessionToken:    cfg.ObjectStoreSessionToken,
+			Region:          cfg.ObjectStoreRegion,
+			Secure:          cfg.ObjectStoreSecure,
+			BucketPrefix:    cfg.ObjectStoreBucketPrefix,
+		})
+	default:
+		return nil, fmt.Errorf("%w: unsupported object store provider %q", ports.ErrUnsupported, cfg.ObjectStoreProvider)
+	}
+}
+
+func vectorStoreAdapter(cfg Config) (ports.VectorStore, error) {
+	switch strings.TrimSpace(cfg.VectorStoreProvider) {
+	case "", "local", "not_configured":
+		return vectorstore.NotConfigured{}, nil
+	case "milvus":
+		return vectorstore.NewMilvusVectorStore(vectorstore.MilvusVectorStoreConfig{
+			Endpoint:         cfg.VectorStoreEndpoint,
+			Token:            cfg.VectorStoreToken,
+			Database:         cfg.VectorStoreDatabase,
+			CollectionPrefix: cfg.VectorStoreCollectionPrefix,
+		})
+	default:
+		return nil, fmt.Errorf("%w: unsupported vector store provider %q", ports.ErrUnsupported, cfg.VectorStoreProvider)
+	}
+}
+
+func instanceObservabilityAdapter(cfg Config) (ports.InstanceObservability, error) {
+	switch strings.TrimSpace(cfg.InstanceObservabilityProvider) {
+	case "", "local", "not_configured":
+		return runtimeadapter.NewLocalInstanceObservabilityService(), nil
+	case "prometheus_kubernetes":
+		return runtimeadapter.NewPrometheusInstanceObservability(runtimeadapter.PrometheusInstanceObservabilityConfig{
+			PrometheusURL:                     cfg.InstanceObservabilityPrometheusURL,
+			KubernetesAPIHost:                 cfg.KubernetesAPIHost,
+			KubernetesServiceHost:             cfg.KubernetesServiceHost,
+			KubernetesServicePort:             cfg.KubernetesServicePort,
+			KubernetesBearerToken:             cfg.KubernetesBearerToken,
+			KubernetesServiceAccountTokenFile: cfg.KubernetesServiceAccountTokenFile,
+			KubernetesServiceAccountCAFile:    cfg.KubernetesServiceAccountCAFile,
+			KubernetesFieldManager:            cfg.KubernetesProviderFieldManager,
+			ExecBaseURL:                       cfg.InstanceObservabilityExecBaseURL,
+		})
+	default:
+		return nil, fmt.Errorf("%w: unsupported instance observability provider %q", ports.ErrUnsupported, cfg.InstanceObservabilityProvider)
+	}
 }
 
 func reconcileControllerConfig(cfg Config) ports.ReconcileControllerConfig {
@@ -207,11 +376,7 @@ func workloadProviderAdapters(cfg Config) (ports.WorkloadProviderDryRun, ports.W
 			nil,
 			nil
 	case "kubernetes_rest":
-		client, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
-			Host:         cfg.KubernetesAPIHost,
-			BearerToken:  cfg.KubernetesBearerToken,
-			FieldManager: cfg.KubernetesProviderFieldManager,
-		})
+		client, err := runtimeadapter.NewKubernetesRESTClient(kubernetesRESTClientConfig(cfg))
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -233,11 +398,7 @@ func workloadLifecycleExecutor(cfg Config, kubeClient *runtimeadapter.Kubernetes
 		client := kubeClient
 		if client == nil {
 			var err error
-			client, err = runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
-				Host:         cfg.KubernetesAPIHost,
-				BearerToken:  cfg.KubernetesBearerToken,
-				FieldManager: cfg.KubernetesProviderFieldManager,
-			})
+			client, err = runtimeadapter.NewKubernetesRESTClient(kubernetesRESTClientConfig(cfg))
 			if err != nil {
 				return nil, err
 			}
@@ -259,11 +420,7 @@ func workloadOpsExecutor(cfg Config, kubeClient *runtimeadapter.KubernetesRESTCl
 		client := kubeClient
 		if client == nil {
 			var err error
-			client, err = runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
-				Host:         cfg.KubernetesAPIHost,
-				BearerToken:  cfg.KubernetesBearerToken,
-				FieldManager: cfg.KubernetesProviderFieldManager,
-			})
+			client, err = runtimeadapter.NewKubernetesRESTClient(kubernetesRESTClientConfig(cfg))
 			if err != nil {
 				return nil, err
 			}
@@ -271,6 +428,18 @@ func workloadOpsExecutor(cfg Config, kubeClient *runtimeadapter.KubernetesRESTCl
 		return runtimeadapter.NewKubernetesInstanceOps(client, runtimeadapter.WithKubernetesInstanceOpsEnabled(cfg.WorkloadOpsEnabled)), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported workload ops provider %q", ports.ErrUnsupported, cfg.WorkloadOpsProvider)
+	}
+}
+
+func kubernetesRESTClientConfig(cfg Config) runtimeadapter.KubernetesRESTClientConfig {
+	return runtimeadapter.KubernetesRESTClientConfig{
+		Host:            cfg.KubernetesAPIHost,
+		ServiceHost:     cfg.KubernetesServiceHost,
+		ServicePort:     cfg.KubernetesServicePort,
+		BearerToken:     cfg.KubernetesBearerToken,
+		BearerTokenFile: cfg.KubernetesServiceAccountTokenFile,
+		CAFile:          cfg.KubernetesServiceAccountCAFile,
+		FieldManager:    cfg.KubernetesProviderFieldManager,
 	}
 }
 

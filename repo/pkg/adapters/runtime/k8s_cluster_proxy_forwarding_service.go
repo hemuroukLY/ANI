@@ -3,6 +3,9 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -129,6 +132,73 @@ func (s *k8sClusterProxyForwardingService) GetKubeconfig(ctx context.Context, re
 	return s.base.GetKubeconfig(ctx, req)
 }
 
+func (s *k8sClusterProxyForwardingService) ListWorkloads(ctx context.Context, req ports.K8sClusterWorkloadListRequest) ([]ports.K8sClusterWorkloadRecord, error) {
+	if s.base == nil {
+		return nil, fmt.Errorf("%w: base k8s cluster service is required", ports.ErrNotConfigured)
+	}
+	cluster, err := s.base.GetCluster(ctx, ports.K8sClusterGetRequest{TenantID: req.TenantID, ClusterID: req.ClusterID})
+	if err != nil {
+		return nil, err
+	}
+	if cluster.State != ports.K8sClusterStateRunning {
+		return nil, fmt.Errorf("%w: list workloads requires a running k8s cluster", ports.ErrConflict)
+	}
+	if !cluster.RealProvider {
+		return s.base.ListWorkloads(ctx, req)
+	}
+	if s.resolver == nil {
+		return nil, fmt.Errorf("%w: k8s cluster proxy target resolver is required", ports.ErrNotConfigured)
+	}
+	target, err := s.resolver.ResolveK8sClusterProxyTarget(ctx, ports.K8sClusterGetRequest{TenantID: req.TenantID, ClusterID: req.ClusterID})
+	if err != nil {
+		return nil, err
+	}
+	if target.TenantID != req.TenantID || target.ClusterID != req.ClusterID {
+		return nil, fmt.Errorf("%w: resolved k8s proxy target does not match request identity", ports.ErrInvalid)
+	}
+	paths, err := k8sWorkloadListPaths(req.Namespace, req.Kind)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ports.K8sClusterWorkloadRecord, 0)
+	for _, workloadPath := range paths {
+		upstreamURL, err := k8sProxyUpstreamURL(target.Server, workloadPath.path, nil)
+		if err != nil {
+			return nil, err
+		}
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("Accept", "application/json")
+		if target.BearerToken != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+target.BearerToken)
+		}
+		client, err := s.httpClientForTarget(target)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			return nil, err
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			return nil, fmt.Errorf("%w: Kubernetes workload list returned HTTP %d", ports.ErrInvalid, resp.StatusCode)
+		}
+		records, err := k8sWorkloadsFromListDocument(workloadPath.kind, body)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, records...)
+	}
+	return items, nil
+}
+
 func (s *k8sClusterProxyForwardingService) Proxy(ctx context.Context, req ports.K8sClusterProxyRequest) (ports.K8sClusterProxyRecord, error) {
 	if s.base == nil {
 		return ports.K8sClusterProxyRecord{}, fmt.Errorf("%w: base k8s cluster service is required", ports.ErrNotConfigured)
@@ -180,7 +250,11 @@ func (s *k8sClusterProxyForwardingService) Proxy(ctx context.Context, req ports.
 	if target.BearerToken != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+target.BearerToken)
 	}
-	resp, err := s.httpClient.Do(httpReq)
+	client, err := s.httpClientForTarget(target)
+	if err != nil {
+		return ports.K8sClusterProxyRecord{}, err
+	}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return ports.K8sClusterProxyRecord{}, err
 	}
@@ -206,6 +280,50 @@ func (s *k8sClusterProxyForwardingService) Proxy(ctx context.Context, req ports.
 	}, nil
 }
 
+func (s *k8sClusterProxyForwardingService) httpClientForTarget(target ports.K8sClusterProxyTarget) (*http.Client, error) {
+	if target.CAData == "" && target.ClientCertificateData == "" && target.ClientKeyData == "" {
+		return s.httpClient, nil
+	}
+	certPEM, err := decodeKubeconfigPEM("client certificate", target.ClientCertificateData)
+	if err != nil {
+		return nil, err
+	}
+	keyPEM, err := decodeKubeconfigPEM("client key", target.ClientKeyData)
+	if err != nil {
+		return nil, err
+	}
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid k8s proxy client certificate: %v", ports.ErrInvalid, err)
+	}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}
+	if target.CAData != "" {
+		caPEM, err := decodeKubeconfigPEM("certificate authority", target.CAData)
+		if err != nil {
+			return nil, err
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("%w: invalid k8s proxy certificate authority data", ports.ErrInvalid)
+		}
+		tlsConfig.RootCAs = pool
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = tlsConfig
+	return &http.Client{Transport: transport, Timeout: s.httpClient.Timeout}, nil
+}
+
+func decodeKubeconfigPEM(label string, value string) ([]byte, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, fmt.Errorf("%w: k8s proxy %s data is required", ports.ErrInvalid, label)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value))
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid k8s proxy %s data: %v", ports.ErrInvalid, label, err)
+	}
+	return decoded, nil
+}
+
 func k8sProxyUpstreamURL(server string, path string, query map[string]string) (string, error) {
 	server = strings.TrimRight(strings.TrimSpace(server), "/")
 	if server == "" {
@@ -221,6 +339,206 @@ func k8sProxyUpstreamURL(server string, path string, query map[string]string) (s
 	}
 	parsed.RawQuery = ""
 	return parsed.String() + path + querySuffix(values.Encode()), nil
+}
+
+type k8sWorkloadListPath struct {
+	kind string
+	path string
+}
+
+func k8sWorkloadListPaths(namespace string, kind string) ([]k8sWorkloadListPath, error) {
+	kind = strings.TrimSpace(kind)
+	if kind != "" {
+		path, err := k8sWorkloadListPathForKind(namespace, kind)
+		if err != nil {
+			return nil, err
+		}
+		return []k8sWorkloadListPath{{kind: canonicalK8sWorkloadKind(kind), path: path}}, nil
+	}
+	kinds := []string{"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"}
+	paths := make([]k8sWorkloadListPath, 0, len(kinds))
+	for _, workloadKind := range kinds {
+		path, err := k8sWorkloadListPathForKind(namespace, workloadKind)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, k8sWorkloadListPath{kind: workloadKind, path: path})
+	}
+	return paths, nil
+}
+
+func k8sWorkloadListPathForKind(namespace string, kind string) (string, error) {
+	namespace = strings.TrimSpace(namespace)
+	canonical := canonicalK8sWorkloadKind(kind)
+	var prefix string
+	switch canonical {
+	case "Deployment":
+		prefix = "/apis/apps/v1"
+		if namespace != "" {
+			return prefix + "/namespaces/" + url.PathEscape(namespace) + "/deployments", nil
+		}
+		return prefix + "/deployments", nil
+	case "StatefulSet":
+		prefix = "/apis/apps/v1"
+		if namespace != "" {
+			return prefix + "/namespaces/" + url.PathEscape(namespace) + "/statefulsets", nil
+		}
+		return prefix + "/statefulsets", nil
+	case "DaemonSet":
+		prefix = "/apis/apps/v1"
+		if namespace != "" {
+			return prefix + "/namespaces/" + url.PathEscape(namespace) + "/daemonsets", nil
+		}
+		return prefix + "/daemonsets", nil
+	case "Job":
+		prefix = "/apis/batch/v1"
+		if namespace != "" {
+			return prefix + "/namespaces/" + url.PathEscape(namespace) + "/jobs", nil
+		}
+		return prefix + "/jobs", nil
+	case "CronJob":
+		prefix = "/apis/batch/v1"
+		if namespace != "" {
+			return prefix + "/namespaces/" + url.PathEscape(namespace) + "/cronjobs", nil
+		}
+		return prefix + "/cronjobs", nil
+	default:
+		return "", fmt.Errorf("%w: unsupported workload kind %q", ports.ErrInvalid, kind)
+	}
+}
+
+func canonicalK8sWorkloadKind(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "deployment", "deployments":
+		return "Deployment"
+	case "statefulset", "statefulsets":
+		return "StatefulSet"
+	case "daemonset", "daemonsets":
+		return "DaemonSet"
+	case "job", "jobs":
+		return "Job"
+	case "cronjob", "cronjobs":
+		return "CronJob"
+	default:
+		return strings.TrimSpace(kind)
+	}
+}
+
+func k8sWorkloadsFromListDocument(kind string, body []byte) ([]ports.K8sClusterWorkloadRecord, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return nil, fmt.Errorf("%w: invalid Kubernetes workload list response: %v", ports.ErrInvalid, err)
+	}
+	rawItems, ok := doc["items"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("%w: Kubernetes workload list response must include items", ports.ErrInvalid)
+	}
+	items := make([]ports.K8sClusterWorkloadRecord, 0, len(rawItems))
+	for _, raw := range rawItems {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%w: Kubernetes workload item must be an object", ports.ErrInvalid)
+		}
+		record, err := k8sWorkloadFromObject(kind, item)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, record)
+	}
+	return items, nil
+}
+
+func k8sWorkloadFromObject(kind string, item map[string]any) (ports.K8sClusterWorkloadRecord, error) {
+	metadata, _ := item["metadata"].(map[string]any)
+	name, _ := metadata["name"].(string)
+	namespace, _ := metadata["namespace"].(string)
+	if strings.TrimSpace(name) == "" || strings.TrimSpace(namespace) == "" {
+		return ports.K8sClusterWorkloadRecord{}, fmt.Errorf("%w: Kubernetes workload metadata.name and metadata.namespace are required", ports.ErrInvalid)
+	}
+	createdAt := time.Time{}
+	if value, _ := metadata["creationTimestamp"].(string); strings.TrimSpace(value) != "" {
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return ports.K8sClusterWorkloadRecord{}, fmt.Errorf("%w: invalid Kubernetes workload creationTimestamp: %v", ports.ErrInvalid, err)
+		}
+		createdAt = parsed.UTC()
+	}
+	spec, _ := item["spec"].(map[string]any)
+	status, _ := item["status"].(map[string]any)
+	replicas := intFromK8sNumber(spec["replicas"])
+	readyReplicas := intFromK8sNumber(status["readyReplicas"])
+	canonicalKind := canonicalK8sWorkloadKind(kind)
+	if canonicalKind == "DaemonSet" {
+		replicas = intFromK8sNumber(status["desiredNumberScheduled"])
+		readyReplicas = intFromK8sNumber(status["numberReady"])
+	}
+	if canonicalKind == "Job" {
+		replicas = firstPositiveInt(intFromK8sNumber(spec["completions"]), intFromK8sNumber(spec["parallelism"]))
+		readyReplicas = intFromK8sNumber(status["succeeded"])
+	}
+	return ports.K8sClusterWorkloadRecord{
+		Name:          strings.TrimSpace(name),
+		Namespace:     strings.TrimSpace(namespace),
+		Kind:          canonicalKind,
+		Replicas:      replicas,
+		ReadyReplicas: readyReplicas,
+		Image:         firstK8sWorkloadContainerImage(spec),
+		Status:        k8sWorkloadStatusFromObject(canonicalKind, replicas, readyReplicas, status),
+		CreatedAt:     createdAt,
+	}, nil
+}
+
+func intFromK8sNumber(value any) int {
+	switch typed := value.(type) {
+	case float64:
+		return int(typed)
+	case int:
+		return typed
+	default:
+		return 0
+	}
+}
+
+func firstPositiveInt(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstK8sWorkloadContainerImage(spec map[string]any) string {
+	if len(spec) == 0 {
+		return ""
+	}
+	template, _ := spec["template"].(map[string]any)
+	templateSpec, _ := template["spec"].(map[string]any)
+	containers, _ := templateSpec["containers"].([]any)
+	if len(containers) == 0 {
+		jobTemplate, _ := spec["jobTemplate"].(map[string]any)
+		jobSpec, _ := jobTemplate["spec"].(map[string]any)
+		if len(jobSpec) == 0 {
+			return ""
+		}
+		return firstK8sWorkloadContainerImage(jobSpec)
+	}
+	container, _ := containers[0].(map[string]any)
+	image, _ := container["image"].(string)
+	return strings.TrimSpace(image)
+}
+
+func k8sWorkloadStatusFromObject(kind string, replicas int, readyReplicas int, status map[string]any) ports.K8sWorkloadStatus {
+	if intFromK8sNumber(status["failed"]) > 0 {
+		return ports.K8sWorkloadFailed
+	}
+	if kind == "Job" && replicas > 0 && readyReplicas >= replicas {
+		return ports.K8sWorkloadSucceeded
+	}
+	if replicas > 0 && readyReplicas >= replicas {
+		return ports.K8sWorkloadRunning
+	}
+	return ports.K8sWorkloadPending
 }
 
 func k8sProxyRequestBody(body map[string]any) ([]byte, error) {
