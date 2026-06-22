@@ -188,6 +188,11 @@ func (c *KubernetesRESTClient) Apply(ctx context.Context, request ports.Workload
 	}, nil
 }
 
+func (c *KubernetesRESTClient) Health(ctx context.Context) error {
+	_, err := c.do(ctx, http.MethodGet, c.host+"/version", "", nil)
+	return err
+}
+
 func (c *KubernetesRESTClient) ApplyManifests(ctx context.Context, manifests []ports.WorkloadManifest) ([]string, error) {
 	if len(manifests) == 0 {
 		return nil, fmt.Errorf("%w: at least one manifest is required for Kubernetes apply", ports.ErrInvalid)

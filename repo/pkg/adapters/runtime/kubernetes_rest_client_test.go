@@ -73,6 +73,22 @@ func TestKubernetesRESTClientEnforcesRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestKubernetesRESTClientHealthCallsVersion(t *testing.T) {
+	var gotPath string
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotPath = r.URL.Path
+		return jsonResponse(http.StatusOK, `{"gitVersion":"v1.36.1"}`), nil
+	})
+
+	client := newTestKubernetesRESTClient(t, transport)
+	if err := client.Health(context.Background()); err != nil {
+		t.Fatalf("Health() error = %v", err)
+	}
+	if gotPath != "/version" {
+		t.Fatalf("path = %q, want /version", gotPath)
+	}
+}
+
 func TestKubernetesRESTClientUsesInClusterServiceAccountWhenHostOmitted(t *testing.T) {
 	tokenPath := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(tokenPath, []byte("service-account-token\n"), 0o600); err != nil {

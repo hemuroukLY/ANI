@@ -159,5 +159,44 @@ func dependencyProbeChecks(deps *Deps) []probeCheck {
 				return deps.Redis.Ping(ctx).Err()
 			},
 		},
+		{
+			name: "object-store",
+			run: func(ctx context.Context) error {
+				if deps == nil || deps.Ports.ObjectStore == nil {
+					return nil
+				}
+				err := deps.Ports.ObjectStore.Health(ctx)
+				if errors.Is(err, ports.ErrNotConfigured) {
+					return nil
+				}
+				return err
+			},
+		},
+		{
+			name: "vector-store",
+			run: func(ctx context.Context) error {
+				if deps == nil || deps.Ports.VectorStore == nil {
+					return nil
+				}
+				err := deps.Ports.VectorStore.Health(ctx)
+				if errors.Is(err, ports.ErrNotConfigured) {
+					return nil
+				}
+				return err
+			},
+		},
+		{
+			name: "kubernetes-api",
+			run: func(ctx context.Context) error {
+				if deps == nil || deps.Ports.KubernetesAPI == nil {
+					return nil
+				}
+				err := deps.Ports.KubernetesAPI.Health(ctx)
+				if errors.Is(err, ports.ErrNotConfigured) {
+					return nil
+				}
+				return err
+			},
+		},
 	}
 }

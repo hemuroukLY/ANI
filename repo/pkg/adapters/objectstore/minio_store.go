@@ -100,6 +100,26 @@ func NewMinIOObjectStore(config MinIOObjectStoreConfig) (*MinIOObjectStore, erro
 	}, nil
 }
 
+func (s *MinIOObjectStore) Health(ctx context.Context) error {
+	target := *s.endpoint
+	target.Path = "/"
+	target.RawPath = ""
+	target.RawQuery = ""
+	req, err := s.newSignedRequest(ctx, http.MethodGet, target, nil, "")
+	if err != nil {
+		return err
+	}
+	resp, err := s.doRequest(req)
+	if err != nil {
+		return err
+	}
+	defer closeBody(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return minIOHTTPError(resp.StatusCode, "health")
+	}
+	return nil
+}
+
 func (s *MinIOObjectStore) EnsureBucket(ctx context.Context, class ports.BucketClass) error {
 	bucket, err := s.bucketName(class)
 	if err != nil {

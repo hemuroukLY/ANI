@@ -28,6 +28,7 @@ type Capabilities struct {
 	Metadata              ports.MetadataStore
 	MessageBus            ports.MessageBus
 	Cache                 ports.CacheStore
+	KubernetesAPI         ports.HealthChecker
 	ObjectStore           ports.ObjectStore
 	VectorStore           ports.VectorStore
 	VectorStoreResources  ports.VectorStoreService
@@ -211,6 +212,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		Metadata:             metadata,
 		MessageBus:           natsadapter.NewMessageBus(js),
 		Cache:                redisadapter.NewCacheStore(redisClient),
+		KubernetesAPI:        kubeClient,
 		ObjectStore:          objectStore,
 		VectorStore:          vectorStore,
 		VectorStoreResources: runtimeadapter.NewLocalVectorStoreService(vectorStoreServiceOptions...),

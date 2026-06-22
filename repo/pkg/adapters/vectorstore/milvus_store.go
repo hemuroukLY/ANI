@@ -139,7 +139,15 @@ func (s *MilvusVectorStore) Delete(ctx context.Context, ref ports.VectorCollecti
 	return s.doMilvus(ctx, "/v2/vectordb/entities/delete", body, nil, nil)
 }
 
-func (s *MilvusVectorStore) Health(ctx context.Context, ref ports.VectorCollectionRef) (ports.VectorCollectionHealth, error) {
+func (s *MilvusVectorStore) Health(ctx context.Context) error {
+	body := map[string]any{}
+	if s.database != "" {
+		body["dbName"] = s.database
+	}
+	return s.doMilvus(ctx, "/v2/vectordb/collections/list", body, nil, nil)
+}
+
+func (s *MilvusVectorStore) CollectionHealth(ctx context.Context, ref ports.VectorCollectionRef) (ports.VectorCollectionHealth, error) {
 	body := s.collectionPayload(ref)
 	var response milvusResponse
 	err := s.doMilvus(ctx, "/v2/vectordb/collections/describe", body, &response, nil)

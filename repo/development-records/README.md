@@ -47,6 +47,7 @@
 | r-p0-1-gateway-rate-limit.md | R-P0-1 gateway rate limit：`RateLimit(store)` 复用 gateway shared store 做 per-tenant + method + route-class 窗口计数，超限返回 `429 RATE_LIMIT_EXCEEDED`；新增 `make validate-gateway-ratelimit`；local/logic verified，不标 production ready | Execution（Core） |
 | r-p0-2-gateway-idempotency-replay.md | R-P0-2 gateway idempotency replay：`Idempotency(store)` 对 mutating 请求写入 processing 哨兵，完成后缓存并回放首次响应，处理中重复请求返回 `409 IDEMPOTENCY_IN_PROGRESS`；新增 `make validate-gateway-idempotency`；local/logic verified，不标 production ready | Execution（Core） |
 | r-p0-3-adapter-resilience-timeout.md | R-P0-3 adapter per-call timeout：新增 `pkg/adapters/resilience` Timeout 骨架，Kubernetes REST client、MinIO、Milvus 外部 HTTP 调用通过 `RequestTimeout` 注入 deadline；新增 `make validate-adapter-resilience-timeout`；local/logic verified，不标 production ready | Execution（Core） |
+| r-p0-4-readyz-dataplane-health.md | R-P0-4 data-plane readyz：ObjectStore、VectorStore、Kubernetes API health 接入 `pkg/bootstrap/probes.go`；MinIO/Milvus/Kubernetes REST client 具备轻量 health 调用；新增 `make validate-readyz-dataplane-live-gate` local gate（未执行真实后端 kill）；local/logic verified，不标 production ready | Execution（Core） |
 
 ### Sprint 13 Planning（2026-06）
 

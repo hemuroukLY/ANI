@@ -81,6 +81,35 @@ func TestMilvusVectorStoreEnforcesRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestMilvusVectorStoreHealthListsCollections(t *testing.T) {
+	var requestBody map[string]any
+	client := &http.Client{Transport: vectorRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v2/vectordb/collections/list" {
+			t.Fatalf("request = %s %s, want POST /v2/vectordb/collections/list", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		return milvusTestJSONResponse(http.StatusOK, `{"code":0,"data":[]}`), nil
+	})}
+
+	store, err := NewMilvusVectorStore(MilvusVectorStoreConfig{
+		Endpoint:   "http://milvus.test",
+		Database:   "ani",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("NewMilvusVectorStore() error = %v", err)
+	}
+
+	if err := store.Health(context.Background()); err != nil {
+		t.Fatalf("Health() error = %v", err)
+	}
+	if requestBody["dbName"] != "ani" {
+		t.Fatalf("request body = %#v, want dbName", requestBody)
+	}
+}
+
 func TestMilvusVectorStoreUpsertPostsRecordsToEntitiesEndpoint(t *testing.T) {
 	t.Parallel()
 
@@ -188,9 +217,9 @@ func TestMilvusVectorStoreMapsNotFoundHealth(t *testing.T) {
 		t.Fatalf("NewMilvusVectorStore() error = %v", err)
 	}
 
-	health, err := store.Health(context.Background(), ports.VectorCollectionRef{TenantID: "tenant-a", KBID: "missing"})
+	health, err := store.CollectionHealth(context.Background(), ports.VectorCollectionRef{TenantID: "tenant-a", KBID: "missing"})
 	if err != nil {
-		t.Fatalf("Health() error = %v", err)
+		t.Fatalf("CollectionHealth() error = %v", err)
 	}
 	if health.Ready || !strings.Contains(health.Reason, "collection not found") {
 		t.Fatalf("health = %#v, want not ready with reason", health)

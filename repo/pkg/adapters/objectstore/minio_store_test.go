@@ -75,6 +75,33 @@ func TestMinIOObjectStoreEnforcesRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestMinIOObjectStoreHealthUsesSignedRootRequest(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || r.URL.Path != "/" {
+			t.Fatalf("request = %s %s, want GET /", r.Method, r.URL.Path)
+		}
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256") {
+			t.Fatalf("request missing SigV4 authorization header: %q", r.Header.Get("Authorization"))
+		}
+		return minIOTestResponse(http.StatusOK), nil
+	})}
+
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{
+		Endpoint:        "http://minio.test",
+		AccessKeyID:     "minio",
+		SecretAccessKey: "secret",
+		HTTPClient:      client,
+		Now:             fixedMinIOTestClock,
+	})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+
+	if err := store.Health(context.Background()); err != nil {
+		t.Fatalf("Health() error = %v", err)
+	}
+}
+
 func TestMinIOObjectStoreEnsureBucketTreatsExistingBucketAsReady(t *testing.T) {
 	t.Parallel()
 
