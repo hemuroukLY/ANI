@@ -42,7 +42,7 @@ goal: 执行 ANI Sprint 14 Core 韧性与服务语义计划
 | # | 事实 | 证据（文件:行） | 含义 |
 |---|---|---|---|
 | F1 | async-task 创建走 DB 级幂等：`ON CONFLICT (tenant_id, idempotency_key) DO NOTHING` | `pkg/repo/task_repo.go:98` | 异步任务幂等**已有**，可复用其模式 |
-| F2 | 幂等重放**实现碎片化、不统一**：observability 规则创建走**内存 map** 重放（`local_observability_service.go:77`，**重启/多副本即失效**）；async-task 走 DB `ON CONFLICT`（`task_repo.go:98`）；多数 mutating handler 只**校验** `idempotency_key` 必填、不重放。无统一且持久的重放机制，也无幂等中间件 | `local_observability_service.go:77`、`task_repo.go:98`、`middleware/` 无 idempotency | 不是"空白"，而是"碎片化 + 内存版不持久"，需收敛为一处持久机制 |
+| F2 | Gateway 幂等响应重放已由 R-P0-2 收敛到 middleware：`Idempotency(store)` 对 mutating 请求写入 processing 哨兵，完成后缓存 `{status, content_type, body}`，重复完成请求回放响应，处理中重复请求返回 409；observability 等服务层内存幂等仍保留为局部防线，但 HTTP 重复请求不再进入 handler | `services/ani-gateway/internal/middleware/idempotency.go`、`services/ani-gateway/internal/middleware/idempotency_test.go`、`Makefile:validate-gateway-idempotency` | 统一 gateway 重放本地逻辑已落地；未跑真实 Redis 多副本/故障场景，不标 production ready |
 | F3 | 限流桩已由 R-P0-1 替换：`RateLimit(store)` 使用 gateway shared store 做 per-tenant + route-class 窗口计数，超限返回 429；本批仍仅为 local/logic verified | `services/ani-gateway/internal/middleware/ratelimit.go`、`services/ani-gateway/internal/middleware/ratelimit_test.go`、`Makefile:validate-gateway-ratelimit` | 背压/限流本地逻辑已落地；未跑真实压测/live gate，不标 production ready |
 | F4 | readyz 仅探 postgres/nats/redis；**Milvus 已有 `Health()`**（`milvus_store.go:137`，未接 readyz），MinIO/network/storage/k8s/gpu 无 Health | `pkg/bootstrap/probes.go` 内 `dependencyProbeChecks`；`milvus_store.go:137` | vector 是"接线"，object/k8s 是"新增 Health" |
 | F5 | 重连仅连接期：NATS `MaxReconnects(5)`、pgxpool `HealthCheckPeriod=30s`、go-redis pool 自动重连 | `pkg/bootstrap/nats.go:23-25`、`pkg/bootstrap/db.go:23-27` | 无操作级重试 |
@@ -57,7 +57,7 @@ goal: 执行 ANI Sprint 14 Core 韧性与服务语义计划
 cd repo
 grep -n "checkLimit" services/ani-gateway/internal/middleware/ratelimit.go
 grep -rn "dependencyProbeChecks" pkg/bootstrap/probes.go
-grep -rln "idempoten" services/ani-gateway/internal/middleware/ || echo "NO idempotency middleware (expected)"
+grep -rln "idempoten" services/ani-gateway/internal/middleware/
 grep -rn "circuitbreak\|CircuitBreaker" pkg/ || echo "NO circuit breaker (expected)"
 ```
 
@@ -71,7 +71,7 @@ grep -rn "circuitbreak\|CircuitBreaker" pkg/ || echo "NO circuit breaker (expect
 |---|---|---|---|
 | F11 gateway 无共享存储后端（R-P0-1/2 的前置） | **R-P0-0** 已引入 gateway 共享 store | **P0 前置** | main.go + chain.go + store.go |
 | F3 限流是桩（`checkLimit` 恒 true） | **R-P0-1** 已落地限流背压（依赖 R-P0-0） | **P0** | gateway middleware |
-| F2 幂等重放碎片化（内存版不持久） | **R-P0-2** 统一幂等重放中间件（收敛 + 修内存版缺陷） | **P0** | gateway middleware |
+| F2 幂等重放碎片化（内存版不持久） | **R-P0-2** 已落地统一 gateway 幂等重放中间件（收敛 HTTP 重复请求） | **P0** | gateway middleware |
 | F6 无每调用超时 | **R-P0-3** 每调用超时 + resilience 包骨架 | **P0** | `pkg/adapters/resilience` + 各 adapter |
 | F4 数据面未接 readyz | **R-P0-4** 数据面 readyz | **P0** | ports `Health()` + `probes.go` |
 | F5 无操作级重试（仅连接期）+ F8 无断路器 | **R-P1-5** 重试 + 断路器 | **P1** | `pkg/adapters/resilience`（叠加在 R-P0-3 之上） |
@@ -112,9 +112,9 @@ grep -rn "circuitbreak\|CircuitBreaker" pkg/ || echo "NO circuit breaker (expect
 | # | 事实 | 证据 | 对计划的影响 |
 |---|---|---|---|
 | **F11** | **gateway shared store 前置已由 R-P0-0 建立**：`main.go` 通过 bootstrap 构造 Redis-backed `ports.CacheStore`，`Register(h, store)` 显式接收；middleware 仍不直接 import Redis SDK；audit 落库仍是 `// TODO: batch-write ... via DB pool` | `services/ani-gateway/main.go`、`services/ani-gateway/internal/middleware/chain.go`、`services/ani-gateway/internal/middleware/store.go`、`pkg/bootstrap/redis.go` | R-P0-1/R-P0-2 的共享存储前置已满足；后续批次必须继续通过 store 注入，不得在 middleware 直接依赖 Redis SDK |
-| **F12** | 中间件依赖注入模式已扩展为 `Register(h, store)`：auth client 仍在 `Register` 内构造，RateLimit 已由 R-P0-1 接收 shared store | `chain.go:9-16`、`ratelimit.go` | R-P0-2 应复用同一个 store 注入模式，在 `RateLimit(store)` 之后、`Audit()` 之前接入 |
+| **F12** | 中间件依赖注入模式已扩展为 `Register(h, store)`：auth client 仍在 `Register` 内构造，`RateLimit(store)` 与 `Idempotency(store)` 均接收 shared store | `chain.go:9-16`、`ratelimit.go`、`idempotency.go` | 后续 R-P0-3/R-P0-4 不应破坏现有 middleware 注入顺序 |
 | **F13** | gateway **无中央 Config**；每个 runtime 各自 `gatewayXxxRuntimeConfigFromEnv()` 从 env 取值并构造自己的 client | `services/ani-gateway/*_runtime.go`（network/storage/k8s/gpu/...） | R-P0-3 超时注入落点 = 这些 per-runtime config 函数 + 各自 http.Client 构造，**不是某个中央 config** |
-| **F14** | 本计划命名的 `make validate-gateway-ratelimit` 已由 R-P0-1 新建；其余 `validate-gateway-idempotency`、`validate-readyz-dataplane-live-gate`、`validate-resilience-faultinjection-live-gate`、`validate-ha-failover-live-gate` 仍不存在 | `Makefile` | 后续每批的"验收 gate"仍含"新建该 target"这一步；R-P0-1 gate 已可复跑 |
+| **F14** | 本计划命名的 `make validate-gateway-ratelimit` 已由 R-P0-1 新建，`make validate-gateway-idempotency` 已由 R-P0-2 新建；其余 `validate-readyz-dataplane-live-gate`、`validate-resilience-faultinjection-live-gate`、`validate-ha-failover-live-gate` 仍不存在 | `Makefile` | 后续每批的"验收 gate"仍含"新建该 target"这一步；R-P0-1/R-P0-2 gates 已可复跑 |
 
 **核对命令：**
 ```bash
@@ -305,12 +305,12 @@ func Do(ctx context.Context, p Policy, fn func(context.Context) error) error
 - 仅作用于 POST / 有副作用的 PUT/PATCH；GET 跳过。
 
 **任务步骤：**
-- [ ] 写失败测试：`TestIdempotentReplayReturnsSameResponse`（同 key 两次 POST → 同 body、handler 只执行一次）。
-- [ ] 写失败测试：`TestConcurrentIdempotentInProgressReturns409`。
-- [ ] 跑红 → FAIL。
-- [ ] 实现中间件并装配进 chain。
-- [ ] 跑绿 → PASS。
-- [ ] 提交：`feat(gateway): add idempotent response replay middleware`
+- [x] 写失败测试：`TestIdempotentReplayReturnsSameResponse`（同 key 两次 POST → 同 body、handler 只执行一次）。
+- [x] 写失败测试：`TestConcurrentIdempotentInProgressReturns409`。
+- [x] 跑红 → FAIL（`Idempotency` 未定义）。
+- [x] 实现中间件并装配进 chain。
+- [x] 跑绿 → PASS。
+- [x] 提交：`feat(gateway): add idempotent response replay middleware`
 
 **验收 gate：** `make validate-gateway-idempotency`（包装上述测试）。
 
