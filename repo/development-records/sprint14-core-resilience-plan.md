@@ -5,7 +5,7 @@
 > 记录类型：Planning / Sprint 14 resilience readiness plan
 > 适用范围：ANI Core 生产级韧性与服务语义补齐（仅 Core，不含 Services）
 > 前置 Sprint：Sprint 13（S01–S07 real provider / live gate 已 production-shaped passed）
-> 计划状态：**草案 + Sprint14 分支执行中**。当前分支 `feature/sprint14-core-resilience-semantics` 已完成 R-P0-0..R-P0-4 与 R-P1-5 foundation 批次；这些记录只表示 local/logic verified，不表示主线已激活或 production ready。
+> 计划状态：**草案 + Sprint14 分支执行中**。当前分支 `feature/sprint14-core-resilience-semantics` 已完成 R-P0-0..R-P0-4、R-P1-5 foundation 与 R-P1-6 degradation 批次；这些记录只表示 local/logic verified，不表示主线已激活或 production ready。
 >
 > 被引用入口：`repo/development-records/README.md`（Sprint 14 Planning 草案条目）、`repo/CURRENT-SPRINT.md`（下一冲刺草案前向指针）。AI 可经标准加载顺序发现本文件。
 
@@ -44,7 +44,7 @@ goal: 执行 ANI Sprint 14 Core 韧性与服务语义计划
 | F1 | async-task 创建走 DB 级幂等：`ON CONFLICT (tenant_id, idempotency_key) DO NOTHING` | `pkg/repo/task_repo.go:98` | 异步任务幂等**已有**，可复用其模式 |
 | F2 | Gateway 幂等响应重放已由 R-P0-2 收敛到 middleware：`Idempotency(store)` 对 mutating 请求写入 processing 哨兵，完成后缓存 `{status, content_type, body}`，重复完成请求回放响应，处理中重复请求返回 409；observability 等服务层内存幂等仍保留为局部防线，但 HTTP 重复请求不再进入 handler | `services/ani-gateway/internal/middleware/idempotency.go`、`services/ani-gateway/internal/middleware/idempotency_test.go`、`Makefile:validate-gateway-idempotency` | 统一 gateway 重放本地逻辑已落地；未跑真实 Redis 多副本/故障场景，不标 production ready |
 | F3 | 限流桩已由 R-P0-1 替换：`RateLimit(store)` 使用 gateway shared store 做 per-tenant + route-class 窗口计数，超限返回 429；本批仍仅为 local/logic verified | `services/ani-gateway/internal/middleware/ratelimit.go`、`services/ani-gateway/internal/middleware/ratelimit_test.go`、`Makefile:validate-gateway-ratelimit` | 背压/限流本地逻辑已落地；未跑真实压测/live gate，不标 production ready |
-| F4 | 数据面 readyz 已由 R-P0-4 接线：`dependencyProbeChecks` 除 postgres/nats/redis 外，追加 `object-store`、`vector-store`、`kubernetes-api`；MinIO、Milvus、Kubernetes REST client 均有轻量 `Health(ctx)`；`ports.ErrNotConfigured` 被视为未启用以避免 local profile 误失败。当前 target 仅执行 local gate，未执行真实后端 kill | `pkg/bootstrap/probes.go`；`pkg/ports/{object_store,vector_store,k8s_clusters,health}.go`；`pkg/adapters/{objectstore,vectorstore,runtime}`；`Makefile:validate-readyz-dataplane-live-gate` | 数据面健康信号 local/logic verified；不声明 production ready；强弱依赖降级细分留给 R-P1-6 |
+| F4 | 数据面 readyz 已由 R-P0-4 接线，并由 R-P1-6 细化 strong/weak 降级：postgres/nats/redis/kubernetes-api strong 失败 → `status=fail` + HTTP 503；object-store/vector-store weak 失败 → `status=degraded` + HTTP 200；`ports.ErrNotConfigured` 被视为未启用以避免 local profile 误失败。当前 targets 仅执行 local gate，未执行真实后端 kill/down | `pkg/bootstrap/probes.go`；`pkg/adapters/resilience/degradation.go`；`pkg/ports/{object_store,vector_store,k8s_clusters,health}.go`；`Makefile:validate-readyz-dataplane-live-gate`、`validate-resilience-degradation` | 数据面健康与降级语义 local/logic verified；不声明 production ready |
 | F5 | 操作级重试基础已由 R-P1-5 在 `pkg/adapters/resilience` 落地：`Policy.MaxAttempts/BaseBackoff/MaxBackoff` + `Retryable(err)`；Kubernetes REST 幂等读/观察/dry-run 可通过 `RetryPolicy` 使用，真实 Apply 写路径不重试。MinIO/Milvus retry policy 尚未装配；NATS/pgx/Redis 仍只有连接期重连 | `pkg/adapters/resilience/resilience.go`、`pkg/adapters/runtime/kubernetes_rest_client.go`、`Makefile:validate-resilience-faultinjection-live-gate` | 操作级重试 foundation local/logic verified；真实 fault injection 未执行；MinIO/Milvus 待后续装配 |
 | F6 | Adapter 每调用超时已由 R-P0-3 落地：`pkg/adapters/resilience.Do` 支持 `Policy.Timeout`，Kubernetes REST client、MinIO、Milvus 外部 HTTP 调用均可通过 `RequestTimeout` 注入 deadline；gateway env 装配为 `KUBERNETES_REQUEST_TIMEOUT`、`OBJECT_STORE_REQUEST_TIMEOUT`、`VECTOR_STORE_REQUEST_TIMEOUT`。默认空值仍为 0，且未跑真实故障注入/live gate | `pkg/adapters/resilience/resilience.go`；`pkg/adapters/runtime/kubernetes_rest_client.go`；`pkg/adapters/objectstore/minio_store.go`；`pkg/adapters/vectorstore/milvus_store.go`；`Makefile:validate-adapter-resilience-timeout` | 每调用超时 local/logic verified；不声明 production ready；重试/断路仍留给 R-P1-5 |
 | F10 | Kubernetes REST 非 2xx 错误分类已由 R-P1-5 修正：`400` 等调用方错误仍包 `ports.ErrInvalid`；`429/5xx` 生成可重试 status error；网络错误由 `Retryable()` 分类 | `pkg/adapters/runtime/kubernetes_rest_client.go`、`pkg/adapters/resilience/resilience.go`、`kubernetes_rest_client_test.go` | K8s REST 错误分类 local/logic verified；不代表真实 API server fault injection 已通过 |
@@ -75,12 +75,12 @@ grep -rn "ErrCircuitOpen\|BreakerName\|circuitBreaker" pkg/adapters/resilience p
 | F6 无每调用超时 | **R-P0-3** 已落地每调用超时 + resilience 包骨架 | **P0** | `pkg/adapters/resilience` + Kubernetes REST / MinIO / Milvus |
 | F4 数据面未接 readyz | **R-P0-4** 已落地数据面 readyz health | **P0** | ports `Health()` + `probes.go` |
 | F5 操作级重试 foundation + F8 断路器 foundation | **R-P1-5** 已完成共享 retry/circuit breaker 与 Kubernetes REST 接线；MinIO/Milvus policy 装配仍待后续 | **P1** | `pkg/adapters/resilience` + `pkg/adapters/runtime/kubernetes_rest_client.go` |
-| 降级语义缺失（关联 F4 数据面健康 + F8 断路状态） | **R-P1-6** 优雅降级策略 | **P1** | `resilience/degradation.go` + `probes.go` |
+| 降级语义缺失（关联 F4 数据面健康 + F8 断路状态） | **R-P1-6** 已完成 readyz strong/weak dependency degradation | **P1** | `resilience/degradation.go` + `probes.go` |
 | F7 全线单 endpoint、无 failover | **R-P2-7** 多端点 / failover | **P2** | adapter 多端点 config + installer 拓扑 |
 | F1 async-task 幂等**已有** | 不新建，**被 R-P0-2 复用**其 DB 模式 | — | `pkg/repo/task_repo.go` |
 | F9 SDK↔契约漂移风险（当前门禁已通过） | 非本 Sprint 批次，仅作**约束**：本 Sprint 不得引入新漂移 | — | 由 `validate-sdk-beta` 把关 |
 
-**一句话读法：** §0 的事实里，F2/F3/F4/F6 → P0 四批已完成，F5/F8/F10 的共享 foundation 与 Kubernetes REST 接线已由 R-P1-5 完成，降级语义仍由 R-P1-6 承接，F7 → P2 一批；F1 是可复用的既有能力，F9 是约束项。R-P1-5 尚未证明真实 fault injection，也未完成 MinIO/Milvus retry policy 装配。
+**一句话读法：** §0 的事实里，F2/F3/F4/F6 → P0 四批已完成，F5/F8/F10 的共享 foundation 与 Kubernetes REST 接线已由 R-P1-5 完成，readyz strong/weak 降级语义已由 R-P1-6 完成，F7 → P2 一批；F1 是可复用的既有能力，F9 是约束项。R-P1-5 尚未证明真实 fault injection，也未完成 MinIO/Milvus retry policy 装配；R-P1-6 尚未执行真实后端 down live gate。
 
 ---
 
@@ -114,7 +114,7 @@ grep -rn "ErrCircuitOpen\|BreakerName\|circuitBreaker" pkg/adapters/resilience p
 | **F11** | **gateway shared store 前置已由 R-P0-0 建立**：`main.go` 通过 bootstrap 构造 Redis-backed `ports.CacheStore`，`Register(h, store)` 显式接收；middleware 仍不直接 import Redis SDK；audit 落库仍是 `// TODO: batch-write ... via DB pool` | `services/ani-gateway/main.go`、`services/ani-gateway/internal/middleware/chain.go`、`services/ani-gateway/internal/middleware/store.go`、`pkg/bootstrap/redis.go` | R-P0-1/R-P0-2 的共享存储前置已满足；后续批次必须继续通过 store 注入，不得在 middleware 直接依赖 Redis SDK |
 | **F12** | 中间件依赖注入模式已扩展为 `Register(h, store)`：auth client 仍在 `Register` 内构造，`RateLimit(store)` 与 `Idempotency(store)` 均接收 shared store | `chain.go:9-16`、`ratelimit.go`、`idempotency.go` | 后续 R-P0-3/R-P0-4 不应破坏现有 middleware 注入顺序 |
 | **F13** | gateway **无中央 Config**；每个 runtime 各自 `gatewayXxxRuntimeConfigFromEnv()` 从 env 取值并构造自己的 client | `services/ani-gateway/*_runtime.go`（network/storage/k8s/gpu/...） | R-P0-3 超时注入落点 = 这些 per-runtime config 函数 + 各自 http.Client 构造，**不是某个中央 config** |
-| **F14** | 本计划命名的 `make validate-gateway-ratelimit` 已由 R-P0-1 新建，`make validate-gateway-idempotency` 已由 R-P0-2 新建，`make validate-adapter-resilience-timeout` 已由 R-P0-3 新建，`make validate-readyz-dataplane-live-gate` 已由 R-P0-4 新建，`make validate-resilience-faultinjection-live-gate` 已由 R-P1-5 新建（当前执行 local gate，未真实 kill 后端/网络分区）；`validate-ha-failover-live-gate` 仍不存在 | `Makefile` | 后续每批的"验收 gate"仍含"新建该 target"这一步；已建 gates 均须明确 local vs live 边界 |
+| **F14** | 本计划命名的 `make validate-gateway-ratelimit` 已由 R-P0-1 新建，`make validate-gateway-idempotency` 已由 R-P0-2 新建，`make validate-adapter-resilience-timeout` 已由 R-P0-3 新建，`make validate-readyz-dataplane-live-gate` 已由 R-P0-4 新建，`make validate-resilience-faultinjection-live-gate` 已由 R-P1-5 新建，`make validate-resilience-degradation` 已由 R-P1-6 新建（均为 local gate，未真实 kill 后端/网络分区）；`validate-ha-failover-live-gate` 仍不存在 | `Makefile` | 后续每批的"验收 gate"仍含"新建该 target"这一步；已建 gates 均须明确 local vs live 边界 |
 
 **核对命令：**
 ```bash
@@ -424,13 +424,14 @@ func Do(ctx context.Context, p Policy, fn func(context.Context) error) error
 - 降级表是数据而非分支散落，便于审计。
 
 **任务步骤：**
-- [ ] 写失败测试：`TestWeakDependencyDownYieldsDegradedNotFail`。
-- [ ] 跑红 → FAIL。
-- [ ] 实现依赖等级表 + readyz 映射。
-- [ ] 跑绿 → PASS。
+- [x] 写失败测试：`TestWeakDependencyDownYieldsDegradedNotFail`。
+- [x] 跑红 → FAIL。
+- [x] 实现依赖等级表 + readyz 映射。
+- [x] 跑绿 → PASS。
+- [ ] 真实后端 down live gate 尚未执行。
 - [ ] 提交：`feat(resilience): add explicit dependency degradation policy`
 
-**验收 gate：** `go test ./pkg/bootstrap/ -run Degrad`；真实门禁复用 R-P0-4 live gate（弱依赖 down → degraded 而非 503）。
+**验收 gate：** `make validate-resilience-degradation`（local/logic）；真实门禁复用 R-P0-4 live gate（弱依赖 down → degraded 而非 503），未跑通前不标 production ready。
 
 ---
 

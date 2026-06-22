@@ -19,6 +19,28 @@ func TestDoEnforcesTimeout(t *testing.T) {
 	}
 }
 
+func TestDependencyModeFor(t *testing.T) {
+	tests := []struct {
+		name string
+		want DependencyMode
+	}{
+		{name: "postgres", want: DependencyStrong},
+		{name: "redis", want: DependencyStrong},
+		{name: "nats", want: DependencyStrong},
+		{name: "kubernetes-api", want: DependencyStrong},
+		{name: "object-store", want: DependencyWeak},
+		{name: "vector-store", want: DependencyWeak},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := DependencyModeFor(tt.name); got != tt.want {
+				t.Fatalf("DependencyModeFor(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRetryableClassification(t *testing.T) {
 	tests := []struct {
 		name string

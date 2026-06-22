@@ -32,14 +32,14 @@ func TestProbeHandlerHealthz(t *testing.T) {
 	}
 }
 
-func TestRunProbeChecksDegradesOnDependencyFailure(t *testing.T) {
+func TestRunProbeChecksFailsOnStrongDependencyFailure(t *testing.T) {
 	result := runProbeChecks(context.Background(), []probeCheck{
 		{name: "postgres", run: func(context.Context) error { return nil }},
 		{name: "redis", run: func(context.Context) error { return errors.New("dial failed") }},
 	})
 
-	if result.Status != "degraded" {
-		t.Fatalf("status = %q, want degraded", result.Status)
+	if result.Status != "fail" {
+		t.Fatalf("status = %q, want fail", result.Status)
 	}
 	if result.Checks["postgres"].Status != "ok" {
 		t.Fatalf("postgres status = %q, want ok", result.Checks["postgres"].Status)
@@ -62,6 +62,29 @@ func TestDependencyProbeChecksReportsObjectStoreUnavailable(t *testing.T) {
 	}
 	if err := check.run(context.Background()); err == nil || !strings.Contains(err.Error(), "minio unavailable") {
 		t.Fatalf("object-store check error = %v, want minio unavailable", err)
+	}
+}
+
+func TestWeakDependencyDownYieldsDegradedNotFail(t *testing.T) {
+	handler := newProbeHandler("test-service", []probeCheck{
+		{name: "object-store", run: func(context.Context) error { return errors.New("minio unavailable") }},
+	})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for weak dependency degradation", recorder.Code)
+	}
+	var body probeResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Status != "degraded" {
+		t.Fatalf("body status = %q, want degraded", body.Status)
+	}
+	if body.Checks["object-store"].Status != "degraded" {
+		t.Fatalf("object-store status = %q, want degraded", body.Checks["object-store"].Status)
 	}
 }
 
