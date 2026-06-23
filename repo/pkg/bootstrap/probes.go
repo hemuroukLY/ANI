@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -178,7 +179,7 @@ func dependencyProbeChecks(deps *Deps) []probeCheck {
 		dependencyCheck(
 			"object-store",
 			func(ctx context.Context) error {
-				if deps == nil || deps.Ports.ObjectStore == nil {
+				if deps == nil || isNilDependencyPort(deps.Ports.ObjectStore) {
 					return nil
 				}
 				err := deps.Ports.ObjectStore.Health(ctx)
@@ -191,7 +192,7 @@ func dependencyProbeChecks(deps *Deps) []probeCheck {
 		dependencyCheck(
 			"vector-store",
 			func(ctx context.Context) error {
-				if deps == nil || deps.Ports.VectorStore == nil {
+				if deps == nil || isNilDependencyPort(deps.Ports.VectorStore) {
 					return nil
 				}
 				err := deps.Ports.VectorStore.Health(ctx)
@@ -204,7 +205,7 @@ func dependencyProbeChecks(deps *Deps) []probeCheck {
 		dependencyCheck(
 			"kubernetes-api",
 			func(ctx context.Context) error {
-				if deps == nil || deps.Ports.KubernetesAPI == nil {
+				if deps == nil || isNilDependencyPort(deps.Ports.KubernetesAPI) {
 					return nil
 				}
 				err := deps.Ports.KubernetesAPI.Health(ctx)
@@ -214,5 +215,18 @@ func dependencyProbeChecks(deps *Deps) []probeCheck {
 				return err
 			},
 		),
+	}
+}
+
+func isNilDependencyPort(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
 	}
 }

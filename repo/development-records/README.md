@@ -6,7 +6,7 @@
 > - **当前冲刺任务** → `repo/CURRENT-SPRINT.md`（每冲刺更新）
 > - **已完成批次详情** → 本文件（每批次完成后追加）
 
-> 当前执行：**Sprint 13 / Core real provider 与 live gate 收敛**。Sprint 12 已完成 19 个 Core handler + 2 个 422 的 Tier1 local profile；Sprint 13 S01-S07 已通过 production-shaped live gate 并归档 `production_shape.status=passed` evidence。S05/S06/S07 关键 token：SPRINT13-OBJECTSTORE-MINIO-A-TRACK / validate-object-store-live-gate / MinIO / pre-signed URL / LIVE PENDING；SPRINT13-VECTOR-MILVUS-A-TRACK / validate-vector-store-live-gate / Milvus / LIVE PENDING；SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK / validate-instance-observability-live-gate / Prometheus / kubelet / LIVE PENDING。`S05-S07 B 轨可以继续` 仅保留作历史兼容语境；当前 S05/S06/S07 均已 passed。SPRINT13-AUTH-DEX-PRODUCTION-GATE 已通过，production-shaped Gateway 使用 `ANI_AUTH_MODE=auth_service`。Sprint14 分支 `feature/sprint14-core-resilience-semantics` 已完成 R-P0-0..R-P2-7 本地/逻辑批次，其中 R-P2-7 完成 Redis Sentinel/Cluster 配置与 MinIO/Milvus endpoint list fallback 本地验证，未执行真实 primary kill / HA failover。上述结论不代表 full platform production ready；正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入仍需后续 release gate。本文只做已完成批次归档，不作为当前任务清单使用。
+> 当前执行：**Sprint 13 / Core real provider 与 live gate 收敛**。Sprint 12 已完成 19 个 Core handler + 2 个 422 的 Tier1 local profile；Sprint 13 S01-S07 已通过 production-shaped live gate 并归档 `production_shape.status=passed` evidence。S05/S06/S07 关键 token：SPRINT13-OBJECTSTORE-MINIO-A-TRACK / validate-object-store-live-gate / MinIO / pre-signed URL / LIVE PENDING；SPRINT13-VECTOR-MILVUS-A-TRACK / validate-vector-store-live-gate / Milvus / LIVE PENDING；SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK / validate-instance-observability-live-gate / Prometheus / kubelet / LIVE PENDING。`S05-S07 B 轨可以继续` 仅保留作历史兼容语境；当前 S05/S06/S07 均已 passed。SPRINT13-AUTH-DEX-PRODUCTION-GATE 已通过，production-shaped Gateway 使用 `ANI_AUTH_MODE=auth_service`。Sprint14 分支 `feature/sprint14-core-resilience-semantics` 已完成 R-P0-0..R-P2-7 本地/逻辑批次，并通过 SPRINT14-CORE-RESILIENCE-LIVE-GATE / validate-sprint14-resilience-live-gate / Sprint14 resilience live gate：在 ani-sprint14-resilience 隔离 namespace 中完成 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover，并归档脱敏 evidence。该 production-ready 结论只限隔离 Sprint14 Core resilience fixture，不外推到现有 Sprint13 单副本后端或 full platform production ready；正式镜像发布/升级、长期 SLA/soak、备份/恢复和 release gate 仍需后续完成。本文只做已完成批次归档，不作为当前任务清单使用。
 > 历史校准记录（2026-05-20/2026-05-21）：Sprint 2/3/4 的 API、SDK、Mock、Docs 与记录闭环已归档；这些记录只解释历史切换，不代表当前执行阶段。
 
 ---
@@ -37,7 +37,7 @@
 
 ### Sprint 14 Planning / Execution（分支执行中，2026-06）
 
-> 当前官方入口仍保留 Sprint 13 production-shaped 边界；`feature/sprint14-core-resilience-semantics` 分支开始执行 Sprint 14 Core 韧性前置批次。未跑通真实 live gate 的能力只标 local/logic verified，不标 production ready。
+> 当前官方入口仍保留 Sprint 13 production-shaped 边界；`feature/sprint14-core-resilience-semantics` 分支已完成 Sprint 14 Core 韧性前置批次，并通过 aggregate Sprint14 resilience live gate。单批次记录仍按当时 local/logic 边界归档；production-ready 范围仅限隔离 Sprint14 Core resilience fixture。
 
 | 文件 | 内容摘要 | 类型 |
 |---|---|---|
@@ -51,6 +51,7 @@
 | r-p1-5-retry-circuit-breaker.md | R-P1-5 retry/circuit-breaker foundation：`pkg/adapters/resilience` 新增 retryable 分类、操作级 retry/backoff 与命名 circuit breaker；Kubernetes REST 非 2xx 错误分类修正，幂等读/观察/dry-run 可通过 `RetryPolicy` 重试，真实 Apply 写路径不重试；新增 `make validate-resilience-faultinjection-live-gate` local gate（未执行真实故障注入）；MinIO/Milvus 已由 R-P2-7 补 endpoint list fallback，但尚未接入命名 circuit breaker policy；local/logic verified，不标 production ready | Execution（Core） |
 | r-p1-6-resilience-degradation.md | R-P1-6 resilience degradation：新增 strong/weak dependency policy，readyz 对 postgres/nats/redis/kubernetes-api strong 失败返回 `status=fail` + HTTP 503，对 object-store/vector-store weak 失败返回 `status=degraded` + HTTP 200；新增 `make validate-resilience-degradation` local gate；未执行真实后端 down live gate，不标 production ready | Execution（Core） |
 | r-p2-7-multi-endpoint-failover-config.md | R-P2-7 multi-endpoint failover config：Redis bootstrap/gateway 支持 `redis.UniversalClient`、Sentinel/Cluster 配置；MinIO/Milvus adapter 接受 endpoint list 或 LB/VIP，并在网络错误、`429`、`5xx` 时尝试下一个 endpoint；新增 `make validate-ha-failover-live-gate` local config/fallback gate（未执行真实 primary kill / topology failover）；PG 仍为单 `DatabaseURL`，只能外接 VIP/proxy；local/logic verified，不标 failover production ready | Execution（Core） |
+| r-sprint14-resilience-live-gate.md | SPRINT14-CORE-RESILIENCE-LIVE-GATE：新增并真实执行 `validate-sprint14-resilience-live-gate` + `ani-sprint14-resilience` 隔离 fixture，覆盖 P0 strong backend kill readyz fail、P1 weak object-store down degraded、P2 controller primary pod delete 后 follower lease failover；evidence 已脱敏归档；production-ready 范围仅限隔离 Sprint14 Core resilience fixture | Execution（Core） |
 
 ### Sprint 13 Planning（2026-06）
 

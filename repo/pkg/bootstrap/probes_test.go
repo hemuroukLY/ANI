@@ -120,6 +120,23 @@ func TestDependencyProbeChecksReportsKubernetesAPIUnavailable(t *testing.T) {
 	}
 }
 
+func TestDependencyProbeChecksIgnoreTypedNilKubernetesAPI(t *testing.T) {
+	var checker *panicHealthChecker
+	checks := dependencyProbeChecks(&Deps{
+		Ports: Capabilities{
+			KubernetesAPI: checker,
+		},
+	})
+
+	check, ok := findProbeCheck(checks, "kubernetes-api")
+	if !ok {
+		t.Fatal("kubernetes-api probe check missing")
+	}
+	if err := check.run(context.Background()); err != nil {
+		t.Fatalf("kubernetes-api check error = %v, want nil for typed nil dependency", err)
+	}
+}
+
 func TestDependencyProbeChecksIgnoreNotConfiguredDataPlane(t *testing.T) {
 	checks := dependencyProbeChecks(&Deps{
 		Ports: Capabilities{
@@ -259,4 +276,10 @@ type fakeHealthChecker struct {
 
 func (s fakeHealthChecker) Health(context.Context) error {
 	return s.err
+}
+
+type panicHealthChecker struct{}
+
+func (*panicHealthChecker) Health(context.Context) error {
+	panic("typed nil health checker must not be called")
 }

@@ -3,7 +3,7 @@
 > 版本 V8.3 | 广州常青云科技有限公司 | 内部产品规划文件
 > 最后更新：2026-06-23
 > 当前摘要：Sprint 12 Core handler/local profile 已闭环；Sprint 13 S01-S07 real provider live gate 均为 `production_shape.status=passed`。这只表示组件级 production-shaped acceptance passed，不等于 full platform production ready。
-> Sprint 14 分支执行：`feature/sprint14-core-resilience-semantics` 已完成 R-P0-0 gateway shared store 前置批次、R-P0-1 gateway rate limit、R-P0-2 gateway idempotency replay、R-P0-3 adapter per-call timeout、R-P0-4 data-plane readyz health、R-P1-5 retry/circuit-breaker foundation、R-P1-6 resilience degradation 与 R-P2-7 multi-endpoint failover config；这些批次仅为 local/logic verified，不声明 production ready。R-P0-4 的 `validate-readyz-dataplane-live-gate` 当前只执行 local gate，未执行真实后端 kill；R-P1-5 的 `validate-resilience-faultinjection-live-gate` 当前只执行 local gate，未执行真实故障注入，MinIO/Milvus 已补 endpoint list fallback 但未接入命名 circuit breaker policy；R-P1-6 的 `validate-resilience-degradation` 当前只执行 local gate，未执行真实后端 down；R-P2-7 的 `validate-ha-failover-live-gate` 当前只执行 Redis Sentinel/Cluster、MinIO/Milvus endpoint list fallback 等 local gate，未执行真实 primary kill / topology failover，PG 仍只支持单 `DatabaseURL`（可外接 VIP/proxy）。
+> Sprint 14 分支执行：`feature/sprint14-core-resilience-semantics` 已完成 R-P0-0 gateway shared store 前置批次、R-P0-1 gateway rate limit、R-P0-2 gateway idempotency replay、R-P0-3 adapter per-call timeout、R-P0-4 data-plane readyz health、R-P1-5 retry/circuit-breaker foundation、R-P1-6 resilience degradation 与 R-P2-7 multi-endpoint failover config；这些单批次仍按 local/logic verified 归档。SPRINT14-CORE-RESILIENCE-LIVE-GATE / validate-sprint14-resilience-live-gate / Sprint14 resilience live gate 已在 ani-sprint14-resilience 隔离 namespace 真实通过 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover，并归档脱敏 evidence；production-ready 范围仅限隔离 Sprint14 Core resilience fixture，不外推到现有 Sprint13 单副本后端或 full platform。
 
 ---
 
@@ -33,7 +33,7 @@
 交付目标：2026-09-30 ANI Core v1.0.0（Services P0 由外部团队负责）。
 关键节奏：Services 团队维护业务产品/API 定义；Core 只按 Core OpenAPI REST API / Core SDK 补基础设施支撑，不反向开发 Services 业务。
 当前重心：Sprint 13 从 Sprint 12 已闭合的 handler/ports/adapters/router 边界接入真实 provider 与 live gate。
-生产化边界：S01-S07 均达到 production-shaped acceptance passed；full platform production ready 仍需正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入等 release gate。
+生产化边界：S01-S07 均达到 production-shaped acceptance passed；full platform production ready 仍需正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入等 release gate。Sprint14 resilience live gate 当前以 ani-sprint14-resilience 隔离 fixture 验证 backend kill、degradation 与 controller primary failover，不把现有 Sprint13 单副本后端误标为自身 HA。
 Auth 边界：SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 使用 ANI_AUTH_MODE=auth_service。
 当前执行入口：repo/CURRENT-SPRINT.md
 详细计划：repo/development-records/sprint13-real-provider-readiness-plan.md
