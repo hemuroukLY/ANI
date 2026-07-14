@@ -38,6 +38,14 @@ class CIWorkflowContractTest(unittest.TestCase):
         errors = validator.validate(self.workflow, "GOCACHE=/private/tmp/ani-go-build")
         self.assertTrue(any("/private/tmp" in error for error in errors))
 
+    def test_non_portable_gate_script_is_blocked(self) -> None:
+        errors = validator.validate(
+            self.workflow,
+            "GOCACHE=$(CURDIR)/.cache/go-build",
+            {"scripts/validate_sdk_alpha.py": "GOCACHE=/private/tmp/ani-go-build"},
+        )
+        self.assertTrue(any("validate_sdk_alpha.py" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

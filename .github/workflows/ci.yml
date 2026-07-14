@@ -7,7 +7,7 @@ on:
     branches: [main, develop]
 
 env:
-  GO_VERSION: "1.23"
+  GO_VERSION: "1.25"
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "20"
 
@@ -93,7 +93,13 @@ jobs:
           mypy ai/ --ignore-missing-imports
 
       - name: Test
-        run: pytest ai/ -v --tb=short
+        run: |
+          python -m compileall -q ai/rag-engine
+          if find ai -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit | grep -q .; then
+            pytest ai/ -v --tb=short
+          else
+            echo "No Python test files under ai; compile check completed."
+          fi
 
   # ── 前端 CI ─────────────────────────────────────────────────────────────────
   frontend-ci:

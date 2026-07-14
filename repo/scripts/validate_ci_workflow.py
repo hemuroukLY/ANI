@@ -18,6 +18,10 @@ REQUIRED_JOBS = {
 }
 WORKFLOW_PATH = Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml"
 MAKEFILE_PATH = Path(__file__).resolve().parents[1] / "Makefile"
+PORTABILITY_PATHS = (
+    MAKEFILE_PATH.parent / "scripts/validate_sdk_alpha.py",
+    MAKEFILE_PATH.parent / "scripts/validate_sdk_mock_smoke.py",
+)
 
 
 def load_workflow(path: Path = WORKFLOW_PATH) -> dict[str, Any]:
@@ -28,7 +32,11 @@ def load_workflow(path: Path = WORKFLOW_PATH) -> dict[str, Any]:
     return workflow
 
 
-def validate(workflow: dict[str, Any], makefile_text: str) -> list[str]:
+def validate(
+    workflow: dict[str, Any],
+    makefile_text: str,
+    portability_texts: dict[str, str] | None = None,
+) -> list[str]:
     errors: list[str] = []
     jobs = workflow.get("jobs")
     if not isinstance(jobs, dict):
@@ -68,14 +76,25 @@ def validate(workflow: dict[str, Any], makefile_text: str) -> list[str]:
     if "swaggerhub-actions/validate-openapi" in workflow_text:
         errors.append("workflow must not use the unresolved SwaggerHub action")
 
-    if "/private/tmp" in makefile_text:
-        errors.append("Makefile must not use the non-portable /private/tmp path")
+    portability_sources = {"Makefile": makefile_text}
+    portability_sources.update(portability_texts or {})
+    for source, text in portability_sources.items():
+        if "/private/tmp" in text:
+            errors.append(f"{source} must not use the non-portable /private/tmp path")
 
     return errors
 
 
 def main() -> int:
-    errors = validate(load_workflow(), MAKEFILE_PATH.read_text(encoding="utf-8"))
+    portability_texts = {
+        str(path.relative_to(MAKEFILE_PATH.parent)): path.read_text(encoding="utf-8")
+        for path in PORTABILITY_PATHS
+    }
+    errors = validate(
+        load_workflow(),
+        MAKEFILE_PATH.read_text(encoding="utf-8"),
+        portability_texts,
+    )
     for error in errors:
         print(f"ERROR: {error}")
     if errors:
