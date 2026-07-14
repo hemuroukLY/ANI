@@ -382,10 +382,6 @@ func (c *KubernetesRESTClient) doOnce(ctx context.Context, method string, endpoi
 	return data, nil
 }
 
-func (c *KubernetesRESTClient) collectionURL(resource kubernetesResource, query string) string {
-	return c.host + resource.collectionPath() + querySuffix(query)
-}
-
 func (c *KubernetesRESTClient) resourceURL(resource kubernetesResource, query string) string {
 	return c.host + resource.resourcePath() + querySuffix(query)
 }
