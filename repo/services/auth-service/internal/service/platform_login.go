@@ -79,8 +79,8 @@ func (s *postgresPlatformLoginStore) TouchLastLogin(ctx context.Context, userID 
 
 // platformPrincipal 平台 token 主体（无 tenant_id）
 type platformPrincipal struct {
-	UserID  uuid.UUID
-	Roles   []string
+	UserID uuid.UUID
+	Roles  []string
 }
 
 // platformLoginManager 平台账密登录管理器
@@ -115,31 +115,31 @@ func (m *platformLoginManager) Login(ctx context.Context, username, password str
 	// 1. 查询平台用户
 	user, err := m.store.LookupUser(ctx, username)
 	if err != nil {
-		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "invalid credentials"))
+		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "user not found"))
 	}
 	// 2. 校验密码
 	if err := verifyPassword(user.passwordHash, password); err != nil {
-		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "invalid credentials"))
+		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "password error"))
 	}
 	// 3. 校验状态
 	if user.status != "active" {
-		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "invalid credentials"))
+		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "user inactive"))
 	}
 	// 4. 平台用户固定角色 platform-admin
 	roles := []string{"platform-admin"}
 	// 5. 生成 refresh token
 	rawRefresh, err := generateRefreshToken()
 	if err != nil {
-		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to issue refresh token"))
+		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to generate refresh token"))
 	}
 	// 6. 持久化 refresh token（tenant_id=NULL）
 	if err := m.store.InsertRefreshToken(ctx, user.id, hashRefreshToken(rawRefresh), roles, m.now().Add(defaultRefreshTokenTTL)); err != nil {
-		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to issue refresh token"))
+		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to insert refresh token"))
 	}
 	// 7. 签发平台 access token (scope=platform, tenant_id=空, roles=["platform-admin"])
 	accessToken, err := m.issuer.IssuePlatformAccessToken(platformPrincipal{UserID: user.id, Roles: roles}, defaultAccessTokenTTL)
 	if err != nil {
-		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to issue access token"))
+		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to generate access token"))
 	}
 	// 8. 更新 last_login_at
 	if err := m.store.TouchLastLogin(ctx, user.id, m.now()); err != nil {

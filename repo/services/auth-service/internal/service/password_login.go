@@ -131,7 +131,7 @@ var errInvalidCredentials = errors.New("invalid credentials")
 
 // 密码登录管理器
 type passwordLoginManager struct {
-	store passwordLoginStore // 数据访问层
+	store  passwordLoginStore // 数据访问层
 	issuer *JWTIssuer         // JWT 发布者层
 	now    func() time.Time   // 时间函数
 }
@@ -167,21 +167,21 @@ func (m *passwordLoginManager) Login(ctx context.Context, tenantName, username, 
 		if errors.Is(err, errTenantNotFound) {
 			return nil, statusFromAuthError(newAuthError(ErrCodeTenantNotFound, "tenant not found"))
 		}
-		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "invalid credentials"))
+		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "tenant error"))
 	}
 
 	// 验证用户是否存在
 	user, err := m.store.LookupUser(ctx, tenantID, "local:"+username)
 	if err != nil {
-		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "invalid credentials"))
+		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "user not found"))
 	}
 	// 验证用户密码是否正确
 	if err := verifyPassword(user.passwordHash, password); err != nil {
-		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "invalid credentials"))
+		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "password error"))
 	}
 	// 验证用户状态是否为活动
 	if user.status != "active" {
-		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "invalid credentials"))
+		return nil, statusFromAuthError(newAuthError(ErrCodeInvalidCredentials, "user inactive"))
 	}
 	// 加载用户角色
 	roles, err := m.store.LoadRoles(ctx, user.id)
@@ -191,16 +191,16 @@ func (m *passwordLoginManager) Login(ctx context.Context, tenantName, username, 
 	// 生成刷新令牌
 	rawRefresh, err := generateRefreshToken()
 	if err != nil {
-		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to issue refresh token"))
+		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to generate refresh token"))
 	}
 	// 插入刷新令牌
 	if err := m.store.InsertRefreshToken(ctx, tenantID, user.id, hashRefreshToken(rawRefresh), roles, m.now().Add(defaultRefreshTokenTTL)); err != nil {
-		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to issue refresh token"))
+		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to insert refresh token"))
 	}
 	// 生成访问令牌
 	accessToken, err := m.issuer.IssueAccessToken(refreshPrincipal{TenantID: tenantID, UserID: user.id, Roles: roles}, defaultAccessTokenTTL)
 	if err != nil {
-		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to issue access token"))
+		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to generate access token"))
 	}
 	// 更新用户最后登录时间
 	if err := m.store.TouchLastLogin(ctx, user.id, m.now()); err != nil {
