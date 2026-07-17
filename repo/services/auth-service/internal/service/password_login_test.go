@@ -5,18 +5,15 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/kubercloud/ani/pkg/ports"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // 创建测试用的JWTIssuer
@@ -46,10 +43,11 @@ func hashedPassword(t *testing.T, password string) string {
 	return string(hash)
 }
 
-// 创建测试用的结构体
+var _ ports.PasswordLoginStore = (*fakePasswordLoginStore)(nil)
+
 type fakePasswordLoginStore struct {
 	tenantID    uuid.UUID
-	user        passwordUser
+	user        ports.PasswordUser
 	roles       []string
 	tenantErr   error
 	userErr     error
@@ -66,7 +64,6 @@ type fakePasswordLoginStore struct {
 	}
 }
 
-// 实现LookupTenant方法
 func (s *fakePasswordLoginStore) LookupTenant(context.Context, string) (uuid.UUID, error) {
 	if s.tenantErr != nil {
 		return uuid.Nil, s.tenantErr
@@ -74,15 +71,13 @@ func (s *fakePasswordLoginStore) LookupTenant(context.Context, string) (uuid.UUI
 	return s.tenantID, nil
 }
 
-// 实现LookupUser方法
-func (s *fakePasswordLoginStore) LookupUser(context.Context, uuid.UUID, string) (passwordUser, error) {
+func (s *fakePasswordLoginStore) LookupUser(context.Context, uuid.UUID, string) (ports.PasswordUser, error) {
 	if s.userErr != nil {
-		return passwordUser{}, s.userErr
+		return ports.PasswordUser{}, s.userErr
 	}
 	return s.user, nil
 }
 
-// 实现LoadRoles方法
 func (s *fakePasswordLoginStore) LoadRoles(context.Context, uuid.UUID) ([]string, error) {
 	if s.rolesErr != nil {
 		return nil, s.rolesErr
@@ -90,7 +85,6 @@ func (s *fakePasswordLoginStore) LoadRoles(context.Context, uuid.UUID) ([]string
 	return s.roles, nil
 }
 
-// 实现InsertRefreshToken方法
 func (s *fakePasswordLoginStore) InsertRefreshToken(_ context.Context, tenantID, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error {
 	if s.insertErr != nil {
 		return s.insertErr
@@ -103,7 +97,6 @@ func (s *fakePasswordLoginStore) InsertRefreshToken(_ context.Context, tenantID,
 	return nil
 }
 
-// 实现TouchLastLogin方法
 func (s *fakePasswordLoginStore) TouchLastLogin(context.Context, uuid.UUID, time.Time) error {
 	s.touchCalled = true
 	return s.touchErr
@@ -118,10 +111,10 @@ func TestPasswordLogin_Success(t *testing.T) {
 	userID := uuid.New()
 	store := &fakePasswordLoginStore{
 		tenantID: tenantID,
-		user: passwordUser{
-			id:           userID,
-			passwordHash: hashedPassword(t, "correct"),
-			status:       "active",
+		user: ports.PasswordUser{
+			ID: userID,
+			PasswordHash: hashedPassword(t, "correct"),
+			Status: "active",
 		},
 		roles: []string{"tenant-admin"},
 	}
@@ -159,20 +152,20 @@ func TestPasswordLogin_InvalidCredentials(t *testing.T) {
 	userID := uuid.New()
 	for _, tc := range []struct {
 		name    string
-		user    passwordUser
+		user    ports.PasswordUser
 		userErr error
 	}{
 		{
 			name: "wrong password",
-			user: passwordUser{
-				id:           userID,
-				passwordHash: hashedPassword(t, "different"),
-				status:       "active",
+			user: ports.PasswordUser{
+				ID: userID,
+				PasswordHash: hashedPassword(t, "different"),
+				Status: "active",
 			},
 		},
 		{
 			name:    "no such user",
-			userErr: errInvalidCredentials,
+			userErr: ports.ErrInvalidCredentials,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -196,7 +189,7 @@ func TestPasswordLogin_InvalidCredentials(t *testing.T) {
 // 测试租户不存在
 func TestPasswordLogin_TenantNotFound(t *testing.T) {
 	issuer := testPasswordLoginIssuer(t)
-	store := &fakePasswordLoginStore{tenantErr: errTenantNotFound}
+	store := &fakePasswordLoginStore{tenantErr: ports.ErrTenantNotFound}
 	mgr := newPasswordLoginManager(store, issuer)
 	_, err := mgr.Login(context.Background(), "missing-tenant", "alice", "pwd")
 	if err == nil {
@@ -229,10 +222,10 @@ func TestPasswordLogin_DisabledUser(t *testing.T) {
 	userID := uuid.New()
 	store := &fakePasswordLoginStore{
 		tenantID: tenantID,
-		user: passwordUser{
-			id:           userID,
-			passwordHash: hashedPassword(t, "correct"),
-			status:       "disabled",
+		user: ports.PasswordUser{
+			ID: userID,
+			PasswordHash: hashedPassword(t, "correct"),
+			Status: "disabled",
 		},
 		roles: []string{"tenant-admin"},
 	}
@@ -253,10 +246,10 @@ func TestPasswordLogin_OIDCUserRejected(t *testing.T) {
 	userID := uuid.New()
 	store := &fakePasswordLoginStore{
 		tenantID: tenantID,
-		user: passwordUser{
-			id:           userID,
-			passwordHash: "", // OIDC-only user has NULL password_hash
-			status:       "active",
+		user: ports.PasswordUser{
+			ID: userID,
+			PasswordHash: "", // OIDC-only user has NULL password_hash
+			Status: "active",
 		},
 		roles: []string{"tenant-admin"},
 	}
@@ -276,16 +269,16 @@ func TestPasswordLogin_OIDCUserRejected(t *testing.T) {
 // `WHERE tenant_id=$1 AND username='local:'+username`，使用 tenant_id 谓词排除平台管理员
 // （平台管理员 tenant_id IS NULL，NULL != $1 不匹配）。
 // 即使某个 username 在 users 表中以平台管理员身份存在（tenant_id IS NULL），
-// 租户端点查询也返回 ErrNoRows，被映射为 errInvalidCredentials → INVALID_CREDENTIALS。
+// 租户端点查询也返回 ErrNoRows，被映射为 ports.ErrInvalidCredentials → INVALID_CREDENTIALS。
 // 这是同表存储下平台/租户通过 tenant_id 谓词与 user_roles 角色绑定双重隔离的安全保证。
 func TestTenantPasswordLogin_PlatformUserRejected(t *testing.T) {
 	issuer := testPasswordLoginIssuer(t)
 	tenantID := uuid.New()
 	// fake store 模拟 users 表中该 username 仅以平台管理员身份存在（tenant_id IS NULL），
-	// 租户端点查询 `WHERE tenant_id=$1 AND username=$2` 返回 ErrNoRows → errInvalidCredentials
+	// 租户端点查询 `WHERE tenant_id=$1 AND username=$2` 返回 ErrNoRows → ports.ErrInvalidCredentials
 	store := &fakePasswordLoginStore{
 		tenantID: tenantID,
-		userErr:  errInvalidCredentials,
+		userErr:  ports.ErrInvalidCredentials,
 	}
 	mgr := newPasswordLoginManager(store, issuer)
 	_, err := mgr.Login(context.Background(), "tenant-a", "admin", "platform-user-password")
@@ -343,6 +336,3 @@ func (b *brokenCache) Exists(context.Context, string) (bool, error) {
 }
 
 // ensure imports stay referenced even when tests shrink during future edits.
-var _ = timestamppb.Now
-var _ = strconv.Itoa
-var _ = pgx.ErrNoRows

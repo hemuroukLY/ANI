@@ -11,14 +11,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kubercloud/ani/pkg/ports"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
+var _ ports.PlatformLoginStore = (*fakePlatformLoginStore)(nil)
+
 // fakePlatformLoginStore 平台登录存储 mock
 type fakePlatformLoginStore struct {
-	user        platformUser
+	user        ports.PlatformUser
 	userErr     error
 	roles       []string
 	rolesErr    error
@@ -34,14 +37,14 @@ type fakePlatformLoginStore struct {
 	}
 }
 
-func (s *fakePlatformLoginStore) LookupUser(_ context.Context, namespacedUsername string) (platformUser, error) {
+func (s *fakePlatformLoginStore) LookupUser(_ context.Context, namespacedUsername string) (ports.PlatformUser, error) {
 	if s.userErr != nil {
-		return platformUser{}, s.userErr
+		return ports.PlatformUser{}, s.userErr
 	}
 	// Caller should pass `local:`-prefixed username; store assertion only.
 	if !strings.HasPrefix(namespacedUsername, "local:") {
 		// 模拟 DB 行为：未命中 `local:` 前缀的平台管理员记录
-		return platformUser{}, errInvalidCredentials
+		return ports.PlatformUser{}, ports.ErrInvalidCredentials
 	}
 	return s.user, nil
 }
@@ -80,10 +83,10 @@ func TestPlatformPasswordLogin_Success(t *testing.T) {
 	issuer.now = func() time.Time { return now }
 	userID := uuid.New()
 	store := &fakePlatformLoginStore{
-		user: platformUser{
-			id:           userID,
-			passwordHash: hashedPassword(t, "correct"),
-			status:       "active",
+		user: ports.PlatformUser{
+			ID: userID,
+			PasswordHash: hashedPassword(t, "correct"),
+			Status: "active",
 		},
 	}
 	mgr := newPlatformLoginManager(store, issuer)
@@ -139,20 +142,20 @@ func TestPlatformPasswordLogin_InvalidCredentials(t *testing.T) {
 	userID := uuid.New()
 	for _, tc := range []struct {
 		name    string
-		user    platformUser
+		user    ports.PlatformUser
 		userErr error
 	}{
 		{
 			name: "wrong password",
-			user: platformUser{
-				id:           userID,
-				passwordHash: hashedPassword(t, "different"),
-				status:       "active",
+			user: ports.PlatformUser{
+				ID: userID,
+				PasswordHash: hashedPassword(t, "different"),
+				Status: "active",
 			},
 		},
 		{
 			name:    "no such user",
-			userErr: errInvalidCredentials,
+			userErr: ports.ErrInvalidCredentials,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -177,10 +180,10 @@ func TestPlatformPasswordLogin_DisabledUser(t *testing.T) {
 	issuer := testPasswordLoginIssuer(t)
 	userID := uuid.New()
 	store := &fakePlatformLoginStore{
-		user: platformUser{
-			id:           userID,
-			passwordHash: hashedPassword(t, "correct"),
-			status:       "disabled",
+		user: ports.PlatformUser{
+			ID: userID,
+			PasswordHash: hashedPassword(t, "correct"),
+			Status: "disabled",
 		},
 	}
 	mgr := newPlatformLoginManager(store, issuer)
@@ -231,10 +234,10 @@ func TestPlatformPasswordLogin_OIDCOnlyUserRejected(t *testing.T) {
 	issuer := testPasswordLoginIssuer(t)
 	userID := uuid.New()
 	store := &fakePlatformLoginStore{
-		user: platformUser{
-			id:           userID,
-			passwordHash: "",
-			status:       "active",
+		user: ports.PlatformUser{
+			ID: userID,
+			PasswordHash: "",
+			Status: "active",
 		},
 	}
 	mgr := newPlatformLoginManager(store, issuer)
@@ -254,14 +257,14 @@ func TestPlatformPasswordLogin_OIDCOnlyUserRejected(t *testing.T) {
 // NOT NULL）或平台内置的 tenant-admin/user/auditor 角色。
 // postgresPlatformLoginStore.LookupUser 查询谓词为 `WHERE u.username='local:'+input AND EXISTS
 // (user_roles→roles.name='platform-admin' AND roles.tenant_id IS NULL)`。租户用户
-// 不满足该 EXISTS 子查询（无 platform-admin 角色绑定），返回 ErrNoRows → errInvalidCredentials。
+// 不满足该 EXISTS 子查询（无 platform-admin 角色绑定），返回 ErrNoRows → ports.ErrInvalidCredentials。
 // 这证明了同表存储、同前缀下平台/租户通过 user_roles 角色绑定天然隔离，租户用户用平台端点登录天然被拒绝。
 func TestPlatformPasswordLogin_TenantUserRejected(t *testing.T) {
 	issuer := testPasswordLoginIssuer(t)
 	// fake store 模拟 users 表中该 username 仅以租户用户身份存在（无 platform-admin 角色绑定），
-	// 平台查询 `WHERE username='local:'+input AND EXISTS platform-admin role` 返回 ErrNoRows → errInvalidCredentials
+	// 平台查询 `WHERE username='local:'+input AND EXISTS platform-admin role` 返回 ErrNoRows → ports.ErrInvalidCredentials
 	store := &fakePlatformLoginStore{
-		userErr: errInvalidCredentials,
+		userErr: ports.ErrInvalidCredentials,
 	}
 	mgr := newPlatformLoginManager(store, issuer)
 	_, err := mgr.Login(context.Background(), "alice", "tenant-user-password")

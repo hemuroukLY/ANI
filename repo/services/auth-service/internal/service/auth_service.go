@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kubercloud/ani/pkg/adapters/postgres"
 	authv1 "github.com/kubercloud/ani/pkg/generated/pb/auth/v1"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	"github.com/kubercloud/ani/pkg/ports"
@@ -46,8 +47,8 @@ func NewAuthService(db *pgxpool.Pool, cache ports.CacheStore, jwtCfg JWTConfig) 
 		refreshTokens: newRefreshTokenStore(db),
 		blocklist:     blocklist,
 		oidc:          newOIDCLoginManager(cache, jwtCfg, newOIDCSessionStore(db, newOIDCGroupRoleMapper(jwtCfg.OIDCGroupRoleMapJSON)), issuer),
-		passwordLogin: newPasswordLoginManager(newPostgresPasswordLoginStore(db), issuer),
-		platformLogin: newPlatformLoginManager(newPostgresPlatformLoginStore(db), issuer),
+		passwordLogin: newPasswordLoginManager(postgres.NewPasswordLoginStore(db), issuer),
+		platformLogin: newPlatformLoginManager(postgres.NewPlatformLoginStore(db), issuer),
 	}
 }
 
