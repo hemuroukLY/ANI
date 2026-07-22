@@ -1,6 +1,7 @@
 import { createFileRoute, Link, Outlet, redirect, useNavigate } from '@tanstack/react-router'
 import { Button, Layout, Menu, MessagePlugin } from 'tdesign-react'
 import {
+  CpuIcon,
   DashboardIcon,
   ServerIcon,
   SettingIcon,
@@ -71,9 +72,11 @@ function AuthenticatedLayout() {
             <Menu.MenuItem value="overview" icon={<DashboardIcon />}>
               <Link to="/">运营总览</Link>
             </Menu.MenuItem>
-            <Menu.MenuItem value="ops" icon={<ServerIcon />}>
-              <Link to="/">运营管理</Link>
-            </Menu.MenuItem>
+            <Menu.SubMenu value="ops" title="资源池与基础设施" icon={<ServerIcon />}>
+              <Menu.MenuItem value="gpu-pool" icon={<CpuIcon />}>
+                <Link to="/ops/gpu-pool">GPU 资源池管理</Link>
+              </Menu.MenuItem>
+            </Menu.SubMenu>
             <Menu.MenuItem value="settings" icon={<SettingIcon />}>
               <Link to="/">平台设置</Link>
             </Menu.MenuItem>
