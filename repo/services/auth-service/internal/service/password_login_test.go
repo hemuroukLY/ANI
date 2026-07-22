@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -312,9 +311,7 @@ func TestPasswordLogin_BadRequestOnEmptyInputs(t *testing.T) {
 // brokenCache returns errors on every operation, simulating Redis down.
 // Retained for reuse by other test files (e.g. oidc). passwordLogin no longer
 // touches cache after lockout removal, so this is not exercised by passwordLogin tests.
-type brokenCache struct {
-	mu sync.Mutex
-}
+type brokenCache struct{}
 
 var _ ports.CacheStore = (*brokenCache)(nil)
 
