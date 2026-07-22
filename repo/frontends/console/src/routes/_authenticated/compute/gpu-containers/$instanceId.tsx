@@ -15,7 +15,7 @@ import { ConsoleContentCard } from '@/components/shell/ConsoleContentCard'
 import { coreApi } from '@/api/coreClient'
 import type { components } from '@/api/core-schema'
 
-export const Route = createFileRoute('/compute/gpu-containers/$instanceId')({
+export const Route = createFileRoute('/_authenticated/compute/gpu-containers/$instanceId')({
   component: GpuContainerDetailPage,
 })
 

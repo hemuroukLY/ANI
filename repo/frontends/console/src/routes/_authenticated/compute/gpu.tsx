@@ -23,7 +23,7 @@ import { ConsoleContentCard } from '@/components/shell/ConsoleContentCard'
 import { coreApi } from '@/api/coreClient'
 import type { components } from '@/api/core-schema'
 
-export const Route = createFileRoute('/compute/gpu')({
+export const Route = createFileRoute('/_authenticated/compute/gpu')({
   component: GpuManagementPage,
 })
 

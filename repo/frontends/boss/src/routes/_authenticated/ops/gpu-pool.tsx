@@ -6,13 +6,12 @@ import { useState } from 'react'
 import { coreApi } from '@/api/coreClient'
 import type { components } from '@/api/core-schema'
 
-export const Route = createFileRoute('/ops/gpu-pool')({
+export const Route = createFileRoute('/_authenticated/ops/gpu-pool')({
   component: GpuPoolPage,
 })
 
 type GPUOccupancyStats = components['schemas']['GPUOccupancyStats']
 type GPUSchedulingQueue = components['schemas']['GPUSchedulingQueue']
-
 interface NodeAggregate {
   node_name: string
   total: number

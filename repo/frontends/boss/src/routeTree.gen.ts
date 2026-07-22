@@ -13,9 +13,7 @@ import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as OpsGpuPoolRouteImport } from './routes/ops/gpu-pool'
-
+import { Route as AuthenticatedOpsGpuPoolRouteImport } from './routes/_authenticated/ops/gpu-pool'
 
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
@@ -36,26 +34,23 @@ const AuthCallbackRoute = AuthCallbackRouteImport.update({
   path: '/auth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OpsGpuPoolRoute = OpsGpuPoolRouteImport.update({
+const AuthenticatedOpsGpuPoolRoute = AuthenticatedOpsGpuPoolRouteImport.update({
   id: '/ops/gpu-pool',
   path: '/ops/gpu-pool',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/ops/gpu-pool': typeof AuthenticatedOpsGpuPoolRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/': typeof AuthenticatedIndexRoute
+  '/ops/gpu-pool': typeof AuthenticatedOpsGpuPoolRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -63,49 +58,26 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/ops/gpu-pool': typeof AuthenticatedOpsGpuPoolRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/auth/callback'
+  fullPaths: '/' | '/login' | '/auth/callback' | '/ops/gpu-pool'
   fileRoutesByTo: FileRoutesByTo
-  to: '/login' | '/auth/callback' | '/'
+  to: '/login' | '/auth/callback' | '/' | '/ops/gpu-pool'
   id:
-  | '__root__'
-  | '/_authenticated'
-  | '/login'
-  | '/auth/callback'
-  | '/_authenticated/'
+    | '__root__'
+    | '/_authenticated'
+    | '/login'
+    | '/auth/callback'
+    | '/_authenticated/'
+    | '/_authenticated/ops/gpu-pool'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   LoginRoute: typeof LoginRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
-}
-export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/ops/gpu-pool': typeof OpsGpuPoolRoute
-}
-export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/ops/gpu-pool': typeof OpsGpuPoolRoute
-}
-export interface FileRoutesById {
-  __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/ops/gpu-pool': typeof OpsGpuPoolRoute
-}
-export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/ops/gpu-pool'
-  fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/ops/gpu-pool'
-  id: '__root__' | '/' | '/ops/gpu-pool'
-  fileRoutesById: FileRoutesById
-}
-export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  OpsGpuPoolRoute: typeof OpsGpuPoolRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -138,29 +110,24 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/ops/gpu-pool': {
-      id: '/ops/gpu-pool'
+    '/_authenticated/ops/gpu-pool': {
+      id: '/_authenticated/ops/gpu-pool'
       path: '/ops/gpu-pool'
       fullPath: '/ops/gpu-pool'
-      preLoaderRoute: typeof OpsGpuPoolRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedOpsGpuPoolRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
   }
 }
 
 interface AuthenticatedRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedOpsGpuPoolRoute: typeof AuthenticatedOpsGpuPoolRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedOpsGpuPoolRoute: AuthenticatedOpsGpuPoolRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
@@ -171,8 +138,6 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   LoginRoute: LoginRoute,
   AuthCallbackRoute: AuthCallbackRoute,
-  IndexRoute: IndexRoute,
-  OpsGpuPoolRoute: OpsGpuPoolRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

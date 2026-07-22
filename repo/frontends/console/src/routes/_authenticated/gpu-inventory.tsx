@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { coreApi } from '@/api/coreClient'
 import type { components } from '@/api/core-schema'
 
-export const Route = createFileRoute('/gpu-inventory')({
+export const Route = createFileRoute('/_authenticated/gpu-inventory')({
   component: GpuInventoryPage,
 })
 

@@ -93,6 +93,14 @@ function setRememberMe(remember: boolean): void {
   writeKey(window.localStorage, REMEMBER_ME_KEY, value)
 }
 
+/**
+ * 仅保存「记住我」偏好（不写 token）。
+ * 用于 OIDC begin 阶段：跳转 IdP 前记录用户偏好，callback 完成后据此选择 storage 介质。
+ */
+export function saveRememberMe(remember: boolean): void {
+  setRememberMe(remember)
+}
+
 /** 计算 access token 过期时间戳（ms epoch）。优先用 issued_at，缺失则用当前时间。 */
 function computeExpiresAt(pair: TokenPair): number {
   const issuedAtMs = pair.issued_at ? Date.parse(pair.issued_at) : Date.now()

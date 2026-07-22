@@ -84,7 +84,14 @@ export function clearAuthToken() {
 
 function currentPath(): string {
   if (typeof window === 'undefined') return '/'
-  return window.location.pathname + window.location.search
+  // BOSS 部署在 `/boss/` 前缀下；pathname 已含 `/boss/`，但 SPA 内部路由以 `/` 为根。
+  // 提取 `/boss/` 之后的 path 作为 returnTo，避免回跳到 Console 同名路径。
+  const raw = window.location.pathname + window.location.search
+  const prefix = '/boss/'
+  if (raw.startsWith(prefix)) {
+    return '/' + raw.slice(prefix.length)
+  }
+  return raw
 }
 
 function handle401() {
@@ -98,7 +105,8 @@ function handle401() {
   saveReturnTo(current)
 
   const search = new URLSearchParams({ returnTo: current }).toString()
-  window.location.assign(`/login?${search}`)
+  // 保持在 BOSS SPA 内部路由（`/boss/login`），不跨端跳到 Console
+  window.location.assign(`/boss/login?${search}`)
 }
 
 export function maybeRefresh(): Promise<boolean> {

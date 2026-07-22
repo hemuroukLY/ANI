@@ -7,6 +7,7 @@ import {
   consumeReturnTo,
   isSessionValid,
   saveOidcState,
+  saveRememberMe,
   saveSession,
   safeReturnTo,
 } from '@/auth/session'
@@ -89,15 +90,8 @@ function LoginPage() {
         return
       }
       saveOidcState(data.state)
-      // remember_me 偏好在跳转前写入，callback 完成后据此选择 storage 介质
-      saveSession({ access_token: '', refresh_token: '', expires_in: 0 }, rememberMe)
-      // 清掉空 token 占位，仅保留 remember_me 偏好
-      sessionStorage.removeItem('console:access_token')
-      sessionStorage.removeItem('console:refresh_token')
-      sessionStorage.removeItem('console:expires_at')
-      localStorage.removeItem('console:access_token')
-      localStorage.removeItem('console:refresh_token')
-      localStorage.removeItem('console:expires_at')
+      // remember_me 偏好先写入，callback 完成后据此选择 storage 介质
+      saveRememberMe(rememberMe)
       setState('redirecting')
       window.location.assign(data.authorization_url)
     } catch {
@@ -159,6 +153,12 @@ function LoginPage() {
   function navigate(target: string) {
     // 使用 location.assign 完成跳转，避免引入 router hook 增加耦合
     window.location.assign(target)
+  }
+
+  function getBossLoginUrl(): string {
+    // 跨端跳转：dev 用绝对 localhost:5174，prod 用 /boss/login（Gateway 路由）
+    const dev = typeof import.meta !== 'undefined' && Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV)
+    return dev ? 'http://localhost:5174/boss/login' : '/boss/login'
   }
 
   return (
@@ -305,9 +305,7 @@ function LoginPage() {
 
         <p className="auth-card-desc">
           平台管理员？
-          <a href={(import.meta as any).env?.DEV ? 'http://localhost:5174/boss/login' : '/boss/login'}>
-            进入 BOSS
-          </a>
+          <a href={getBossLoginUrl()}>进入 BOSS</a>
         </p>
       </Card>
     </div>

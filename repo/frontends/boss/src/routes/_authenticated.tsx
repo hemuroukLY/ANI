@@ -6,8 +6,9 @@ import {
   ServerIcon,
   SettingIcon,
 } from 'tdesign-icons-react'
+import { useEffect } from 'react'
 import { logout, maybeRefresh, setAuthToken } from '@/api/auth'
-import { getSession, isSessionValid, safeReturnTo } from '@/auth/session'
+import { getSession, isSessionValid, safeReturnTo, saveReturnTo } from '@/auth/session'
 
 const { Header, Aside, Content } = Layout
 
@@ -23,6 +24,10 @@ export const Route = createFileRoute('/_authenticated')({
     const session = getSession()
     if (!session || !isSessionValid()) {
       const current = location.pathname + (location.searchStr ?? '')
+      // 仅保存同源相对路径作为 returnTo，防 open redirect
+      if (safeReturnTo(current) === current) {
+        saveReturnTo(current)
+      }
       throw redirect({
         to: '/login',
         search: { returnTo: safeReturnTo(current) === current ? current : '/' },
@@ -37,6 +42,15 @@ export const Route = createFileRoute('/_authenticated')({
 
 function AuthenticatedLayout() {
   const navigate = useNavigate()
+
+  // 定时检查 token 临近过期，触发 refresh（US-006）。
+  // 间隔 1 分钟；refresh 真正逻辑由 api/auth.ts maybeRefresh 负责（剩余 < 5 分钟触发）。
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void maybeRefresh()
+    }, 60_000)
+    return () => clearInterval(timer)
+  }, [])
 
   async function handleLogout() {
     await logout()

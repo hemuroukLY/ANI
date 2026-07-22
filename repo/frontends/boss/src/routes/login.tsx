@@ -1,4 +1,4 @@
-import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import { useState } from 'react'
 import { Alert, Button, Card, Checkbox, Form, Input, MessagePlugin, Tabs } from 'tdesign-react'
 import { coreApi } from '@/api/coreClient'
@@ -7,6 +7,7 @@ import {
   consumeReturnTo,
   isSessionValid,
   saveOidcState,
+  saveRememberMe,
   saveSession,
   safeReturnTo,
 } from '@/auth/session'
@@ -38,7 +39,6 @@ export const Route = createFileRoute('/login')({
 type LoginState = 'idle' | 'validating' | 'loading' | 'redirecting' | 'error'
 
 function LoginPage() {
-  const navigate = useNavigate()
   const [tab, setTab] = useState<'oidc' | 'password'>('oidc')
   const [rememberMe, setRememberMe] = useState(false)
 
@@ -83,13 +83,7 @@ function LoginPage() {
       }
       saveOidcState(data.state)
       // remember_me 偏好先写入，callback 完成后据此选择 storage 介质
-      saveSession({ access_token: '', refresh_token: '', expires_in: 0 }, rememberMe)
-      sessionStorage.removeItem('boss:access_token')
-      sessionStorage.removeItem('boss:refresh_token')
-      sessionStorage.removeItem('boss:expires_at')
-      localStorage.removeItem('boss:access_token')
-      localStorage.removeItem('boss:refresh_token')
-      localStorage.removeItem('boss:expires_at')
+      saveRememberMe(rememberMe)
       setState('redirecting')
       window.location.assign(data.authorization_url)
     } catch {
@@ -126,7 +120,8 @@ function LoginPage() {
       const returnTo = consumeReturnTo()
       const target = safeReturnTo(returnTo, '/')
       MessagePlugin.success('登录成功')
-      navigate({ to: target })
+      // 硬跳转以确保 middleware 已注入新 token；BOSS basepath `/boss/` 会自动相对化
+      window.location.assign(target)
     } catch {
       MessagePlugin.error('网络异常，请稍后重试')
       setPassword('')
@@ -140,6 +135,12 @@ function LoginPage() {
     } else {
       void handlePasswordLogin()
     }
+  }
+
+  function getConsoleLoginUrl(): string {
+    // 跨端跳转：dev 用绝对 localhost:5173，prod 用 /login（Gateway 路由）
+    const dev = typeof import.meta !== 'undefined' && Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV)
+    return dev ? 'http://localhost:5173/login' : '/login'
   }
 
   const loading = state === 'loading' || state === 'redirecting'
@@ -259,9 +260,7 @@ function LoginPage() {
 
         <p className="auth-card-desc">
           租户用户？
-          <a href={(import.meta as any).env?.DEV ? 'http://localhost:5173/login' : '/login'}>
-            进入 Console
-          </a>
+          <a href={getConsoleLoginUrl()}>进入 Console</a>
         </p>
       </Card>
     </div>

@@ -19,7 +19,7 @@ import { coreApi } from '@/api/coreClient'
 import type { components } from '@/api/core-schema'
 import { CreateGpuContainerDialog } from './create-dialog'
 
-export const Route = createFileRoute('/compute/gpu-containers/')({
+export const Route = createFileRoute('/_authenticated/compute/gpu-containers/')({
   component: GpuContainerListPage,
 })
 
