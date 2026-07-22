@@ -112,9 +112,9 @@ func TestPasswordLogin_Success(t *testing.T) {
 	store := &fakePasswordLoginStore{
 		tenantID: tenantID,
 		user: ports.PasswordUser{
-			ID: userID,
+			ID:           userID,
 			PasswordHash: hashedPassword(t, "correct"),
-			Status: "active",
+			Status:       "active",
 		},
 		roles: []string{"tenant-admin"},
 	}
@@ -158,9 +158,9 @@ func TestPasswordLogin_InvalidCredentials(t *testing.T) {
 		{
 			name: "wrong password",
 			user: ports.PasswordUser{
-				ID: userID,
+				ID:           userID,
 				PasswordHash: hashedPassword(t, "different"),
-				Status: "active",
+				Status:       "active",
 			},
 		},
 		{
@@ -223,9 +223,9 @@ func TestPasswordLogin_DisabledUser(t *testing.T) {
 	store := &fakePasswordLoginStore{
 		tenantID: tenantID,
 		user: ports.PasswordUser{
-			ID: userID,
+			ID:           userID,
 			PasswordHash: hashedPassword(t, "correct"),
-			Status: "disabled",
+			Status:       "disabled",
 		},
 		roles: []string{"tenant-admin"},
 	}
@@ -247,9 +247,9 @@ func TestPasswordLogin_OIDCUserRejected(t *testing.T) {
 	store := &fakePasswordLoginStore{
 		tenantID: tenantID,
 		user: ports.PasswordUser{
-			ID: userID,
+			ID:           userID,
 			PasswordHash: "", // OIDC-only user has NULL password_hash
-			Status: "active",
+			Status:       "active",
 		},
 		roles: []string{"tenant-admin"},
 	}

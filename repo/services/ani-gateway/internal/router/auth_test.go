@@ -218,21 +218,21 @@ func TestAuthRevokeAPIKeyMapsNotFound(t *testing.T) {
 }
 
 type fakeGatewayAuthClient struct {
-	beginOIDC       *authv1.BeginOIDCLoginResponse
-	completeOIDC    *authv1.TokenPair
-	refresh         *authv1.AccessToken
-	create          *authv1.CreateAPIKeyResponse
-	list            *authv1.ListAPIKeysResponse
-	err             error
-	beginErr        error
-	completeErr     error
-	revokeErr       error
-	createErr       error
-	listErr         error
-	revokeKeyErr    error
-	login           *authv1.TokenPair
-	loginErr        error
-	platformLogin   *authv1.TokenPair
+	beginOIDC        *authv1.BeginOIDCLoginResponse
+	completeOIDC     *authv1.TokenPair
+	refresh          *authv1.AccessToken
+	create           *authv1.CreateAPIKeyResponse
+	list             *authv1.ListAPIKeysResponse
+	err              error
+	beginErr         error
+	completeErr      error
+	revokeErr        error
+	createErr        error
+	listErr          error
+	revokeKeyErr     error
+	login            *authv1.TokenPair
+	loginErr         error
+	platformLogin    *authv1.TokenPair
 	platformLoginErr error
 }
 

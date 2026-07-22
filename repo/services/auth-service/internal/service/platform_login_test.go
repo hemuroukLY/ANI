@@ -84,9 +84,9 @@ func TestPlatformPasswordLogin_Success(t *testing.T) {
 	userID := uuid.New()
 	store := &fakePlatformLoginStore{
 		user: ports.PlatformUser{
-			ID: userID,
+			ID:           userID,
 			PasswordHash: hashedPassword(t, "correct"),
-			Status: "active",
+			Status:       "active",
 		},
 	}
 	mgr := newPlatformLoginManager(store, issuer)
@@ -148,9 +148,9 @@ func TestPlatformPasswordLogin_InvalidCredentials(t *testing.T) {
 		{
 			name: "wrong password",
 			user: ports.PlatformUser{
-				ID: userID,
+				ID:           userID,
 				PasswordHash: hashedPassword(t, "different"),
-				Status: "active",
+				Status:       "active",
 			},
 		},
 		{
@@ -181,9 +181,9 @@ func TestPlatformPasswordLogin_DisabledUser(t *testing.T) {
 	userID := uuid.New()
 	store := &fakePlatformLoginStore{
 		user: ports.PlatformUser{
-			ID: userID,
+			ID:           userID,
 			PasswordHash: hashedPassword(t, "correct"),
-			Status: "disabled",
+			Status:       "disabled",
 		},
 	}
 	mgr := newPlatformLoginManager(store, issuer)
@@ -235,9 +235,9 @@ func TestPlatformPasswordLogin_OIDCOnlyUserRejected(t *testing.T) {
 	userID := uuid.New()
 	store := &fakePlatformLoginStore{
 		user: ports.PlatformUser{
-			ID: userID,
+			ID:           userID,
 			PasswordHash: "",
-			Status: "active",
+			Status:       "active",
 		},
 	}
 	mgr := newPlatformLoginManager(store, issuer)
