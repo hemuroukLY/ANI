@@ -1165,35 +1165,44 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * 查询租户用量统计
-         * @description 在租户 JWT 上下文中查询本租户的用量数据。
-         *     tenant_id 从 JWT 提取，忽略 query 中的 tenant_id 参数。
-         */
-        get: operations["getMeteringUsage"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/metering/usage/platform": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+        /** 查询租户用量统计 */
+        get: {
+            parameters: {
+                query: {
+                    start_time: string;
+                    end_time: string;
+                    resource_type?: string;
+                    group_by?: "resource_type" | "az" | "day" | "hour";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 租户用量统计 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: {
+                                resource_type?: string;
+                                total_quantity?: number;
+                                unit?: string;
+                                period?: string;
+                            }[];
+                            total?: number;
+                            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
         };
-        /**
-         * 查询平台跨租户用量
-         * @description 在平台 RBAC 上下文中查询全平台或指定租户的用量数据。
-         *     需 scope:metering:platform:read 权限。
-         *     items[].tenant_id 在此端点下必填。
-         *     若带 tenant_id query 须二次 RBAC 校验。
-         */
-        get: operations["getPlatformMeteringUsage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2254,6 +2263,7 @@ export interface components {
                  */
                 workload_class: "inference" | "training" | "batch";
             } | null;
+            sandbox_config?: components["schemas"]["SandboxConfig"];
         };
         /**
          * @description Sandbox 出口策略；local profile 仅记录意图，不代表真实网络隔离已执行。
@@ -3798,7 +3808,14 @@ export interface operations {
              *     - GPUNodeIncompatible: 无兼容 GPU 节点，请调整型号偏好或调度队列
              *     - QueueNotFound: 所选调度队列不存在或已删除
              */
-            422: components["responses"]["PreconditionFailed"];
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     getInstance: {
@@ -6470,8 +6487,20 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description 队列名称冲突，code: QueueNameConflict */
-            409: components["responses"]["Conflict"];
+            /** @description 队列名称冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example QueueNameConflict */
+                        code?: string;
+                        message?: string;
+                        request_id?: string;
+                    };
+                };
+            };
         };
     };
     getGPUSchedulingQueue: {
@@ -6518,8 +6547,20 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
-            /** @description 平台默认队列不可删除，code: PlatformDefaultProtected */
-            403: components["responses"]["Forbidden"];
+            /** @description 平台默认队列不可删除 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example PlatformDefaultProtected */
+                        code?: string;
+                        message?: string;
+                        request_id?: string;
+                    };
+                };
+            };
             404: components["responses"]["NotFound"];
         };
     };
@@ -6549,8 +6590,20 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            /** @description 平台默认队列不可修改，code: PlatformDefaultProtected */
-            403: components["responses"]["Forbidden"];
+            /** @description 平台默认队列不可修改 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example PlatformDefaultProtected */
+                        code?: string;
+                        message?: string;
+                        request_id?: string;
+                    };
+                };
+            };
             404: components["responses"]["NotFound"];
         };
     };

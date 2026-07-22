@@ -2,7 +2,8 @@
 /**
  * Generate Core API types for BOSS from api/openapi/v1.yaml.
  *
- * 同 Console 的 scripts/gen-core-schema.mjs 一致，仅路径指向 boss 工程根。
+ * Applies the same syntax normalisation as the Console gen-core-schema script
+ * so openapi-typescript can parse the Core contract without modifying v1.yaml.
  */
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
