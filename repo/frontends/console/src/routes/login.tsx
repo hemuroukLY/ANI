@@ -13,6 +13,16 @@ import {
 } from '@/auth/session'
 
 /**
+ * 生成幂等键：`console-pwd-<timestamp>-<random>`，符合 OpenAPI `^[A-Za-z0-9_-]{1,128}$` 约束。
+ * 每次提交重新生成，重试时复用同一表单会话的 key 由调用方决定（当前每次新建）。
+ */
+function generateIdempotencyKey(): string {
+  const ts = Date.now().toString(36)
+  const rand = Math.random().toString(36).slice(2, 10)
+  return `console-pwd-${ts}-${rand}`
+}
+
+/**
  * `/login` — Plain 企业风登录卡（P0 OIDC + P1 账密 Tab）。
  *
  * 布局：`.auth-page` 全屏居中 + `Card.auth-card` max-width 400px。
@@ -107,11 +117,13 @@ function LoginPage() {
     }
     setState('loading')
     try {
+      const idempotencyKey = generateIdempotencyKey()
       const { data, error, response } = await coreApi.POST('/auth/password/login', {
         body: {
           tenant_name: tenantName.trim(),
           username: username.trim(),
           password,
+          idempotency_key: idempotencyKey,
         },
       })
       if (error || !data || response.status !== 200) {

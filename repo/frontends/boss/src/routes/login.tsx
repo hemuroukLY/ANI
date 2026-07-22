@@ -13,6 +13,15 @@ import {
 } from '@/auth/session'
 
 /**
+ * 生成幂等键：`boss-pwd-<timestamp>-<random>`，符合 OpenAPI `^[A-Za-z0-9_-]{1,128}$` 约束。
+ */
+function generateIdempotencyKey(): string {
+  const ts = Date.now().toString(36)
+  const rand = Math.random().toString(36).slice(2, 10)
+  return `boss-pwd-${ts}-${rand}`
+}
+
+/**
  * BOSS `/login` — Plain 企业风登录卡（P1）。
  *
  * 双 Tab：企业登录（OIDC，与 Console 共用 Core /auth/oidc/begin、/auth/token）
@@ -99,8 +108,9 @@ function LoginPage() {
     }
     setState('loading')
     try {
+      const idempotencyKey = generateIdempotencyKey()
       const { data, error, response } = await coreApi.POST('/auth/platform/password/login', {
-        body: { username: username.trim(), password },
+        body: { username: username.trim(), password, idempotency_key: idempotencyKey },
       })
       if (error || !data || response.status !== 200) {
         const code = (error as { code?: string } | undefined)?.code
