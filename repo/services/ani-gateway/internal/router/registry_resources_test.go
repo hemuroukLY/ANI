@@ -1,11 +1,110 @@
 package router
 
 import (
+	"bytes"
 	"context"
+	"net/http"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/common/ut"
+	registryadapter "github.com/kubercloud/ani/pkg/adapters/registry"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
+
+func TestRegistryProjectCreateReplaysIdempotencyKeyBeforeProvider(t *testing.T) {
+	store := &registryIdempotencyStore{values: map[string][]byte{}}
+	provider := &countingRegistry{ImageRegistry: registryadapter.NewLocalImageRegistry()}
+	h := server.New()
+	h.Use(
+		middleware.RequestID(),
+		func(ctx context.Context, c *app.RequestContext) { c.Set("tenant_id", "demo-tenant"); c.Next(ctx) },
+		middleware.Idempotency(store),
+	)
+	registerHarbor(h.Group("/api/v1"), provider)
+
+	body := `{"idempotency_key":"registry-project-a","name":"demo-tenant","public":false}`
+	first := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/registry/projects", &ut.Body{Body: bytes.NewBufferString(body), Len: len(body)}, ut.Header{Key: "Content-Type", Value: "application/json"}).Result()
+	second := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/registry/projects", &ut.Body{Body: bytes.NewBufferString(body), Len: len(body)}, ut.Header{Key: "Content-Type", Value: "application/json"}).Result()
+	if first.StatusCode() != http.StatusCreated || second.StatusCode() != http.StatusCreated {
+		t.Fatalf("statuses = %d, %d, want 201", first.StatusCode(), second.StatusCode())
+	}
+	if string(first.Body()) != string(second.Body()) {
+		t.Fatalf("second response must replay first response: first=%q second=%q", first.Body(), second.Body())
+	}
+	if provider.createProjectCalls != 1 {
+		t.Fatalf("CreateProject calls = %d, want 1", provider.createProjectCalls)
+	}
+}
+
+type countingRegistry struct {
+	ports.ImageRegistry
+	createProjectCalls int
+}
+
+func (r *countingRegistry) CreateProject(ctx context.Context, request ports.RegistryProjectRequest) (ports.RegistryProject, error) {
+	r.createProjectCalls++
+	return r.ImageRegistry.CreateProject(ctx, request)
+}
+
+type capturingRegistry struct {
+	ports.ImageRegistry
+	listImagesRequest ports.RegistryImageListRequest
+}
+
+func (r *capturingRegistry) ListImages(ctx context.Context, request ports.RegistryImageListRequest) (ports.RegistryImageListResult, error) {
+	r.listImagesRequest = request
+	return r.ImageRegistry.ListImages(ctx, request)
+}
+
+type registryIdempotencyStore struct {
+	mu     sync.Mutex
+	values map[string][]byte
+}
+
+func (s *registryIdempotencyStore) Get(_ context.Context, key string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.values[key]
+	if !ok {
+		return nil, ports.ErrNotFound
+	}
+	return append([]byte(nil), value...), nil
+}
+func (s *registryIdempotencyStore) Set(_ context.Context, key string, value []byte, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.values[key] = append([]byte(nil), value...)
+	return nil
+}
+func (s *registryIdempotencyStore) SetNX(_ context.Context, key string, value []byte, _ time.Duration) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.values[key]; ok {
+		return false, nil
+	}
+	s.values[key] = append([]byte(nil), value...)
+	return true, nil
+}
+func (s *registryIdempotencyStore) Delete(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.values, key)
+	return nil
+}
+func (s *registryIdempotencyStore) Increment(context.Context, string, time.Duration) (int64, error) {
+	return 0, nil
+}
+func (s *registryIdempotencyStore) Exists(_ context.Context, key string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.values[key]
+	return ok, nil
+}
 
 func TestRegistryAPIProjectRepositoryAndArtifactResponses(t *testing.T) {
 	api := newRegistryAPI()
@@ -127,4 +226,25 @@ func TestRegistryAPIProjectPullSecretAndScanReportResponses(t *testing.T) {
 		t.Fatalf("report response = %+v, want complete one-artifact report", reportResponse)
 	}
 	requireLocalCoreDevProfile(t, reportResponse.DevProfile, "local-image-registry")
+}
+
+func TestRegistryAPIListImagesPassesPurposeAndReturnsPurpose(t *testing.T) {
+	provider := &capturingRegistry{ImageRegistry: registryadapter.NewLocalImageRegistry()}
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerHarbor(h.Group("/api/v1"), provider)
+
+	response := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/registry/images?purpose=gpu", nil).Result()
+	if response.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", response.StatusCode(), response.Body())
+	}
+	if provider.listImagesRequest.Purpose != "gpu" {
+		t.Fatalf("purpose forwarded = %q, want gpu", provider.listImagesRequest.Purpose)
+	}
+	if !bytes.Contains(response.Body(), []byte(`"purpose":"gpu"`)) {
+		t.Fatalf("body = %s, want image purpose", response.Body())
+	}
 }
