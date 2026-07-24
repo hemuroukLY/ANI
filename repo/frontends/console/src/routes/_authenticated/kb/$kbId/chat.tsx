@@ -31,7 +31,12 @@ function KBChat() {
       // 生成或复用幂等键：新问题生成新键，重试复用同一键
       api.POST('/knowledge-bases/{kb_id}/query', {
         params: { path: { kb_id: kbId } },
-        body: { question: q, idempotency_key: idempotencyKeyRef.current ?? `ani_${crypto.randomUUID()}` },
+        body: {
+          question: q,
+          idempotency_key: `chat-${Date.now()}`,
+          top_k: 5,
+          score_threshold: 0.3,
+        },
       }).then(({ data }) => data),
     onSuccess: (data) => {
       idempotencyKeyRef.current = null // 请求成功后清空，下一次提问生成新键
