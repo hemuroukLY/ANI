@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/kubercloud/ani/pkg v0.0.0
+	github.com/redis/go-redis/v9 v9.5.1
 	google.golang.org/grpc v1.79.3
 	google.golang.org/protobuf v1.36.10
 )
