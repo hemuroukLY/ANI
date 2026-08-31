@@ -37,4 +37,7 @@ var (
 	ErrMetadataTenantTxCommit   = errors.New("metadata tenant tx commit")
 	ErrMetadataPlatformTxBegin  = errors.New("metadata platform tx begin")
 	ErrMetadataPlatformTxCommit = errors.New("metadata platform tx commit")
+
+	// ErrNotImplemented marks a port adapter method that is declared but not yet implemented.
+	ErrNotImplemented = errors.New("501 Not Implemented")
 )

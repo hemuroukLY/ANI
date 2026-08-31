@@ -1,0 +1,86 @@
+package ports
+
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// PlatformUserAdminStore defines platform-admin CRUD against users / roles / user_roles.
+// Implementations must use platform bypass RLS (WithPlatformTx) and never set tenant_id.
+type PlatformUserAdminStore interface {
+	// Create inserts a platform account (tenant_id IS NULL) and binds a platform role.
+	// passwordHash is pre-computed by the caller (gateway bcrypt); Store does not hash.
+	Create(ctx context.Context, in PlatformUserCreate) (PlatformUser, error)
+
+	// List returns cursor-paginated platform accounts (tenant_id IS NULL, is_deleted=FALSE).
+	List(ctx context.Context, filter PlatformUserFilter) (PlatformUserListResult, error)
+
+	// Get returns one platform account by ID (no password_hash).
+	Get(ctx context.Context, userID uuid.UUID) (PlatformUser, error)
+
+	// ChangeRole deletes old user_roles and inserts the new role inside a transaction.
+	ChangeRole(ctx context.Context, userID uuid.UUID, newRole string) error
+
+	// ResetPassword validates the new password differs from the old, hashes, and updates password_hash.
+	ResetPassword(ctx context.Context, userID uuid.UUID, newPassword string) error
+
+	// SetStatus updates users.status (active/disabled) with last-admin protection.
+	SetStatus(ctx context.Context, userID uuid.UUID, status string) error
+
+	// SoftDelete sets is_deleted=TRUE, deleted_at=now(), status=disabled.
+	SoftDelete(ctx context.Context, userID uuid.UUID) error
+
+	// CountActivePlatformAdmins counts active platform-admin rows, excluding excludeUserID.
+	CountActivePlatformAdmins(ctx context.Context, excludeUserID uuid.UUID) (int, error)
+
+	// ListPlatformRoles returns platform built-in roles (tenant_id IS NULL) from the roles table.
+	ListPlatformRoles(ctx context.Context) ([]PlatformRole, error)
+}
+
+// PlatformUser is the Core platform-admin view (never includes password_hash).
+type PlatformUser struct {
+	ID          uuid.UUID
+	Email       string
+	Username    string
+	DisplayName *string
+	Role        string // platform-admin | platform-ops | platform-readonly
+	Status      string // active | disabled
+	Source      string // local | third_party (inferred from username prefix)
+	LastLoginAt *time.Time
+	CreatedAt   time.Time
+}
+
+// PlatformUserCreate is the input for Create (password already bcrypt-hashed).
+type PlatformUserCreate struct {
+	Email        string
+	Username     string // without prefix; Store prepends local:
+	DisplayName  string
+	Role         string
+	PasswordHash string
+}
+
+// PlatformUserFilter is the cursor-page filter for List.
+type PlatformUserFilter struct {
+	Limit  int
+	Cursor string
+	Role   string
+	Status string
+	Source string // local | oidc (username prefix filter)
+	Search string // email / username ILIKE
+}
+
+// PlatformUserListResult is a cursor page of platform users.
+type PlatformUserListResult struct {
+	Items      []PlatformUser
+	NextCursor string // "" = no more
+}
+
+// PlatformRole is a platform built-in role with BOSS four-dimension permissions.
+type PlatformRole struct {
+	Name        string
+	Label       string
+	Description string
+	Permissions map[string]string // tenant_ops / resource_pool / platform_user / audit_export → read/write/none
+}
