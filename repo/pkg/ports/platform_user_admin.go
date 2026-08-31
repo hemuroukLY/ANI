@@ -12,13 +12,13 @@ import (
 type PlatformUserAdminStore interface {
 	// Create inserts a platform account (tenant_id IS NULL) and binds a platform role.
 	// passwordHash is pre-computed by the caller (gateway bcrypt); Store does not hash.
-	Create(ctx context.Context, in PlatformUserCreate) (PlatformUser, error)
+	Create(ctx context.Context, in PlatformUserCreate) (PlatformUserAdmin, error)
 
 	// List returns cursor-paginated platform accounts (tenant_id IS NULL, is_deleted=FALSE).
 	List(ctx context.Context, filter PlatformUserFilter) (PlatformUserListResult, error)
 
 	// Get returns one platform account by ID (no password_hash).
-	Get(ctx context.Context, userID uuid.UUID) (PlatformUser, error)
+	Get(ctx context.Context, userID uuid.UUID) (PlatformUserAdmin, error)
 
 	// ChangeRole deletes old user_roles and inserts the new role inside a transaction.
 	ChangeRole(ctx context.Context, userID uuid.UUID, newRole string) error
@@ -39,8 +39,9 @@ type PlatformUserAdminStore interface {
 	ListPlatformRoles(ctx context.Context) ([]PlatformRole, error)
 }
 
-// PlatformUser is the Core platform-admin view (never includes password_hash).
-type PlatformUser struct {
+// PlatformUserAdmin is the Core platform-admin view (never includes password_hash).
+// Named ...Admin to avoid clashing with PlatformLoginStore's PlatformUser (login view).
+type PlatformUserAdmin struct {
 	ID          uuid.UUID
 	Email       string
 	Username    string
@@ -71,16 +72,16 @@ type PlatformUserFilter struct {
 	Search string // email / username ILIKE
 }
 
-// PlatformUserListResult is a cursor page of platform users.
+// PlatformUserListResult is a cursor page of platform admins.
 type PlatformUserListResult struct {
-	Items      []PlatformUser
+	Items      []PlatformUserAdmin
 	NextCursor string // "" = no more
 }
 
-// PlatformRole is a platform built-in role with BOSS four-dimension permissions.
+// PlatformRole is a platform built-in role; Permissions is roles.permissions JSONB as-is.
 type PlatformRole struct {
 	Name        string
 	Label       string
 	Description string
-	Permissions map[string]string // tenant_ops / resource_pool / platform_user / audit_export → read/write/none
+	Permissions []map[string]any // resource/actions/scope entries (tenants / resource_pool / users / metering)
 }

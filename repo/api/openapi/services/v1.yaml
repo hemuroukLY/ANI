@@ -1250,13 +1250,9 @@ components:
         label:       { type: string }
         description: { type: string }
         permissions:
-          type: object
-          required: [tenant_ops, resource_pool, platform_user, audit_export]
-          properties:
-            tenant_ops:    { type: string, enum: [read, write, none] }
-            resource_pool: { type: string, enum: [read, write, none] }
-            platform_user: { type: string, enum: [read, write, none] }
-            audit_export:  { type: string, enum: [read, write, none] }
+          type: array
+          description: "roles.permissions JSONB 原样（resource/actions/scope）；resource 含 tenants / resource_pool / users / metering"
+          items: { type: object, additionalProperties: true }
 
     PlatformRoleListResponse:
       type: object

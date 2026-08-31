@@ -5,7 +5,6 @@ package platform_settings.v1;
 import "common/v1/common.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
-import "google/protobuf/wrappers.proto";
 
 option go_package = "github.com/kubercloud/ani/pkg/generated/pb/platform_settings/v1;platformsettingsv1";
 
@@ -123,14 +122,8 @@ message PlatformRole {
   string name = 1;
   string label = 2;
   string description = 3;
-  PlatformRolePermissions permissions = 4;
-}
-
-message PlatformRolePermissions {
-  string tenant_ops = 1;
-  string resource_pool = 2;
-  string platform_user = 3;
-  string audit_export = 4;
+  // roles.permissions JSONB 原样（resource/actions/scope）
+  repeated google.protobuf.Struct permissions = 4;
 }
 
 message PlatformAdminAuditLog {

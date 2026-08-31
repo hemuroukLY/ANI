@@ -64,7 +64,7 @@
 |---|---|---|
 | Issue AC「`make proto`（buf generate）生成 pb」 | pb 已生成到位（`platform_admin_service.pb.go` / `_grpc.pb.go`），但本次会话内 `buf lint` 因沙箱拒绝写 `C:\Users\...\AppData\Local\buf\v3\wasmruntime` 无法复跑 | 生成物已存在且 `go vet` 通过；buf 工具链问题与代码正确性无关，可在非沙箱环境复验 |
 | Issue AC「`make gen-core-sdk` 重新生成，**新增 PlatformUser 相关方法**」 | anisdk 已含 8 个 PlatformUser 方法（`createPlatformUser` 等，issue-001 commit `7b5a68d` 已交付），本批**无增量** | SDK 生成物在 issue-001 已随契约一并交付（两 issue 实际合并交付）；本批仅消费现成 SDK，AC 中「重新生成」无新内容可刷 |
-| Issue AC「`make test` 通过」 | 以 `go build ./services/platform-settings-service/... ./pkg/ports/... ./pkg/adapters/...` + `go vet ./services/platform-settings-service/...` 验证（服务包通过）；**`pkg/ports` 编译失败**：`PlatformUser` 与 [password_login.go:46](file:///d:/Jczn/project/ANI/ANI/repo/pkg/ports/password_login.go#L46) 既有同名 struct 冲突 | **阻塞缺陷，见 Open Questions #1**——两文件同包同 struct 名，Go 不允许。骨架已写完但未修名冲突 |
+| Issue AC「`make test` 通过」 | `go build ./pkg/ports/... ./pkg/adapters/... ./services/platform-settings-service/...` + `go vet` + `go test`（相关包）全 PASS。期间发现并已修复：初版 `PlatformUser` 与 [password_login.go:46](file:///d:/Jczn/project/ANI/ANI/repo/pkg/ports/password_login.go#L46) 同名冲突（`pkg/ports` 编译失败），**已改名 `PlatformUserAdmin`**（含 Create/Get/List Result Items 引用，共 5 处），编译恢复 | 冲突为真实阻塞缺陷，按用户拍板采用「改新 struct 名」方案（与 store/文件名 `platform_user_admin` 对齐，不动已上线密码登录代码）；`pkg/adapters/runtime` 的 symlink 测试失败为沙箱环境问题，与本流无关 |
 | SPEC §3.2.2「`CorePlatformUserClient` 8 方法（含 ListPlatformRoles）」 | 与 SPEC 一致；但 `PlatformUserCreateInput` 含明文 `Password`（Core 端口 `PlatformUserCreate` 含 `PasswordHash`） | 分层职责：网关 bcrypt → Core handler 收明文转 hash → Services 层经 Core SDK HTTP 传明文（TLS 内网）→ Core 端口已是 hash。与 SPEC §3.2.1「passwordHash is pre-computed by the caller (gateway bcrypt)」逐层语义一致，非笔误 |
 | Issue「adapter/handler 返回 501 占位」 | Core 侧 postgres adapter 返回 `errors.New("501 Not Implemented")`；Services 侧 gRPC 返回 `codes.Unimplemented`（HTTP 语义 501 对应） | 两层占位错误域不同（Design Decision 2），行为均符合「占位不实现」意图 |
 
@@ -77,7 +77,7 @@
 
 ## Open Questions
 
-1. **【阻塞】`PlatformUser` 同名冲突**：[pkg/ports/platform_user_admin.go:43](file:///d:/Jczn/project/ANI/ANI/repo/pkg/ports/platform_user_admin.go#L43) 与 [pkg/ports/password_login.go:46](file:///d:/Jczn/project/ANI/ANI/repo/pkg/ports/password_login.go#L46)（平台密码登录既有 struct，仅 ID/PasswordHash/Status 三字段）同名，`go build ./pkg/ports/...` 失败。**建议改名**：新 struct 改 `PlatformUserAdmin`（与文件名 `platform_user_admin.go` 和 store 名对齐），或旧 login struct 改 `PlatformLoginUser`。前者动本流新代码（5 处引用），后者动已上线密码登录代码——倾向前者。需要用户拍板后修复并重跑 `make test`。
+1. ~~**【已解决】`PlatformUser` 同名冲突**~~：与 [password_login.go:46](file:///d:/Jczn/project/ANI/ANI/repo/pkg/ports/password_login.go#L46) 冲突（平台密码登录既有 struct，仅 ID/PasswordHash/Status 三字段）。2026-08-31 已按用户拍板改新 struct 名为 `PlatformUserAdmin`（[platform_user_admin.go](file:///d:/Jczn/project/ANI/ANI/repo/pkg/ports/platform_user_admin.go)，5 处引用同步），`go build` / `go vet` / `go test` 相关包全部恢复 PASS。
 2. **`buf lint` 沙箱不可用**：proto 生成物已存在，但 lint/格式（`buf format`）未复验。建议在非沙箱终端跑 `make proto && buf lint api/proto` 确认无 STYLE 告警。
 3. **issue-001/002 交付边界实际合并**：SDK 生成与契约在同一 commit `7b5a68d` 交付，本批无 SDK 增量。若后续 `/review-it` 或 `/ship-it` 按 issue 独立验收，需在 PR 描述说明「SDK 部分 see 7b5a68d」。
 4. **`go.work` 未含本服务时 IDE 可能报错**：go.work 已加条目（本批完成）；但 Dockerfile 构建依赖 `go.work.sum` 同步——若 go.work.sum 缺新条目，CI 镜像构建会失败。建议 `go work sync` 后提交。
@@ -87,13 +87,14 @@
 
 ```bash
 cd repo
-go vet ./services/platform-settings-service/...          # PASS（10 RPC 骨架编译通过）
-go build ./services/platform-settings-service/...        # PASS
-go build ./pkg/ports/... ./pkg/adapters/...              # FAIL —— PlatformUser 同名冲突（Open Questions #1）
+go build ./pkg/ports/... ./pkg/adapters/... ./services/platform-settings-service/...   # PASS（冲突已修，PlatformUserAdmin）
+go vet ./pkg/ports/... ./pkg/adapters/postgres/... ./services/platform-settings-service/...  # PASS
+go test ./pkg/ports/... ./pkg/adapters/... ./services/platform-settings-service/... ./services/auth-service/...  # PASS
+#   （pkg/adapters/runtime symlink 测试在沙箱内必挂，属环境问题，与本流无关，已排除）
 # 文件核对：
 #   services/platform-settings-service/ 全 12 文件就位（main/go.mod/go.sum/Dockerfile/config + ports×3 + adapters×2 + service×1）
 #   pkg/generated/pb/platform_settings/v1/ 2 文件就位（含 10 RPC Server interface）
-#   pkg/ports/platform_user_admin.go 9 方法 + 5 struct 对齐 SPEC §3.2.1
+#   pkg/ports/platform_user_admin.go 9 方法 + 5 struct 对齐 SPEC §3.2.1（struct 现名 PlatformUserAdmin）
 #   go.work 追加 ./services/platform-settings-service
 #   未触碰 services/tenant-service/（git status 无该路径变更）
 # buf lint api/proto  → 沙箱拒绝（wasmruntime 目录不可写），需非沙箱环境复验
@@ -103,4 +104,4 @@ go build ./pkg/ports/... ./pkg/adapters/...              # FAIL —— PlatformU
 
 - 本批次仅骨架：所有方法（Core adapter / Services adapter / gRPC RPC）均 501 / `codes.Unimplemented` 占位，无 SQL、无 HTTP 调用、无幂等逻辑。
 - Core handler（HTTP 端点实现）属 issue-004；ListPlatformRoles 具体实现属 issue-007；网关接入属 issue-005。
-- 不声明 runtime ready 或 production ready；`make test` 因 #1 冲突未通过，实现笔记在冲突修复前不应视为 issue-002 完结。
+- 不声明 runtime ready 或 production ready；同名冲突已修复（2026-08-31，`PlatformUserAdmin`），相关包 build/vet/test 全 PASS，issue-002 骨架交付完整。

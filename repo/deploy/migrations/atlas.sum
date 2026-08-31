@@ -1,4 +1,4 @@
-h1:HHlryIYBPcEC8hZgQI+kZwYsBTBJTLvr4Q+eu7pmY2c=
+h1:RCKfVwnISb0XLF5n67Q4xBDWhlSbtYtXWLZHBNEN9E8=
 20260501000100_init_schema.sql h1:M4G3Wd+Bw2Zt4FUz5wq1kw519PAMb37SpkfRhS02ubI=
 20260502000200_operations_idempotency.sql h1:c79fYzupq5/lgRDB2t4xMUB4eRKrzpNnJ0UT5ZAOnqQ=
 20260502000300_permissions_schema.sql h1:7E8kXUbRLQZrNrMkGdqIrHvTZjl/7v2IxsPZhz8KIe0=
@@ -30,3 +30,4 @@ h1:HHlryIYBPcEC8hZgQI+kZwYsBTBJTLvr4Q+eu7pmY2c=
 20260827000200_users_display_name_soft_delete.sql h1:MD63wOL3z0f7IQGx6G4AStztGpcRLCLrrkBJoFrl5xg=
 20260828000100_database_roles_hardening.sql h1:r+K1uLtQ0A8nOSBM02zw8LKomC5qJbR5yRq71SrA8+s=
 20260828000200_app_role_privileges.sql h1:+XN0HUpLcrmn/8qZj3b6VtgP3KQVi7Qoldwnypt1Dfc=
+20260831000100_platform_roles_seed.sql h1:n+bJlqTf2H2XkVICXhHPOmoMI7dTqgG3L1/ZNzhOAUM=

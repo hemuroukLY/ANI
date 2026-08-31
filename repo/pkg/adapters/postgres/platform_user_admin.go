@@ -18,10 +18,10 @@ func NewPostgresPlatformUserAdminStore() ports.PlatformUserAdminStore {
 	return &PostgresPlatformUserAdminStore{}
 }
 
-func (s *PostgresPlatformUserAdminStore) Create(ctx context.Context, in ports.PlatformUserCreate) (ports.PlatformUser, error) {
+func (s *PostgresPlatformUserAdminStore) Create(ctx context.Context, in ports.PlatformUserCreate) (ports.PlatformUserAdmin, error) {
 	_ = ctx
 	_ = in
-	return ports.PlatformUser{}, ports.ErrNotImplemented
+	return ports.PlatformUserAdmin{}, ports.ErrNotImplemented
 }
 
 func (s *PostgresPlatformUserAdminStore) List(ctx context.Context, filter ports.PlatformUserFilter) (ports.PlatformUserListResult, error) {
@@ -30,10 +30,10 @@ func (s *PostgresPlatformUserAdminStore) List(ctx context.Context, filter ports.
 	return ports.PlatformUserListResult{}, ports.ErrNotImplemented
 }
 
-func (s *PostgresPlatformUserAdminStore) Get(ctx context.Context, userID uuid.UUID) (ports.PlatformUser, error) {
+func (s *PostgresPlatformUserAdminStore) Get(ctx context.Context, userID uuid.UUID) (ports.PlatformUserAdmin, error) {
 	_ = ctx
 	_ = userID
-	return ports.PlatformUser{}, ports.ErrNotImplemented
+	return ports.PlatformUserAdmin{}, ports.ErrNotImplemented
 }
 
 func (s *PostgresPlatformUserAdminStore) ChangeRole(ctx context.Context, userID uuid.UUID, newRole string) error {

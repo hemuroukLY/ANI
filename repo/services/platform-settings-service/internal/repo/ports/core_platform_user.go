@@ -57,5 +57,5 @@ type PlatformRoleDTO struct {
 	Name        string
 	Label       string
 	Description string
-	Permissions map[string]string
+	Permissions []map[string]any // roles.permissions JSONB 原样（resource/actions/scope）
 }
