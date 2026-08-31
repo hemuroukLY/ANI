@@ -40,4 +40,7 @@ var (
 
 	// ErrNotImplemented marks a port adapter method that is declared but not yet implemented.
 	ErrNotImplemented = errors.New("501 Not Implemented")
+	// Reservation sentinel errors (BOSS reservation management).
+	ErrReservationExceedsQuota = errors.New("allocated_gpu_count exceeds total quota")
+	ErrReservedInsufficient    = errors.New("reserved quota insufficient: allocated - used - reserved < request")
 )

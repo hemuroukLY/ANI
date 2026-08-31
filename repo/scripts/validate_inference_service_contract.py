@@ -38,7 +38,14 @@ REQUIRED_OPERATIONS = {
     ("/inference-operations/{operation_id}", "get"): "getInferenceOperation",
     ("/inference-services/{service_id}/logs", "get"): "getInferenceServiceLogs",
     ("/inference-services/{service_id}/test", "post"): "testInferenceService",
+    ("/inference-policies", "get"): "listInferenceAccessPolicies",
+    ("/inference-policies", "post"): "createInferenceAccessPolicy",
+    ("/inference-policies/{policy_id}", "get"): "getInferenceAccessPolicy",
+    ("/inference-policies/{policy_id}", "patch"): "patchInferenceAccessPolicy",
+    ("/inference-policies/{policy_id}", "delete"): "deleteInferenceAccessPolicy",
+    ("/inference-services/{service_id}/policies", "get"): "listInferenceServicePolicies",
     ("/inference-services/{service_id}/policies", "put"): "updateInferenceServicePolicies",
+    ("/inference-policy-events", "get"): "listInferencePolicyEvents",
 }
 EXPECTED_TASK_TYPES = {
     ("/inference-services", "post"): ["inference_service.create"],
@@ -291,6 +298,15 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
     accelerator = schemas.get("InferenceServiceAccelerator") or {}
     if set(accelerator.get("required") or []) != {"spec_id", "count_per_replica"}:
         errors.append("InferenceServiceAccelerator must require spec_id and count_per_replica")
+    memory = (accelerator.get("properties") or {}).get("memory") or {}
+    if memory.get("type") != "integer":
+        errors.append("InferenceServiceAccelerator.memory must be integer")
+    if memory.get("minimum") != 1:
+        errors.append("InferenceServiceAccelerator.memory must have minimum 1")
+    if "memory" in set(accelerator.get("required") or []):
+        errors.append("InferenceServiceAccelerator.memory must remain optional")
+    if "gpu_mode" in (accelerator.get("properties") or {}):
+        errors.append("InferenceServiceAccelerator must not declare gpu_mode; wholecard vs vGPU is implied by memory")
 
     update_request = schemas.get("UpdateInferenceServiceRequest") or {}
     if set((update_request.get("properties") or {}).keys()) != {"idempotency_key", "replicas"}:
@@ -378,8 +394,8 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
         errors.append("InferenceServiceEngine.command must be a string argv, not structured flags")
 
     policies = (paths.get("/inference-services/{service_id}/policies") or {}).get("put") or {}
-    if "501" not in (policies.get("responses") or {}):
-        errors.append("updateInferenceServicePolicies must declare 501 FEATURE_NOT_AVAILABLE")
+    if "501" in (policies.get("responses") or {}):
+        errors.append("updateInferenceServicePolicies must not declare 501 FEATURE_NOT_AVAILABLE after C42")
     runtime_test = (paths.get("/inference-services/{service_id}/test") or {}).get("post") or {}
     missing_runtime_responses = {"422", "502", "503", "504"} - set(runtime_test.get("responses") or {})
     if missing_runtime_responses:

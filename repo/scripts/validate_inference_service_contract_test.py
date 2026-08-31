@@ -59,11 +59,27 @@ class InferenceServiceContractTest(unittest.TestCase):
         errors = validator.validate(spec)
         self.assertIn("InferenceService must not expose runtime_endpoint", errors)
 
-    def test_policy_501_semantics_are_required(self) -> None:
+    def test_policy_501_semantics_are_removed_for_c42(self) -> None:
         spec = copy.deepcopy(self.spec)
-        spec["paths"]["/inference-services/{service_id}/policies"]["put"]["responses"].pop("501")
+        spec["paths"]["/inference-services/{service_id}/policies"]["put"]["responses"]["501"] = {
+            "$ref": "#/components/responses/FeatureNotAvailable"
+        }
         errors = validator.validate(spec)
-        self.assertIn("updateInferenceServicePolicies must declare 501 FEATURE_NOT_AVAILABLE", errors)
+        self.assertIn("updateInferenceServicePolicies must not declare 501 FEATURE_NOT_AVAILABLE after C42", errors)
+
+    def test_c42_policy_operations_are_declared(self) -> None:
+        paths = self.spec["paths"]
+        expected = {
+            ("/inference-policies", "get"): "listInferenceAccessPolicies",
+            ("/inference-policies", "post"): "createInferenceAccessPolicy",
+            ("/inference-policies/{policy_id}", "get"): "getInferenceAccessPolicy",
+            ("/inference-policies/{policy_id}", "patch"): "patchInferenceAccessPolicy",
+            ("/inference-policies/{policy_id}", "delete"): "deleteInferenceAccessPolicy",
+            ("/inference-services/{service_id}/policies", "get"): "listInferenceServicePolicies",
+            ("/inference-policy-events", "get"): "listInferencePolicyEvents",
+        }
+        for (path, method), operation_id in expected.items():
+            self.assertEqual(paths[path][method]["operationId"], operation_id)
 
     def test_runtime_test_declares_stable_failure_responses(self) -> None:
         responses = self.spec["paths"]["/inference-services/{service_id}/test"]["post"]["responses"]
@@ -166,6 +182,35 @@ class InferenceServiceContractTest(unittest.TestCase):
         self.assertEqual(
             set(schemas["UpdateInferenceServiceRequest"]["properties"]),
             {"idempotency_key", "replicas"},
+        )
+
+    def test_accelerator_count_is_required_and_memory_is_optional(self) -> None:
+        accelerator = self.spec["components"]["schemas"]["InferenceServiceAccelerator"]
+        self.assertEqual(set(accelerator["required"]), {"spec_id", "count_per_replica"})
+        self.assertEqual(accelerator["properties"]["count_per_replica"]["minimum"], 1)
+        self.assertNotIn("gpu_mode", accelerator["properties"])
+        memory = accelerator["properties"]["memory"]
+        self.assertEqual(memory["type"], "integer")
+        self.assertEqual(memory["minimum"], 1)
+        spec = copy.deepcopy(self.spec)
+        spec["components"]["schemas"]["InferenceServiceAccelerator"]["required"] = [
+            "spec_id",
+            "count_per_replica",
+            "memory",
+        ]
+        errors = validator.validate(spec)
+        self.assertIn("InferenceServiceAccelerator.memory must remain optional", errors)
+
+    def test_accelerator_rejects_gpu_mode(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        spec["components"]["schemas"]["InferenceServiceAccelerator"]["properties"]["gpu_mode"] = {
+            "type": "string",
+            "enum": ["wholecard", "vgpu"],
+        }
+        errors = validator.validate(spec)
+        self.assertIn(
+            "InferenceServiceAccelerator must not declare gpu_mode; wholecard vs vGPU is implied by memory",
+            errors,
         )
 
     def test_authenticated_reads_declare_auth_failures(self) -> None:
