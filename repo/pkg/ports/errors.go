@@ -32,6 +32,15 @@ var (
 	ErrTransferTargetInvalid  = errors.New("transfer target invalid")
 	ErrRoleChangeInvalid      = errors.New("role change invalid")
 	ErrPasswordSameAsOld      = errors.New("password same as old")
+
+	// Platform user admin sentinel errors (users / user_roles / roles，平台维度)。
+	ErrPlatformUserNotFound  = errors.New("platform user not found")
+	ErrRoleNotFound          = errors.New("role not found")
+	ErrEmailAlreadyExists    = errors.New("email already exists")
+	ErrUsernameAlreadyExists = errors.New("username already exists")
+	ErrLastPlatformAdmin     = errors.New("last platform admin")
+	ErrValidationFailed      = errors.New("validation failed")
+
 	// Metadata transaction sentinel errors.
 	ErrMetadataTenantTxBegin    = errors.New("metadata tenant tx begin")
 	ErrMetadataTenantTxCommit   = errors.New("metadata tenant tx commit")

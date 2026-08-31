@@ -20,6 +20,10 @@ class ServicesBoundaryValidationTest(unittest.TestCase):
         self.assertIn("envoy-authz-adapter", guard.SERVICES_OWNED_SOURCE_ROOTS)
         self.assertIn("services/envoy-authz-adapter", guard.GO_SCAN_ROOTS)
 
+    def test_platform_settings_service_is_classified_as_services_owned_source(self) -> None:
+        self.assertIn("platform-settings-service", guard.SERVICES_OWNED_SOURCE_ROOTS)
+        self.assertIn("services/platform-settings-service", guard.GO_SCAN_ROOTS)
+
     def test_repo_baseline_is_warn_only(self) -> None:
         result = guard.validate_workspace(guard.ROOT, run_spec_split=False)
 
