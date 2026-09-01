@@ -43,14 +43,6 @@
 - **审计复用 `audit_logs` 分区表 vs 新建平台专用审计表**：复用省一张表 + 迁移，平台级用 `tenant_id IS NULL` 天然隔离，`resource='platform_user'` + `details->>'target_id'` 精确定位；代价是查询耦合 `details` JSONB（无专用索引，平台账号量级小可接受）。
 - **`CORE_UNAVAILABLE` 统一兜底 404/501 vs 精确区分「端点未实现」**：过渡期统一为可读的 502 业务码，链路验证聚焦「转发链本身正确」；Core 落地后真实 404/501 会自然浮出，届时无需改这层代码。
 
-## Open Questions
-
-无阻塞性问题（review-it 全部 finding 已闭环：F1 已修、F2/F3 已按裁决移交 #5–#10 并写入 issue 分工边界、F4/F5 文档已对齐）。移交事项：
-
-1. **#5**：roles 相关落地时需重生 pb（`make gen-proto`）并同步修正网关 `platformRoleJSON` 映射形状（proto `repeated Struct` vs pb 旧 4 维漂移）。
-2. **#5–#10**：SDK 写操作幂等键透传（经 `RequestOptions.Headers` 携带 `Idempotency-Key`；SDK 的 `IdempotencyOperations` 已含全部 5 个写 operation）。
-3. **#5–#10**：各 issue 文件中「网关转发 + SDK client 方法」相关 AC 需收敛为引用本 issue（避免重复实现）。
-4. **Core 层独立 issue**：`/admin/platform-users/*` handler + `PostgresPlatformUserAdminStore` SQL + #7 两个权限查询端点，合入前本链路对 Core 调用统一返回 `CORE_UNAVAILABLE`。
 
 ## Verification
 
