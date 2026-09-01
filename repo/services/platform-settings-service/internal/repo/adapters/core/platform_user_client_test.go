@@ -52,7 +52,7 @@ func TestCorePlatformUserClient_List_ParamsAndDecode(t *testing.T) {
 	}
 }
 
-func TestCorePlatformUserClient_Create_ThenGet(t *testing.T) {
+func TestCorePlatformUserClient_Create(t *testing.T) {
 	t.Parallel()
 
 	id := "22222222-2222-2222-2222-222222222222"
@@ -63,13 +63,9 @@ func TestCorePlatformUserClient_Create_ThenGet(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/admin/platform-users":
 			sawCreate = true
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "message": "ok"})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/platform-users/"+id:
+		case r.Method == http.MethodGet:
 			sawGet = true
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": id, "email": "b@example.com", "username": "local:admin",
-				"display_name": "Admin", "role": "platform-admin", "status": "active",
-				"source": "local", "created_at": "2026-08-31T01:00:00Z",
-			})
+			t.Fatalf("Create must not call GET: %s %s", r.Method, r.URL.Path)
 		default:
 			t.Fatalf("%s %s", r.Method, r.URL.Path)
 		}
@@ -83,8 +79,8 @@ func TestCorePlatformUserClient_Create_ThenGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if !sawCreate || !sawGet || out.ID != id {
-		t.Fatalf("create=%v get=%v out=%+v", sawCreate, sawGet, out)
+	if !sawCreate || sawGet || out != id {
+		t.Fatalf("create=%v get=%v out=%q", sawCreate, sawGet, out)
 	}
 }
 
@@ -97,7 +93,6 @@ func TestMapSDKError_BusinessCodes(t *testing.T) {
 	}{
 		{"PLATFORM_USER_NOT_FOUND", ports.ErrPlatformUserNotFound},
 		{"ROLE_NOT_FOUND", ports.ErrRoleNotFound},
-		{"EMAIL_ALREADY_EXISTS", ports.ErrEmailAlreadyExists},
 		{"USERNAME_ALREADY_EXISTS", ports.ErrUsernameAlreadyExists},
 		{"LAST_PLATFORM_ADMIN", ports.ErrLastPlatformAdmin},
 		{"PASSWORD_SAME_AS_OLD", ports.ErrPasswordSameAsOld},

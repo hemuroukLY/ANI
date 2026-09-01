@@ -399,7 +399,6 @@ var platformAdminBusinessCodeByHTTP = map[string]int{
 	"VALIDATION_FAILED":       http.StatusBadRequest,
 	"PLATFORM_USER_NOT_FOUND": http.StatusNotFound,
 	"ROLE_NOT_FOUND":          http.StatusNotFound,
-	"EMAIL_ALREADY_EXISTS":    http.StatusConflict,
 	"USERNAME_ALREADY_EXISTS": http.StatusConflict,
 	"LAST_PLATFORM_ADMIN":     http.StatusUnprocessableEntity,
 	"PASSWORD_SAME_AS_OLD":    http.StatusUnprocessableEntity,
@@ -438,7 +437,8 @@ func mapPlatformAdminError(c *app.RequestContext, err error) {
 	case codes.InvalidArgument:
 		writePlatformAdminError(c, http.StatusBadRequest, "VALIDATION_FAILED", msg)
 	case codes.AlreadyExists:
-		writePlatformAdminError(c, http.StatusConflict, "EMAIL_ALREADY_EXISTS", msg)
+		// 平台账号创建冲突仅剩 username；email 允许重复。
+		writePlatformAdminError(c, http.StatusConflict, "USERNAME_ALREADY_EXISTS", msg)
 	case codes.FailedPrecondition:
 		writePlatformAdminError(c, http.StatusUnprocessableEntity, "ROLE_CHANGE_INVALID", msg)
 	case codes.Unimplemented:

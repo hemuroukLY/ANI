@@ -25,7 +25,8 @@ import (
 type PlatformUserAdminStore interface {
 	// Create inserts a platform account (tenant_id IS NULL) and binds a platform role.
 	// passwordHash is pre-computed by the caller; Store does not hash.
-	// Unknown role → ErrRoleNotFound; email/username conflict → ErrEmailAlreadyExists / ErrUsernameAlreadyExists.
+	// Unknown / non-platform role → ErrRoleNotFound; username conflict → ErrUsernameAlreadyExists.
+	// Email 允许重复（平台侧无 email 唯一约束，无 EMAIL_ALREADY_EXISTS）。
 	Create(ctx context.Context, in PlatformUserCreate) (PlatformUserAdmin, error)
 
 	// List returns cursor-paginated platform accounts (tenant_id IS NULL, is_deleted=FALSE).
@@ -60,6 +61,8 @@ type PlatformUserAdminStore interface {
 
 // PlatformUserAdmin is the Core platform-admin view (never includes password_hash).
 // Named ...Admin to avoid clashing with PlatformLoginStore's PlatformUser (login view).
+//
+// Username 为库内值（含 local:/oidc: 前缀）。TODO(list/detail): 对外列表/详情响应后续剥前缀。
 type PlatformUserAdmin struct {
 	ID          uuid.UUID
 	Email       string
@@ -67,7 +70,7 @@ type PlatformUserAdmin struct {
 	DisplayName *string
 	Role        string // platform-admin | platform-ops | platform-readonly
 	Status      string // active | disabled
-	Source      string // local | third_party (inferred from username prefix)
+	Source      string // local | third_party | unknown（由 username 前缀推断）
 	LastLoginAt *time.Time
 	CreatedAt   time.Time
 }

@@ -15,10 +15,7 @@ var (
 	// ErrRoleNotFound 表示平台角色不存在（HTTP 404）。
 	ErrRoleNotFound = errors.New("ROLE_NOT_FOUND")
 
-	// ErrEmailAlreadyExists 表示平台邮箱冲突（HTTP 409）。
-	ErrEmailAlreadyExists = errors.New("EMAIL_ALREADY_EXISTS")
-
-	// ErrUsernameAlreadyExists 表示平台用户名冲突（HTTP 409）。
+	// ErrUsernameAlreadyExists 表示平台用户名冲突（HTTP 409）；平台侧 email 允许重复。
 	ErrUsernameAlreadyExists = errors.New("USERNAME_ALREADY_EXISTS")
 
 	// ErrLastPlatformAdmin 表示唯一活跃 platform-admin 不可禁用/删除（HTTP 422）。

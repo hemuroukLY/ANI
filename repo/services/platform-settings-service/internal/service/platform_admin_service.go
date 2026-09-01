@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	platformsettingsv1 "github.com/kubercloud/ani/pkg/generated/pb/platform_settings/v1"
@@ -33,8 +34,50 @@ func (s *PlatformAdminService) Register(server *grpc.Server) {
 	platformsettingsv1.RegisterPlatformAdminServiceServer(server, s)
 }
 
-func (s *PlatformAdminService) CreatePlatformAdmin(context.Context, *platformsettingsv1.CreatePlatformAdminRequest) (*commonv1.IdempotentResult, error) {
-	return nil, unimplemented()
+func (s *PlatformAdminService) CreatePlatformAdmin(ctx context.Context, req *platformsettingsv1.CreatePlatformAdminRequest) (*commonv1.IdempotentResult, error) {
+	const action = "platform_admin.create"
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.auditStore, action, nil, err)
+		return nil, err
+	}
+
+	// 步骤 1：入参校验；失败审计写入 role（不含 password）
+	// 幂等由网关层处理，本服务不消费 idempotency_key。
+	if detail := validateCreatePlatformAdmin(req.GetEmail(), req.GetUsername(), req.GetDisplayName(), req.GetRole(), req.GetPassword()); detail != "" {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, detail)
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"role": strings.TrimSpace(req.GetRole())}, err)
+		return nil, err
+	}
+	if s.coreClient == nil {
+		err := businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core client not configured")
+		writeAuditFailure(ctx, s.auditStore, action, nil, err)
+		return nil, err
+	}
+
+	// 步骤 2：调 Core 创建（冲突透传；失败审计不含 role）
+	createdID, err := s.coreClient.Create(ctx, ports.PlatformUserCreateInput{
+		Email:       strings.TrimSpace(req.GetEmail()),
+		Username:    strings.TrimSpace(req.GetUsername()),
+		DisplayName: strings.TrimSpace(req.GetDisplayName()),
+		Role:        strings.TrimSpace(req.GetRole()),
+		Password:    req.GetPassword(),
+	})
+	if err != nil {
+		mapped := mapDomainError(err)
+		writeAuditFailure(ctx, s.auditStore, action, nil, mapped)
+		return nil, mapped
+	}
+
+	// 步骤 3：成功审计仅 target_id（不含 password/role）
+	writeAuditSuccess(ctx, s.auditStore, action, map[string]any{
+		"target_id": createdID,
+	})
+
+	return &commonv1.IdempotentResult{
+		Id:      createdID,
+		Message: "platform admin created",
+	}, nil
 }
 
 func (s *PlatformAdminService) ListPlatformAdmins(ctx context.Context, req *platformsettingsv1.ListPlatformAdminsRequest) (*platformsettingsv1.ListPlatformAdminsResponse, error) {

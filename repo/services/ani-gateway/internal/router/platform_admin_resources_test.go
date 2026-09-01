@@ -25,6 +25,7 @@ type fakePlatformAdminClient struct {
 	lastCreate *platformsettingsv1.CreatePlatformAdminRequest
 	listResp   *platformsettingsv1.ListPlatformAdminsResponse
 	rolesResp  *platformsettingsv1.ListPlatformAdminRolesResponse
+	getResp    *platformsettingsv1.PlatformAdminDetail
 	err        error
 }
 
@@ -33,7 +34,7 @@ func (f *fakePlatformAdminClient) CreatePlatformAdmin(_ context.Context, in *pla
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &commonv1.IdempotentResult{Id: "u1", Message: "ok"}, nil
+	return &commonv1.IdempotentResult{Id: "11111111-1111-1111-1111-111111111111", Message: "platform admin created"}, nil
 }
 func (f *fakePlatformAdminClient) ListPlatformAdmins(_ context.Context, in *platformsettingsv1.ListPlatformAdminsRequest, _ ...grpc.CallOption) (*platformsettingsv1.ListPlatformAdminsResponse, error) {
 	f.lastList = in
@@ -55,6 +56,9 @@ func (f *fakePlatformAdminClient) GetPlatformAdmin(_ context.Context, in *platfo
 	f.lastGetID = in.GetUserId()
 	if f.err != nil {
 		return nil, f.err
+	}
+	if f.getResp != nil {
+		return f.getResp, nil
 	}
 	return &platformsettingsv1.PlatformAdminDetail{Id: in.GetUserId(), Username: "local:ops"}, nil
 }
@@ -114,8 +118,8 @@ func TestMapPlatformAdminError_Table(t *testing.T) {
 		{"validation", status.Error(codes.InvalidArgument, "VALIDATION_FAILED: bad"), http.StatusBadRequest, "VALIDATION_FAILED"},
 		{"not found", status.Error(codes.NotFound, "PLATFORM_USER_NOT_FOUND: x"), http.StatusNotFound, "PLATFORM_USER_NOT_FOUND"},
 		{"role not found", status.Error(codes.NotFound, "ROLE_NOT_FOUND"), http.StatusNotFound, "ROLE_NOT_FOUND"},
-		{"email", status.Error(codes.AlreadyExists, "EMAIL_ALREADY_EXISTS: e"), http.StatusConflict, "EMAIL_ALREADY_EXISTS"},
 		{"username", status.Error(codes.AlreadyExists, "USERNAME_ALREADY_EXISTS"), http.StatusConflict, "USERNAME_ALREADY_EXISTS"},
+		{"already exists fallback", status.Error(codes.AlreadyExists, "conflict"), http.StatusConflict, "USERNAME_ALREADY_EXISTS"},
 		{"last admin", status.Error(codes.FailedPrecondition, "LAST_PLATFORM_ADMIN"), http.StatusUnprocessableEntity, "LAST_PLATFORM_ADMIN"},
 		{"password", status.Error(codes.FailedPrecondition, "PASSWORD_SAME_AS_OLD"), http.StatusUnprocessableEntity, "PASSWORD_SAME_AS_OLD"},
 		{"role change", status.Error(codes.FailedPrecondition, "ROLE_CHANGE_INVALID"), http.StatusUnprocessableEntity, "ROLE_CHANGE_INVALID"},
@@ -205,6 +209,64 @@ func TestPlatformAdmins_CreateForwardBody(t *testing.T) {
 	}
 	if fake.lastCreate == nil || fake.lastCreate.GetEmail() != "a@x.com" || fake.lastCreate.GetIdempotencyKey() == "" {
 		t.Fatalf("lastCreate=%+v", fake.lastCreate)
+	}
+}
+
+func TestHandler_CreateFlow(t *testing.T) {
+	const id = "11111111-1111-1111-1111-111111111111"
+	fake := &fakePlatformAdminClient{
+		listResp: &platformsettingsv1.ListPlatformAdminsResponse{
+			Items: []*platformsettingsv1.PlatformAdminListItem{
+				{Id: id, Username: "local:ops", DisplayName: "Ops", Role: "platform-ops", Status: "active", Source: "local"},
+			},
+		},
+		getResp: &platformsettingsv1.PlatformAdminDetail{
+			Id: id, Email: "ops@ani.io", Username: "local:ops", DisplayName: "Ops",
+			Role: "platform-ops", Status: "active", Source: "local",
+		},
+	}
+	h := setupPlatformAdminTestServer(t, fake)
+
+	createBody := `{"email":"ops@ani.io","username":"ops","display_name":"Ops","role":"platform-ops","password":"Abcd1234!","idempotency_key":"44444444-4444-4444-4444-444444444444"}`
+	createResp := performPlatformAdmin(h, http.MethodPost, "/api/v1/svc/platform-admins", createBody)
+	if createResp.StatusCode() != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", createResp.StatusCode(), createResp.Body())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(createResp.Body(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created["id"] != id || created["message"] != "platform admin created" {
+		t.Fatalf("created=%v", created)
+	}
+	if fake.lastCreate == nil || fake.lastCreate.GetPassword() == "" || fake.lastCreate.GetIdempotencyKey() == "" {
+		t.Fatalf("lastCreate=%+v", fake.lastCreate)
+	}
+
+	listResp := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins?role=platform-ops", "")
+	if listResp.StatusCode() != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listResp.StatusCode(), listResp.Body())
+	}
+	var listed map[string]any
+	_ = json.Unmarshal(listResp.Body(), &listed)
+	items, _ := listed["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("list=%v", listed)
+	}
+
+	detailResp := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins/"+id, "")
+	if detailResp.StatusCode() != http.StatusOK {
+		t.Fatalf("detail status=%d body=%s", detailResp.StatusCode(), detailResp.Body())
+	}
+	var detail map[string]any
+	_ = json.Unmarshal(detailResp.Body(), &detail)
+	for _, key := range []string{"id", "email", "username", "display_name", "role", "status", "source"} {
+		if detail[key] == nil || detail[key] == "" {
+			t.Fatalf("missing detail field %s: %v", key, detail)
+		}
+	}
+	if detail["email"] != "ops@ani.io" || detail["role"] != "platform-ops" {
+		t.Fatalf("detail=%v", detail)
 	}
 }
 

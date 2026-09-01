@@ -21,42 +21,38 @@ func NewCorePlatformUserClient() ports.CorePlatformUserClient {
 	return &CorePlatformUserClient{sdk: newCoreSDKClient()}
 }
 
-// Create 调用 Core POST /admin/platform-users，成功后 GET 详情补齐 DTO。
-func (c *CorePlatformUserClient) Create(ctx context.Context, in ports.PlatformUserCreateInput) (ports.PlatformUserDTO, error) {
-	_ = ctx
-	// 步骤 1：调用 Core 创建平台账号
-	raw, err := c.sdk.Request("POST", "/admin/platform-users", anisdk.RequestOptions{
-		Body: map[string]any{
-			"email":        in.Email,
-			"username":     in.Username,
-			"display_name": in.DisplayName,
-			"role":         in.Role,
-			"password":     in.Password,
-		},
-	})
-	if err != nil {
-		return ports.PlatformUserDTO{}, mapSDKError(err)
+// Create 调用 Core POST /admin/platform-users，仅返回新建用户 id（不回查详情）。
+// 幂等由网关层处理；本客户端不重复实现 idempotency_key。
+func (c *CorePlatformUserClient) Create(ctx context.Context, in ports.PlatformUserCreateInput) (string, error) {
+	// 步骤 1：组装创建 body（明文 password 仅本次透传；不落日志）
+	body := map[string]any{
+		"email":        in.Email,
+		"username":     in.Username,
+		"display_name": in.DisplayName,
+		"role":         in.Role,
+		"password":     in.Password,
 	}
-	// 步骤 2：从创建响应取出 user id
+	raw, err := c.sdk.Request("POST", "/admin/platform-users", anisdk.RequestOptions{Body: body, Context: ctx})
+	if err != nil {
+		return "", mapSDKError(err)
+	}
+	// 步骤 2：从创建响应取出 user id（Create 契约仅 id/message）
 	obj, err := asObject(raw)
 	if err != nil {
-		return ports.PlatformUserDTO{}, err
+		return "", err
 	}
 	id := stringField(obj, "id")
 	if id == "" {
-		return ports.PlatformUserDTO{}, fmt.Errorf("%w: create response missing id", ports.ErrCoreUnavailable)
+		return "", fmt.Errorf("%w: create response missing id", ports.ErrCoreUnavailable)
 	}
-	uid, err := uuid.Parse(id)
-	if err != nil {
-		return ports.PlatformUserDTO{}, fmt.Errorf("%w: invalid create id: %v", ports.ErrCoreUnavailable, err)
+	if _, err := uuid.Parse(id); err != nil {
+		return "", fmt.Errorf("%w: invalid create id: %v", ports.ErrCoreUnavailable, err)
 	}
-	// 步骤 3：回查详情补齐完整 DTO（创建接口仅返回 id/message）
-	return c.Get(ctx, uid)
+	return id, nil
 }
 
 // List 调用 Core GET /admin/platform-users（游标 + 过滤参数透传）。
 func (c *CorePlatformUserClient) List(ctx context.Context, filter ports.PlatformUserListFilter) (ports.PlatformUserListDTO, error) {
-	_ = ctx
 	// 步骤 1：组装游标与过滤 query
 	params := anisdk.CursorParams(filter.Limit, filter.Cursor)
 	if filter.Role != "" {
@@ -72,7 +68,7 @@ func (c *CorePlatformUserClient) List(ctx context.Context, filter ports.Platform
 		params["search"] = filter.Search
 	}
 	// 步骤 2：调用 Core 列表接口
-	raw, err := c.sdk.Request("GET", "/admin/platform-users", anisdk.RequestOptions{Params: params})
+	raw, err := c.sdk.Request("GET", "/admin/platform-users", anisdk.RequestOptions{Params: params, Context: ctx})
 	if err != nil {
 		return ports.PlatformUserListDTO{}, mapSDKError(err)
 	}
@@ -101,10 +97,9 @@ func (c *CorePlatformUserClient) List(ctx context.Context, filter ports.Platform
 
 // Get 调用 Core GET /admin/platform-users/{userId}。
 func (c *CorePlatformUserClient) Get(ctx context.Context, userID uuid.UUID) (ports.PlatformUserDTO, error) {
-	_ = ctx
 	// 步骤 1：拼路径并调用 Core 详情接口
 	path := fmt.Sprintf("/admin/platform-users/%s", userID.String())
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{Context: ctx})
 	if err != nil {
 		return ports.PlatformUserDTO{}, mapSDKError(err)
 	}
@@ -114,11 +109,11 @@ func (c *CorePlatformUserClient) Get(ctx context.Context, userID uuid.UUID) (por
 
 // ChangeRole 调用 Core PUT /admin/platform-users/{userId}/role。
 func (c *CorePlatformUserClient) ChangeRole(ctx context.Context, userID uuid.UUID, role string) error {
-	_ = ctx
 	// 步骤 1：拼路径并提交新角色
 	path := fmt.Sprintf("/admin/platform-users/%s/role", userID.String())
 	_, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{
-		Body: map[string]any{"role": role},
+		Body:    map[string]any{"role": role},
+		Context: ctx,
 	})
 	// 步骤 2：映射 Core 错误码为领域哨兵
 	return mapSDKError(err)
@@ -126,11 +121,11 @@ func (c *CorePlatformUserClient) ChangeRole(ctx context.Context, userID uuid.UUI
 
 // ResetPassword 调用 Core POST /admin/platform-users/{userId}/reset-password。
 func (c *CorePlatformUserClient) ResetPassword(ctx context.Context, userID uuid.UUID, newPassword string) error {
-	_ = ctx
 	// 步骤 1：拼路径并提交新密码（明文仅本次透传）
 	path := fmt.Sprintf("/admin/platform-users/%s/reset-password", userID.String())
 	_, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
-		Body: map[string]any{"new_password": newPassword},
+		Body:    map[string]any{"new_password": newPassword},
+		Context: ctx,
 	})
 	// 步骤 2：映射 Core 错误码为领域哨兵
 	return mapSDKError(err)
@@ -138,7 +133,6 @@ func (c *CorePlatformUserClient) ResetPassword(ctx context.Context, userID uuid.
 
 // SetStatus 调用 Core disable/enable 端点（status=active → enable，否则 disable）。
 func (c *CorePlatformUserClient) SetStatus(ctx context.Context, userID uuid.UUID, status string) error {
-	_ = ctx
 	// 步骤 1：按目标状态选择 disable / enable
 	action := "disable"
 	if status == "active" {
@@ -146,17 +140,16 @@ func (c *CorePlatformUserClient) SetStatus(ctx context.Context, userID uuid.UUID
 	}
 	// 步骤 2：调用对应 Core 写接口
 	path := fmt.Sprintf("/admin/platform-users/%s/%s", userID.String(), action)
-	_, err := c.sdk.Request("POST", path, anisdk.RequestOptions{})
+	_, err := c.sdk.Request("POST", path, anisdk.RequestOptions{Context: ctx})
 	// 步骤 3：映射 Core 错误码为领域哨兵
 	return mapSDKError(err)
 }
 
 // SoftDelete 调用 Core DELETE /admin/platform-users/{userId}。
 func (c *CorePlatformUserClient) SoftDelete(ctx context.Context, userID uuid.UUID) error {
-	_ = ctx
 	// 步骤 1：拼路径并调用 Core 软删除
 	path := fmt.Sprintf("/admin/platform-users/%s", userID.String())
-	_, err := c.sdk.Request("DELETE", path, anisdk.RequestOptions{})
+	_, err := c.sdk.Request("DELETE", path, anisdk.RequestOptions{Context: ctx})
 	// 步骤 2：映射 Core 错误码为领域哨兵
 	return mapSDKError(err)
 }

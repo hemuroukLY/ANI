@@ -1198,9 +1198,9 @@ components:
         id:           { type: string, format: uuid }
         username:     { type: string }
         display_name: { type: string }
-        role:         { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        role:         { type: string, description: "平台角色名；以 Core roles 表 / GET /platform-admins/roles 为准，不在契约写死枚举" }
         status:       { type: string, enum: [active, disabled] }
-        source:       { type: string, enum: [local, third_party] }
+        source:       { type: string, enum: [local, third_party, unknown] }
         last_login_at: { type: string, format: date-time, nullable: true }
 
     PlatformAdminDetail:
@@ -1211,9 +1211,9 @@ components:
         email:         { type: string, format: email }
         username:      { type: string }
         display_name:  { type: string }
-        role:          { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        role:          { type: string, description: "平台角色名；以 Core roles 表 / GET /platform-admins/roles 为准，不在契约写死枚举" }
         status:        { type: string, enum: [active, disabled] }
-        source:        { type: string, enum: [local, third_party] }
+        source:        { type: string, enum: [local, third_party, unknown] }
         last_login_at: { type: string, format: date-time, nullable: true }
         created_at:    { type: string, format: date-time }
 
@@ -1229,10 +1229,10 @@ components:
       required: [idempotency_key, email, username, display_name, role, password]
       properties:
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
-        email:           { type: string, format: email, description: "RFC 5322" }
-        username:        { type: string, minLength: 1, maxLength: 64, description: "不含冒号" }
+        email:           { type: string, format: email, description: "RFC 5322；允许重复" }
+        username:        { type: string, minLength: 1, maxLength: 64, description: "不含冒号；全局唯一" }
         display_name:    { type: string, minLength: 1, maxLength: 128 }
-        role:            { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        role:            { type: string, minLength: 1, description: "平台角色：tenant_id IS NULL 且 name 以 platform- 为前缀" }
         password:        { type: string, minLength: 8, maxLength: 64, description: "四类中至少三类" }
 
     PlatformAdminRoleUpdateRequest:
@@ -1240,13 +1240,13 @@ components:
       required: [idempotency_key, role]
       properties:
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
-        role:            { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        role:            { type: string, minLength: 1, description: "目标平台角色：tenant_id IS NULL 且 name 以 platform- 为前缀" }
 
     PlatformRole:
       type: object
       required: [name, label, description, permissions]
       properties:
-        name:        { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        name:        { type: string, description: "平台角色名；以后端实际返回为准" }
         label:       { type: string }
         description: { type: string }
         permissions:
@@ -3430,7 +3430,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
         "404": { $ref: '#/components/responses/NotFound', description: "ROLE_NOT_FOUND" }
-        "409": { $ref: '#/components/responses/Conflict', description: "EMAIL_ALREADY_EXISTS / USERNAME_ALREADY_EXISTS / IDEMPOTENCY_CONFLICT" }
+        "409": { $ref: '#/components/responses/Conflict', description: "USERNAME_ALREADY_EXISTS / IDEMPOTENCY_CONFLICT" }
     get:
       operationId: listPlatformAdmins
       summary: 平台运营账号列表（需 platform-admin / platform-ops / platform-readonly）
@@ -3438,7 +3438,7 @@ paths:
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
         - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
-        - { name: role, in: query, schema: { type: string, enum: [platform-admin, platform-ops, platform-readonly] } }
+        - { name: role, in: query, schema: { type: string }, description: "按平台角色名过滤；不写死枚举" }
         - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
         - { name: source, in: query, schema: { type: string, enum: [local, oidc] }, description: "按 username 前缀过滤；oidc 结果在响应中映射为 third_party" }
         - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username" }

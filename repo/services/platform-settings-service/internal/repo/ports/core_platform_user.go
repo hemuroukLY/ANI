@@ -9,7 +9,7 @@ import (
 
 // CorePlatformUserClient wraps Core SDK calls to /api/v1/admin/platform-users/*.
 type CorePlatformUserClient interface {
-	Create(ctx context.Context, in PlatformUserCreateInput) (PlatformUserDTO, error)
+	Create(ctx context.Context, in PlatformUserCreateInput) (id string, err error)
 	List(ctx context.Context, filter PlatformUserListFilter) (PlatformUserListDTO, error)
 	Get(ctx context.Context, userID uuid.UUID) (PlatformUserDTO, error)
 	ChangeRole(ctx context.Context, userID uuid.UUID, role string) error

@@ -48,6 +48,9 @@ type RegisterOptions struct {
 	QuotaAdminService       ports.QuotaAdminService
 	PlatformWorkloadService ports.PlatformWorkloadService
 	TenantService           ports.TenantService
+	// PlatformUserAdminStore backs Core /admin/platform-users* endpoints.
+	// When nil those handlers are not registered.
+	PlatformUserAdminStore ports.PlatformUserAdminStore
 	// GPUSpecStore backs the GPU spec directory CRUD endpoints (POST/DELETE
 	// in gpu_spec_resources.go). When nil those handlers return 503.
 	GPUSpecStore ports.GPUSpecStore
@@ -106,6 +109,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerQuotaResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
 	registerAdminTenantResources(v1, options.TenantService)
+	registerAdminPlatformUserResources(v1, options.PlatformUserAdminStore)
 	// GPU spec directory CRUD (POST/DELETE) + reservation management +
 	// tenant self-query endpoints (SPEC §4.3).
 	registerGPUSpecResources(v1, options.GPUSpecStore, options.GPUInventory, options.GPUInstanceStore, options.MetadataStore)

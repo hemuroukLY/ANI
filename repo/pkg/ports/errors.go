@@ -34,9 +34,9 @@ var (
 	ErrPasswordSameAsOld      = errors.New("password same as old")
 
 	// Platform user admin sentinel errors (users / user_roles / roles，平台维度)。
+	// 平台侧 email 允许重复，冲突仅 username。
 	ErrPlatformUserNotFound  = errors.New("platform user not found")
 	ErrRoleNotFound          = errors.New("role not found")
-	ErrEmailAlreadyExists    = errors.New("email already exists")
 	ErrUsernameAlreadyExists = errors.New("username already exists")
 	ErrLastPlatformAdmin     = errors.New("last platform admin")
 	ErrValidationFailed      = errors.New("validation failed")

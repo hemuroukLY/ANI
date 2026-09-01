@@ -13,6 +13,7 @@ import (
 
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/bootstrap"
+	"github.com/kubercloud/ani/pkg/ports"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/router"
 )
@@ -234,6 +235,10 @@ func main() {
 		os.Exit(1)
 	}
 	defer closeTenantStore()
+	var platformUserAdminStore ports.PlatformUserAdminStore
+	if quotaMetadataStore != nil {
+		platformUserAdminStore = runtimeadapter.NewPostgresPlatformUserAdminStore(quotaMetadataStore)
+	}
 	gpuInventory, err := newGatewayGPUInventory(gatewayGPUInventoryRuntimeConfigFromEnv(), gpuSchedulingQueueStore, gpuSpecStore, quotaStoreService)
 	if err != nil {
 		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
@@ -276,6 +281,7 @@ func main() {
 		QuotaAdminService:                     quotaAdminService,
 		PlatformWorkloadService:               platformWorkloadService,
 		TenantService:                         tenantService,
+		PlatformUserAdminStore:                platformUserAdminStore,
 		GPUSpecStore:                          gpuSpecStore,
 		MetadataStore:                         quotaMetadataStore,
 		QuotaStoreService:                     quotaStoreService,

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,10 +18,21 @@ type fakeCoreClient struct {
 	listFilter ports.PlatformUserListFilter
 	listRes    ports.PlatformUserListDTO
 	listErr    error
+
+	createIn  ports.PlatformUserCreateInput
+	createID  string
+	createErr error
 }
 
-func (f *fakeCoreClient) Create(context.Context, ports.PlatformUserCreateInput) (ports.PlatformUserDTO, error) {
-	return ports.PlatformUserDTO{}, ports.ErrNotImplemented
+func (f *fakeCoreClient) Create(_ context.Context, in ports.PlatformUserCreateInput) (string, error) {
+	f.createIn = in
+	if f.createErr != nil {
+		return "", f.createErr
+	}
+	if f.createID != "" {
+		return f.createID, nil
+	}
+	return "", ports.ErrNotImplemented
 }
 func (f *fakeCoreClient) List(_ context.Context, filter ports.PlatformUserListFilter) (ports.PlatformUserListDTO, error) {
 	f.listFilter = filter
@@ -43,13 +55,147 @@ func (f *fakeCoreClient) ListPlatformRoles(context.Context) ([]ports.PlatformRol
 	return nil, ports.ErrNotImplemented
 }
 
+type recordingAuditStore struct {
+	logs     []ports.AuditLog
+	createFn func(ctx context.Context, log ports.AuditLog) (uuid.UUID, error)
+}
+
+func (f *recordingAuditStore) Create(ctx context.Context, log ports.AuditLog) (uuid.UUID, error) {
+	if f.createFn != nil {
+		id, err := f.createFn(ctx, log)
+		if err == nil {
+			f.logs = append(f.logs, log)
+		}
+		return id, err
+	}
+	f.logs = append(f.logs, log)
+	return uuid.New(), nil
+}
+func (f *recordingAuditStore) ListUserAuditLogs(context.Context, uuid.UUID, ports.AuditLogFilter) (ports.AuditLogListResult, error) {
+	return ports.AuditLogListResult{}, ports.ErrNotImplemented
+}
+
 type fakeAuditStore struct{}
 
 func (fakeAuditStore) Create(context.Context, ports.AuditLog) (uuid.UUID, error) {
-	return uuid.Nil, ports.ErrNotImplemented
+	return uuid.Nil, nil
 }
 func (fakeAuditStore) ListUserAuditLogs(context.Context, uuid.UUID, ports.AuditLogFilter) (ports.AuditLogListResult, error) {
 	return ports.AuditLogListResult{}, ports.ErrNotImplemented
+}
+
+func TestPlatformAdminService_Create_Success(t *testing.T) {
+	t.Parallel()
+	core := &fakeCoreClient{
+		createID: "11111111-1111-1111-1111-111111111111",
+	}
+	audit := &recordingAuditStore{}
+	svc := NewPlatformAdminService(core, audit)
+
+	res, err := svc.CreatePlatformAdmin(context.Background(), &platformsettingsv1.CreatePlatformAdminRequest{
+		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", Role: "platform-ops",
+		Password: "Abcd1234!",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if res.GetId() != core.createID || res.GetMessage() != "platform admin created" {
+		t.Fatalf("res=%+v", res)
+	}
+	if core.createIn.Password != "Abcd1234!" {
+		t.Fatalf("createIn=%+v", core.createIn)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Action != "platform_admin.create" || audit.logs[0].Result != "success" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+	if audit.logs[0].Details["target_id"] != core.createID {
+		t.Fatalf("details=%+v", audit.logs[0].Details)
+	}
+	if _, ok := audit.logs[0].Details["role"]; ok {
+		t.Fatal("success audit must not include role")
+	}
+	if _, ok := audit.logs[0].Details["password"]; ok {
+		t.Fatal("password must not appear in audit details")
+	}
+}
+
+func TestPlatformAdminService_Create_UsernameConflict(t *testing.T) {
+	t.Parallel()
+	core := &fakeCoreClient{createErr: ports.ErrUsernameAlreadyExists}
+	svc := NewPlatformAdminService(core, &recordingAuditStore{})
+	_, err := svc.CreatePlatformAdmin(context.Background(), &platformsettingsv1.CreatePlatformAdminRequest{
+		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", Role: "platform-ops", Password: "Abcd1234!",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.AlreadyExists || !strings.HasPrefix(st.Message(), "USERNAME_ALREADY_EXISTS") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPlatformAdminService_Create_Validation(t *testing.T) {
+	t.Parallel()
+	audit := &recordingAuditStore{}
+	svc := NewPlatformAdminService(&fakeCoreClient{}, audit)
+	_, err := svc.CreatePlatformAdmin(context.Background(), &platformsettingsv1.CreatePlatformAdminRequest{
+		Email: "bad", Username: "ops:x", DisplayName: "", Role: "any-role", Password: "short",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.InvalidArgument || !strings.HasPrefix(st.Message(), "VALIDATION_FAILED") {
+		t.Fatalf("err=%v", err)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Result != "failed" || audit.logs[0].Action != "platform_admin.create" {
+		t.Fatalf("validation must write failed audit: %+v", audit.logs)
+	}
+	if audit.logs[0].Details["role"] != "any-role" {
+		t.Fatalf("validation audit must include role: %+v", audit.logs[0].Details)
+	}
+	if _, ok := audit.logs[0].Details["password"]; ok {
+		t.Fatal("password must not appear in audit details")
+	}
+}
+
+func TestPlatformAdminService_Create_RoleRequired(t *testing.T) {
+	t.Parallel()
+	svc := NewPlatformAdminService(&fakeCoreClient{}, &recordingAuditStore{})
+	_, err := svc.CreatePlatformAdmin(context.Background(), &platformsettingsv1.CreatePlatformAdminRequest{
+		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", Role: "  ", Password: "Abcd1234!",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.InvalidArgument || !strings.Contains(st.Message(), "role required") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPlatformAdminService_Create_RoleNotFoundFromCore(t *testing.T) {
+	t.Parallel()
+	core := &fakeCoreClient{createErr: ports.ErrRoleNotFound}
+	svc := NewPlatformAdminService(core, &recordingAuditStore{})
+	_, err := svc.CreatePlatformAdmin(context.Background(), &platformsettingsv1.CreatePlatformAdminRequest{
+		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", Role: "future-role", Password: "Abcd1234!",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.NotFound || !strings.HasPrefix(st.Message(), "ROLE_NOT_FOUND") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPlatformAdminService_Create_AuditWriteErrorDoesNotFail(t *testing.T) {
+	t.Parallel()
+	core := &fakeCoreClient{
+		createID: "11111111-1111-1111-1111-111111111111",
+	}
+	audit := &recordingAuditStore{
+		createFn: func(context.Context, ports.AuditLog) (uuid.UUID, error) {
+			return uuid.Nil, ports.ErrNotImplemented
+		},
+	}
+	svc := NewPlatformAdminService(core, audit)
+	res, err := svc.CreatePlatformAdmin(context.Background(), &platformsettingsv1.CreatePlatformAdminRequest{
+		Email: "a@ani.io", Username: "admin", DisplayName: "Admin", Role: "platform-admin", Password: "Abcd1234!",
+	})
+	if err != nil || res.GetId() == "" {
+		t.Fatalf("create must succeed despite audit error: err=%v res=%+v", err, res)
+	}
 }
 
 func TestListPlatformAdmins_Success(t *testing.T) {
@@ -101,7 +247,6 @@ func TestMapDomainError_Table(t *testing.T) {
 	}{
 		{ports.ErrPlatformUserNotFound, codes.NotFound, "PLATFORM_USER_NOT_FOUND"},
 		{ports.ErrRoleNotFound, codes.NotFound, "ROLE_NOT_FOUND"},
-		{ports.ErrEmailAlreadyExists, codes.AlreadyExists, "EMAIL_ALREADY_EXISTS"},
 		{ports.ErrUsernameAlreadyExists, codes.AlreadyExists, "USERNAME_ALREADY_EXISTS"},
 		{ports.ErrLastPlatformAdmin, codes.FailedPrecondition, "LAST_PLATFORM_ADMIN"},
 		{ports.ErrPasswordSameAsOld, codes.FailedPrecondition, "PASSWORD_SAME_AS_OLD"},
@@ -125,7 +270,6 @@ func TestUnimplementedRPCs(t *testing.T) {
 	t.Parallel()
 	svc := NewPlatformAdminService(&fakeCoreClient{}, fakeAuditStore{})
 	checks := []error{
-		func() error { _, err := svc.CreatePlatformAdmin(context.Background(), nil); return err }(),
 		func() error { _, err := svc.GetPlatformAdmin(context.Background(), nil); return err }(),
 		func() error { _, err := svc.ListPlatformAdminRoles(context.Background(), nil); return err }(),
 		func() error { _, err := svc.UpdatePlatformAdminRole(context.Background(), nil); return err }(),
@@ -139,5 +283,18 @@ func TestUnimplementedRPCs(t *testing.T) {
 		if status.Code(err) != codes.Unimplemented {
 			t.Fatalf("case %d: %v", i, err)
 		}
+	}
+}
+
+func TestValidatePasswordComplexity(t *testing.T) {
+	t.Parallel()
+	if validatePasswordComplexity("Abcd1234!") != "" {
+		t.Fatal("expected ok")
+	}
+	if validatePasswordComplexity("abcdefgh") == "" {
+		t.Fatal("expected fail: only lower")
+	}
+	if validatePasswordComplexity("Ab1!") == "" {
+		t.Fatal("expected fail: too short")
 	}
 }

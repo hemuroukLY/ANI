@@ -25,8 +25,6 @@ func mapDomainError(err error) error {
 		return businessError(codes.NotFound, ports.ErrPlatformUserNotFound, detail)
 	case errors.Is(err, ports.ErrRoleNotFound):
 		return businessError(codes.NotFound, ports.ErrRoleNotFound, detail)
-	case errors.Is(err, ports.ErrEmailAlreadyExists):
-		return businessError(codes.AlreadyExists, ports.ErrEmailAlreadyExists, detail)
 	case errors.Is(err, ports.ErrUsernameAlreadyExists):
 		return businessError(codes.AlreadyExists, ports.ErrUsernameAlreadyExists, detail)
 	case errors.Is(err, ports.ErrLastPlatformAdmin):

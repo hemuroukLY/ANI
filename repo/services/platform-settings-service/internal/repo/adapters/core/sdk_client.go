@@ -16,19 +16,17 @@ import (
 const defaultCoreAPIBaseURL = "http://127.0.0.1:8080/api/v1"
 
 // defaultCoreAPITimeout 是 platform-settings-service 调 Core API 的 HTTP 超时。
-// anisdk.Client 内部使用 http.DefaultClient.Do 且不接收 context。
 const defaultCoreAPITimeout = 10 * time.Second
-
-func init() {
-	http.DefaultClient.Timeout = defaultCoreAPITimeout
-}
 
 func newCoreSDKClient() anisdk.Client {
 	base := strings.TrimSpace(os.Getenv("CORE_API_BASE_URL"))
 	if base == "" {
 		base = defaultCoreAPIBaseURL
 	}
-	return anisdk.NewClient(strings.TrimRight(base, "/"), strings.TrimSpace(os.Getenv("CORE_API_TOKEN")))
+	c := anisdk.NewClient(strings.TrimRight(base, "/"), strings.TrimSpace(os.Getenv("CORE_API_TOKEN")))
+	// 使用独立 http.Client，避免修改全局 http.DefaultClient。
+	c.HTTPClient = &http.Client{Timeout: defaultCoreAPITimeout}
+	return c
 }
 
 func mapSDKError(err error) error {
@@ -46,8 +44,6 @@ func mapSDKError(err error) error {
 			return fmt.Errorf("%w: %s", ports.ErrPlatformUserNotFound, detail)
 		case ports.ErrRoleNotFound.Error():
 			return fmt.Errorf("%w: %s", ports.ErrRoleNotFound, detail)
-		case ports.ErrEmailAlreadyExists.Error():
-			return fmt.Errorf("%w: %s", ports.ErrEmailAlreadyExists, detail)
 		case ports.ErrUsernameAlreadyExists.Error():
 			return fmt.Errorf("%w: %s", ports.ErrUsernameAlreadyExists, detail)
 		case ports.ErrLastPlatformAdmin.Error():
@@ -158,7 +154,7 @@ func decodePlatformUser(raw any) (ports.PlatformUserDTO, error) {
 	out := ports.PlatformUserDTO{
 		ID:          stringField(obj, "id"),
 		Email:       stringField(obj, "email"),
-		Username:    stringField(obj, "username"),
+		Username:    stringField(obj, "username"), // TODO(list/detail): 含 local: 前缀，后续剥除
 		DisplayName: optionalStringField(obj, "display_name"),
 		Role:        stringField(obj, "role"),
 		Status:      stringField(obj, "status"),
