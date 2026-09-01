@@ -17,15 +17,19 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type fakePlatformAdminClient struct {
 	lastList   *platformsettingsv1.ListPlatformAdminsRequest
 	lastGetID  string
+	lastPermID string
+	lastUpdate *platformsettingsv1.UpdatePlatformAdminRoleRequest
 	lastCreate *platformsettingsv1.CreatePlatformAdminRequest
 	listResp   *platformsettingsv1.ListPlatformAdminsResponse
 	rolesResp  *platformsettingsv1.ListPlatformAdminRolesResponse
 	getResp    *platformsettingsv1.PlatformAdminDetail
+	permsResp  *platformsettingsv1.PlatformAdminPermissions
 	err        error
 }
 
@@ -62,7 +66,18 @@ func (f *fakePlatformAdminClient) GetPlatformAdmin(_ context.Context, in *platfo
 	}
 	return &platformsettingsv1.PlatformAdminDetail{Id: in.GetUserId(), Username: "local:ops"}, nil
 }
-func (f *fakePlatformAdminClient) UpdatePlatformAdminRole(context.Context, *platformsettingsv1.UpdatePlatformAdminRoleRequest, ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
+func (f *fakePlatformAdminClient) GetPlatformAdminPermissions(_ context.Context, in *platformsettingsv1.GetPlatformAdminPermissionsRequest, _ ...grpc.CallOption) (*platformsettingsv1.PlatformAdminPermissions, error) {
+	f.lastPermID = in.GetUserId()
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.permsResp != nil {
+		return f.permsResp, nil
+	}
+	return &platformsettingsv1.PlatformAdminPermissions{UserId: in.GetUserId(), Role: "platform-ops"}, nil
+}
+func (f *fakePlatformAdminClient) UpdatePlatformAdminRole(_ context.Context, in *platformsettingsv1.UpdatePlatformAdminRoleRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
+	f.lastUpdate = in
 	return f.errOrOK()
 }
 func (f *fakePlatformAdminClient) ResetPlatformAdminPassword(context.Context, *platformsettingsv1.ResetPlatformAdminPasswordRequest, ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
@@ -145,17 +160,17 @@ func TestPlatformAdmins_ListForwardParams(t *testing.T) {
 	fake := &fakePlatformAdminClient{
 		listResp: &platformsettingsv1.ListPlatformAdminsResponse{
 			Items: []*platformsettingsv1.PlatformAdminListItem{
-				{Id: "u1", Username: "local:ops", Role: "platform-ops", Status: "active", Source: "local"},
+				{Id: "u1", Username: "local:ops", RoleId: "00000000-0000-0000-0000-000000000006", Role: "platform-ops", Status: "active", Source: "local"},
 			},
 			NextCursor: "n1",
 		},
 	}
 	h := setupPlatformAdminTestServer(t, fake)
-	resp := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins?limit=7&cursor=c1&role=platform-ops&status=active&source=local&search=ops", "")
+	resp := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins?limit=7&cursor=c1&role_id=00000000-0000-0000-0000-000000000006&status=active&source=local&search=ops", "")
 	if resp.StatusCode() != http.StatusOK {
 		t.Fatalf("status=%d body=%s", resp.StatusCode(), resp.Body())
 	}
-	if fake.lastList == nil || fake.lastList.GetRole() != "platform-ops" || fake.lastList.GetPage().GetLimit() != 7 ||
+	if fake.lastList == nil || fake.lastList.GetRoleId() != "00000000-0000-0000-0000-000000000006" || fake.lastList.GetPage().GetLimit() != 7 ||
 		fake.lastList.GetPage().GetCursor() != "c1" || fake.lastList.GetSearch() != "ops" {
 		t.Fatalf("lastList=%+v", fake.lastList)
 	}
@@ -169,9 +184,15 @@ func TestPlatformAdmins_ListForwardParams(t *testing.T) {
 }
 
 func TestPlatformAdmins_RolesDoesNotCollideWithUserID(t *testing.T) {
+	perm, err := structpb.NewStruct(map[string]any{"resource": "tenants", "actions": []any{"*"}, "scope": "platform"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	fake := &fakePlatformAdminClient{
 		rolesResp: &platformsettingsv1.ListPlatformAdminRolesResponse{
-			Items: []*platformsettingsv1.PlatformRole{{Name: "platform-admin", Label: "Admin"}},
+			Items: []*platformsettingsv1.PlatformRole{{
+				Id: "00000000-0000-0000-0000-000000000006", Name: "platform-admin", Permissions: []*structpb.Struct{perm},
+			}},
 		},
 	}
 	h := setupPlatformAdminTestServer(t, fake)
@@ -189,6 +210,14 @@ func TestPlatformAdmins_RolesDoesNotCollideWithUserID(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("roles payload=%v", rolesPayload)
 	}
+	first, _ := items[0].(map[string]any)
+	perms, ok := first["permissions"].([]any)
+	if !ok || len(perms) != 1 {
+		t.Fatalf("permissions must be array: %v", first)
+	}
+	if _, hasLabel := first["label"]; hasLabel {
+		t.Fatalf("label must not be present: %v", first)
+	}
 
 	get := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "")
 	if get.StatusCode() != http.StatusOK {
@@ -199,10 +228,54 @@ func TestPlatformAdmins_RolesDoesNotCollideWithUserID(t *testing.T) {
 	}
 }
 
+func TestPlatformAdmins_GetPermissionsForward(t *testing.T) {
+	const id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	perm, err := structpb.NewStruct(map[string]any{"resource": "metering", "actions": []any{"read"}, "scope": "platform"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakePlatformAdminClient{
+		permsResp: &platformsettingsv1.PlatformAdminPermissions{
+			UserId: id, RoleId: "00000000-0000-0000-0000-000000000006", Role: "platform-readonly", Permissions: []*structpb.Struct{perm},
+		},
+	}
+	h := setupPlatformAdminTestServer(t, fake)
+	resp := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins/"+id+"/permissions", "")
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if fake.lastPermID != id {
+		t.Fatalf("lastPermID=%s", fake.lastPermID)
+	}
+	var payload map[string]any
+	_ = json.Unmarshal(resp.Body(), &payload)
+	if payload["user_id"] != id || payload["role_id"] != "00000000-0000-0000-0000-000000000006" || payload["role"] != "platform-readonly" {
+		t.Fatalf("payload=%v", payload)
+	}
+	perms, ok := payload["permissions"].([]any)
+	if !ok || len(perms) != 1 {
+		t.Fatalf("permissions=%v", payload["permissions"])
+	}
+}
+
+func TestPlatformAdmins_UpdateRoleForwardBody(t *testing.T) {
+	fake := &fakePlatformAdminClient{}
+	h := setupPlatformAdminTestServer(t, fake)
+	body := `{"role_id":"00000000-0000-0000-0000-000000000006","idempotency_key":"44444444-4444-4444-4444-444444444444"}`
+	resp := performPlatformAdmin(h, http.MethodPut, "/api/v1/svc/platform-admins/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/role", body)
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if fake.lastUpdate == nil || fake.lastUpdate.GetUserId() != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" ||
+		fake.lastUpdate.GetRoleId() != "00000000-0000-0000-0000-000000000006" || fake.lastUpdate.GetIdempotencyKey() == "" {
+		t.Fatalf("lastUpdate=%+v", fake.lastUpdate)
+	}
+}
+
 func TestPlatformAdmins_CreateForwardBody(t *testing.T) {
 	fake := &fakePlatformAdminClient{}
 	h := setupPlatformAdminTestServer(t, fake)
-	body := `{"email":"a@x.com","username":"ops","display_name":"Ops","role":"platform-ops","password":"Abcd1234!","idempotency_key":"44444444-4444-4444-4444-444444444444"}`
+	body := `{"email":"a@x.com","username":"ops","display_name":"Ops","role_id":"00000000-0000-0000-0000-000000000006","password":"Abcd1234!","idempotency_key":"44444444-4444-4444-4444-444444444444"}`
 	resp := performPlatformAdmin(h, http.MethodPost, "/api/v1/svc/platform-admins", body)
 	if resp.StatusCode() != http.StatusOK {
 		t.Fatalf("status=%d body=%s", resp.StatusCode(), resp.Body())
@@ -217,17 +290,17 @@ func TestHandler_CreateFlow(t *testing.T) {
 	fake := &fakePlatformAdminClient{
 		listResp: &platformsettingsv1.ListPlatformAdminsResponse{
 			Items: []*platformsettingsv1.PlatformAdminListItem{
-				{Id: id, Username: "ops", DisplayName: "Ops", Role: "platform-ops", Status: "active", Source: "local"},
+				{Id: id, Username: "ops", DisplayName: "Ops", RoleId: "00000000-0000-0000-0000-000000000006", Role: "platform-ops", Status: "active", Source: "local"},
 			},
 		},
 		getResp: &platformsettingsv1.PlatformAdminDetail{
 			Id: id, Email: "ops@ani.io", Username: "ops", DisplayName: "Ops",
-			Role: "platform-ops", Status: "active", Source: "local",
+			RoleId: "00000000-0000-0000-0000-000000000006", Role: "platform-ops", Status: "active", Source: "local",
 		},
 	}
 	h := setupPlatformAdminTestServer(t, fake)
 
-	createBody := `{"email":"ops@ani.io","username":"ops","display_name":"Ops","role":"platform-ops","password":"Abcd1234!","idempotency_key":"44444444-4444-4444-4444-444444444444"}`
+	createBody := `{"email":"ops@ani.io","username":"ops","display_name":"Ops","role_id":"00000000-0000-0000-0000-000000000006","password":"Abcd1234!","idempotency_key":"44444444-4444-4444-4444-444444444444"}`
 	createResp := performPlatformAdmin(h, http.MethodPost, "/api/v1/svc/platform-admins", createBody)
 	if createResp.StatusCode() != http.StatusOK {
 		t.Fatalf("create status=%d body=%s", createResp.StatusCode(), createResp.Body())
@@ -243,7 +316,7 @@ func TestHandler_CreateFlow(t *testing.T) {
 		t.Fatalf("lastCreate=%+v", fake.lastCreate)
 	}
 
-	listResp := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins?role=platform-ops", "")
+	listResp := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins?role_id=00000000-0000-0000-0000-000000000006", "")
 	if listResp.StatusCode() != http.StatusOK {
 		t.Fatalf("list status=%d body=%s", listResp.StatusCode(), listResp.Body())
 	}
@@ -257,7 +330,7 @@ func TestHandler_CreateFlow(t *testing.T) {
 	if _, hasEmail := first["email"]; hasEmail {
 		t.Fatalf("list item must not include email: %v", first)
 	}
-	for _, key := range []string{"id", "username", "display_name", "role", "status", "source"} {
+	for _, key := range []string{"id", "username", "display_name", "role_id", "role", "status", "source"} {
 		if first[key] == nil || first[key] == "" {
 			t.Fatalf("missing list field %s: %v", key, first)
 		}
@@ -272,12 +345,12 @@ func TestHandler_CreateFlow(t *testing.T) {
 	}
 	var detail map[string]any
 	_ = json.Unmarshal(detailResp.Body(), &detail)
-	for _, key := range []string{"id", "email", "username", "display_name", "role", "status", "source"} {
+	for _, key := range []string{"id", "email", "username", "display_name", "role_id", "role", "status", "source"} {
 		if detail[key] == nil || detail[key] == "" {
 			t.Fatalf("missing detail field %s: %v", key, detail)
 		}
 	}
-	if detail["email"] != "ops@ani.io" || detail["role"] != "platform-ops" || detail["username"] != "ops" {
+	if detail["email"] != "ops@ani.io" || detail["role_id"] != "00000000-0000-0000-0000-000000000006" || detail["role"] != "platform-ops" || detail["username"] != "ops" {
 		t.Fatalf("detail=%v", detail)
 	}
 }
@@ -335,7 +408,7 @@ func TestPlatformAdmins_UnimplementedMaps501(t *testing.T) {
 	fake := &fakePlatformAdminClient{err: status.Error(codes.Unimplemented, "NOT_IMPLEMENTED")}
 	h := setupPlatformAdminTestServer(t, fake)
 	resp := performPlatformAdmin(h, http.MethodPost, "/api/v1/svc/platform-admins",
-		`{"email":"a@x.com","username":"ops","display_name":"Ops","role":"platform-ops","password":"Abcd1234!","idempotency_key":"44444444-4444-4444-4444-444444444444"}`)
+		`{"email":"a@x.com","username":"ops","display_name":"Ops","role_id":"00000000-0000-0000-0000-000000000006","password":"Abcd1234!","idempotency_key":"44444444-4444-4444-4444-444444444444"}`)
 	if resp.StatusCode() != http.StatusNotImplemented {
 		t.Fatalf("status=%d body=%s", resp.StatusCode(), resp.Body())
 	}

@@ -22,7 +22,7 @@ func TestCorePlatformUserClient_List_ParamsAndDecode(t *testing.T) {
 			t.Fatalf("%s %s", r.Method, r.URL.Path)
 		}
 		q := r.URL.Query()
-		if q.Get("limit") != "10" || q.Get("cursor") != "c1" || q.Get("role") != "platform-ops" ||
+		if q.Get("limit") != "10" || q.Get("cursor") != "c1" || q.Get("role_id") != "00000000-0000-0000-0000-000000000006" ||
 			q.Get("status") != "active" || q.Get("source") != "local" || q.Get("search") != "ops" {
 			t.Fatalf("unexpected query: %s", r.URL.RawQuery)
 		}
@@ -31,7 +31,7 @@ func TestCorePlatformUserClient_List_ParamsAndDecode(t *testing.T) {
 			"items": []map[string]any{
 				{
 					"id": "11111111-1111-1111-1111-111111111111", "email": "a@example.com",
-					"username": "local:ops", "display_name": "Ops", "role": "platform-ops",
+					"username": "local:ops", "display_name": "Ops", "role_id": "00000000-0000-0000-0000-000000000006", "role": "platform-ops",
 					"status": "active", "source": "local", "created_at": "2026-08-31T00:00:00Z",
 				},
 			},
@@ -42,7 +42,7 @@ func TestCorePlatformUserClient_List_ParamsAndDecode(t *testing.T) {
 
 	client := &CorePlatformUserClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
 	out, err := client.List(context.Background(), ports.PlatformUserListFilter{
-		Limit: 10, Cursor: "c1", Role: "platform-ops", Status: "active", Source: "local", Search: "ops",
+		Limit: 10, Cursor: "c1", RoleID: "00000000-0000-0000-0000-000000000006", Status: "active", Source: "local", Search: "ops",
 	})
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -74,7 +74,7 @@ func TestCorePlatformUserClient_Create(t *testing.T) {
 
 	client := &CorePlatformUserClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
 	out, err := client.Create(context.Background(), ports.PlatformUserCreateInput{
-		Email: "b@example.com", Username: "admin", DisplayName: "Admin", Role: "platform-admin", Password: "Abcd1234!",
+		Email: "b@example.com", Username: "admin", DisplayName: "Admin", RoleID: "00000000-0000-0000-0000-000000000006", Password: "Abcd1234!",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -121,7 +121,7 @@ func TestCorePlatformUserClient_Get_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": id, "email": "ops@ani.io", "username": "local:ops", "display_name": "Ops",
-			"role": "platform-ops", "status": "active", "source": "local",
+			"role_id": "00000000-0000-0000-0000-000000000006", "role": "platform-ops", "status": "active", "source": "local",
 			"created_at": "2026-08-31T00:00:00Z",
 		})
 	}))
@@ -132,7 +132,7 @@ func TestCorePlatformUserClient_Get_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if out.ID != id || out.Username != "local:ops" || out.Role != "platform-ops" {
+	if out.ID != id || out.Username != "local:ops" || out.RoleID != "00000000-0000-0000-0000-000000000006" || out.Role != "platform-ops" {
 		t.Fatalf("out=%+v", out)
 	}
 }
@@ -154,11 +154,72 @@ func TestCorePlatformUserClient_Get_404CoreUnavailable(t *testing.T) {
 	}
 }
 
-func TestCorePlatformUserClient_ListPlatformRoles_TODO(t *testing.T) {
+func TestCorePlatformUserClient_ListPlatformRoles(t *testing.T) {
 	t.Parallel()
-	client := &CorePlatformUserClient{}
-	_, err := client.ListPlatformRoles(context.Background())
-	if !errors.Is(err, ports.ErrNotImplemented) {
-		t.Fatalf("got %v", err)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/admin/platform-users/roles" {
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{{
+				"id": "00000000-0000-0000-0000-000000000006", "name": "platform-ops",
+				"permissions": []map[string]any{{"resource": "tenants", "actions": []any{"*"}, "scope": "platform"}},
+			}},
+		})
+	}))
+	defer srv.Close()
+
+	client := &CorePlatformUserClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	out, err := client.ListPlatformRoles(context.Background())
+	if err != nil {
+		t.Fatalf("ListPlatformRoles: %v", err)
+	}
+	if len(out) != 1 || out[0].ID != "00000000-0000-0000-0000-000000000006" || out[0].Name != "platform-ops" || len(out[0].Permissions) != 1 {
+		t.Fatalf("out=%+v", out)
+	}
+}
+
+func TestCorePlatformUserClient_GetPlatformUserPermissions(t *testing.T) {
+	t.Parallel()
+
+	id := "44444444-4444-4444-4444-444444444444"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/admin/platform-users/"+id+"/permissions" {
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"user_id": id, "role_id": "00000000-0000-0000-0000-000000000006", "role": "platform-readonly",
+			"permissions": []map[string]any{{"resource": "metering", "actions": []any{"read"}, "scope": "platform"}},
+		})
+	}))
+	defer srv.Close()
+
+	client := &CorePlatformUserClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	out, err := client.GetPlatformUserPermissions(context.Background(), uuid.MustParse(id))
+	if err != nil {
+		t.Fatalf("GetPlatformUserPermissions: %v", err)
+	}
+	if out.UserID != id || out.RoleID != "00000000-0000-0000-0000-000000000006" || out.Role != "platform-readonly" || len(out.Permissions) != 1 {
+		t.Fatalf("out=%+v", out)
+	}
+}
+
+func TestCorePlatformUserClient_GetPlatformUserPermissions_NotFound(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": "PLATFORM_USER_NOT_FOUND", "message": "not found"})
+	}))
+	defer srv.Close()
+
+	client := &CorePlatformUserClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	_, err := client.GetPlatformUserPermissions(context.Background(), uuid.MustParse("44444444-4444-4444-4444-444444444444"))
+	if err == nil || !errors.Is(err, ports.ErrPlatformUserNotFound) {
+		t.Fatalf("expected ErrPlatformUserNotFound, got %v", err)
 	}
 }

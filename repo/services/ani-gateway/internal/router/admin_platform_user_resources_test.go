@@ -23,6 +23,10 @@ type fakeAdminPlatformUserStore struct {
 	listRes ports.PlatformUserListResult
 	getRes  ports.PlatformUserAdmin
 	getErr  error
+
+	rolesRes []ports.PlatformRole
+	permsRes ports.PlatformUserPermissions
+	permsErr error
 }
 
 func (f *fakeAdminPlatformUserStore) Create(_ context.Context, in ports.PlatformUserCreate) (ports.PlatformUserAdmin, error) {
@@ -44,7 +48,7 @@ func (f *fakeAdminPlatformUserStore) Get(context.Context, uuid.UUID) (ports.Plat
 	}
 	return f.getRes, nil
 }
-func (f *fakeAdminPlatformUserStore) ChangeRole(context.Context, uuid.UUID, string) error {
+func (f *fakeAdminPlatformUserStore) ChangeRole(context.Context, uuid.UUID, uuid.UUID) error {
 	return nil
 }
 func (f *fakeAdminPlatformUserStore) ResetPassword(context.Context, uuid.UUID, string) error {
@@ -56,7 +60,16 @@ func (f *fakeAdminPlatformUserStore) CountActivePlatformAdmins(context.Context, 
 	return 0, nil
 }
 func (f *fakeAdminPlatformUserStore) ListPlatformRoles(context.Context) ([]ports.PlatformRole, error) {
-	return nil, nil
+	return f.rolesRes, nil
+}
+func (f *fakeAdminPlatformUserStore) GetPlatformUserPermissions(_ context.Context, userID uuid.UUID) (ports.PlatformUserPermissions, error) {
+	if f.permsErr != nil {
+		return ports.PlatformUserPermissions{}, f.permsErr
+	}
+	if f.permsRes.UserID != uuid.Nil {
+		return f.permsRes, nil
+	}
+	return ports.PlatformUserPermissions{UserID: userID}, nil
 }
 
 func setupAdminPlatformUserTestServer(t *testing.T, store ports.PlatformUserAdminStore) *server.Hertz {
@@ -84,7 +97,7 @@ func TestHandler_AdminCreatePlatformUser(t *testing.T) {
 	}
 	h := setupAdminPlatformUserTestServer(t, store)
 
-	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444","email":"ops@ani.io","username":"ops","display_name":"Ops","role":"platform-ops","password":"Abcd1234!"}`
+	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444","email":"ops@ani.io","username":"ops","display_name":"Ops","role_id":"00000000-0000-0000-0000-000000000006","password":"Abcd1234!"}`
 	resp := performAdminPlatformUser(h, http.MethodPost, "/api/v1/admin/platform-users", body)
 	if resp.StatusCode() != http.StatusOK {
 		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
@@ -106,7 +119,7 @@ func TestHandler_AdminCreatePlatformUser_WeakPassword(t *testing.T) {
 	store := &fakeAdminPlatformUserStore{}
 	h := setupAdminPlatformUserTestServer(t, store)
 
-	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444","email":"ops@ani.io","username":"ops","display_name":"Ops","role":"platform-ops","password":"short"}`
+	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444","email":"ops@ani.io","username":"ops","display_name":"Ops","role_id":"00000000-0000-0000-0000-000000000006","password":"short"}`
 	resp := performAdminPlatformUser(h, http.MethodPost, "/api/v1/admin/platform-users", body)
 	if resp.StatusCode() != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
@@ -124,7 +137,7 @@ func TestHandler_AdminCreatePlatformUser_UsernameConflict(t *testing.T) {
 	store := &fakeAdminPlatformUserStore{createErr: ports.ErrUsernameAlreadyExists}
 	h := setupAdminPlatformUserTestServer(t, store)
 
-	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444","email":"ops@ani.io","username":"ops","display_name":"Ops","role":"platform-ops","password":"Abcd1234!"}`
+	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444","email":"ops@ani.io","username":"ops","display_name":"Ops","role_id":"00000000-0000-0000-0000-000000000006","password":"Abcd1234!"}`
 	resp := performAdminPlatformUser(h, http.MethodPost, "/api/v1/admin/platform-users", body)
 	if resp.StatusCode() != http.StatusConflict {
 		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
@@ -141,7 +154,7 @@ func TestHandler_AdminGetPlatformUser(t *testing.T) {
 	store := &fakeAdminPlatformUserStore{
 		getRes: ports.PlatformUserAdmin{
 			ID: id, Email: "ops@ani.io", Username: "local:ops", DisplayName: &dn,
-			Role: "platform-ops", Status: "active", Source: "local",
+			RoleID: uuid.MustParse("00000000-0000-0000-0000-000000000006"), Role: "platform-ops", Status: "active", Source: "local",
 			CreatedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
 		},
 	}
@@ -154,8 +167,8 @@ func TestHandler_AdminGetPlatformUser(t *testing.T) {
 	if err := json.Unmarshal(resp.Body(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["username"] != "ops" {
-		t.Fatalf("username=%v", payload["username"])
+	if payload["username"] != "ops" || payload["role_id"] != "00000000-0000-0000-0000-000000000006" || payload["role"] != "platform-ops" {
+		t.Fatalf("payload=%v", payload)
 	}
 }
 
@@ -167,14 +180,14 @@ func TestHandler_AdminListPlatformUsers(t *testing.T) {
 		listRes: ports.PlatformUserListResult{
 			Items: []ports.PlatformUserAdmin{{
 				ID: id, Email: "ops@ani.io", Username: "local:ops", DisplayName: &dn,
-				Role: "platform-ops", Status: "active", Source: "local",
+				RoleID: uuid.MustParse("00000000-0000-0000-0000-000000000006"), Role: "platform-ops", Status: "active", Source: "local",
 				CreatedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
 			}},
 			NextCursor: "next1",
 		},
 	}
 	h := setupAdminPlatformUserTestServer(t, store)
-	resp := performAdminPlatformUser(h, http.MethodGet, "/api/v1/admin/platform-users?limit=10&role=platform-ops&search=ops", "")
+	resp := performAdminPlatformUser(h, http.MethodGet, "/api/v1/admin/platform-users?limit=10&role_id=00000000-0000-0000-0000-000000000006&search=ops", "")
 	if resp.StatusCode() != http.StatusOK {
 		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
 	}
@@ -186,5 +199,106 @@ func TestHandler_AdminListPlatformUsers(t *testing.T) {
 	first, _ := items[0].(map[string]any)
 	if first["username"] != "ops" {
 		t.Fatalf("username=%v", first["username"])
+	}
+}
+
+func TestHandler_AdminListPlatformUserRoles(t *testing.T) {
+	t.Parallel()
+	store := &fakeAdminPlatformUserStore{
+		rolesRes: []ports.PlatformRole{{
+			ID: uuid.MustParse("00000000-0000-0000-0000-000000000006"), Name: "platform-ops",
+			Permissions: []map[string]any{{"resource": "tenants", "actions": []any{"*"}, "scope": "platform"}},
+		}},
+	}
+	h := setupAdminPlatformUserTestServer(t, store)
+	resp := performAdminPlatformUser(h, http.MethodGet, "/api/v1/admin/platform-users/roles", "")
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := payload["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("payload=%v", payload)
+	}
+	first, _ := items[0].(map[string]any)
+	if first["id"] != "00000000-0000-0000-0000-000000000006" || first["name"] != "platform-ops" {
+		t.Fatalf("item=%v", first)
+	}
+	if _, hasLabel := first["label"]; hasLabel {
+		t.Fatalf("label must not be present: %v", first)
+	}
+	if _, hasDesc := first["description"]; hasDesc {
+		t.Fatalf("description must not be present: %v", first)
+	}
+	perms, _ := first["permissions"].([]any)
+	if len(perms) != 1 {
+		t.Fatalf("permissions=%v", first["permissions"])
+	}
+}
+
+func TestHandler_AdminGetPlatformUserPermissions(t *testing.T) {
+	t.Parallel()
+	id := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	store := &fakeAdminPlatformUserStore{
+		permsRes: ports.PlatformUserPermissions{
+			UserID: id, RoleID: uuid.MustParse("00000000-0000-0000-0000-000000000006"), Role: "platform-ops",
+			Permissions: []map[string]any{{"resource": "tenants", "actions": []any{"read"}, "scope": "platform"}},
+		},
+	}
+	h := setupAdminPlatformUserTestServer(t, store)
+	resp := performAdminPlatformUser(h, http.MethodGet, "/api/v1/admin/platform-users/"+id.String()+"/permissions", "")
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["user_id"] != id.String() || payload["role_id"] != "00000000-0000-0000-0000-000000000006" || payload["role"] != "platform-ops" {
+		t.Fatalf("payload=%v", payload)
+	}
+	if _, hasLabel := payload["label"]; hasLabel {
+		t.Fatalf("label must not be present: %v", payload)
+	}
+	if _, hasDesc := payload["description"]; hasDesc {
+		t.Fatalf("description must not be present: %v", payload)
+	}
+	perms, _ := payload["permissions"].([]any)
+	if len(perms) != 1 {
+		t.Fatalf("permissions=%v", payload["permissions"])
+	}
+}
+
+func TestHandler_AdminRolesDoesNotCollideWithUserID(t *testing.T) {
+	t.Parallel()
+	store := &fakeAdminPlatformUserStore{
+		rolesRes: []ports.PlatformRole{{ID: uuid.MustParse("00000000-0000-0000-0000-000000000006"), Name: "platform-admin", Permissions: []map[string]any{}}},
+		getErr:   ports.ErrPlatformUserNotFound,
+	}
+	h := setupAdminPlatformUserTestServer(t, store)
+	roles := performAdminPlatformUser(h, http.MethodGet, "/api/v1/admin/platform-users/roles", "")
+	if roles.StatusCode() != http.StatusOK {
+		t.Fatalf("roles status=%d body=%s", roles.StatusCode(), string(roles.Body()))
+	}
+	// /roles 不得落入 /:userId
+	get := performAdminPlatformUser(h, http.MethodGet, "/api/v1/admin/platform-users/roles", "")
+	if get.StatusCode() != http.StatusOK {
+		t.Fatalf("repeated roles hit=%d", get.StatusCode())
+	}
+}
+
+func TestHandler_AdminGetPlatformUserPermissions_NotFound(t *testing.T) {
+	t.Parallel()
+	store := &fakeAdminPlatformUserStore{permsErr: ports.ErrPlatformUserNotFound}
+	h := setupAdminPlatformUserTestServer(t, store)
+	resp := performAdminPlatformUser(h, http.MethodGet, "/api/v1/admin/platform-users/11111111-1111-1111-1111-111111111111/permissions", "")
+	if resp.StatusCode() != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
+	}
+	if !strings.Contains(string(resp.Body()), "PLATFORM_USER_NOT_FOUND") {
+		t.Fatalf("body=%s", string(resp.Body()))
 	}
 }

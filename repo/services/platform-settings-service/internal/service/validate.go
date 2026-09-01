@@ -4,11 +4,13 @@ import (
 	"net/mail"
 	"strings"
 	"unicode"
+
+	"github.com/google/uuid"
 )
 
 // validateCreatePlatformAdmin 校验创建入参（SPEC §5.3）；失败返回可读 detail。
-// role 仅做非空检查：合法平台角色以 Core roles 表为准，后期增删角色不改本服务。
-func validateCreatePlatformAdmin(email, username, displayName, role, password string) string {
+// role_id 仅做 UUID 非空检查：合法平台角色以 Core roles 表为准，后期增删角色不改本服务。
+func validateCreatePlatformAdmin(email, username, displayName, roleID, password string) string {
 	email = strings.TrimSpace(email)
 	if email == "" {
 		return "email required"
@@ -31,8 +33,12 @@ func validateCreatePlatformAdmin(email, username, displayName, role, password st
 		return "display_name must be 1-128 characters"
 	}
 
-	if strings.TrimSpace(role) == "" {
-		return "role required"
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return "role_id required"
+	}
+	if _, err := uuid.Parse(roleID); err != nil {
+		return "role_id must be a uuid"
 	}
 
 	if detail := validatePasswordComplexity(password); detail != "" {
@@ -79,7 +85,7 @@ func validatePasswordComplexity(password string) string {
 	return ""
 }
 
-// validateListPlatformAdminFilters 校验列表 query 枚举；role/search 透传 Core。
+// validateListPlatformAdminFilters 校验列表 query 枚举；role_id/search 透传 Core。
 func validateListPlatformAdminFilters(status, source string) string {
 	switch strings.TrimSpace(status) {
 	case "", "active", "disabled":

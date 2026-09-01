@@ -21,19 +21,19 @@ func TestPostgresPlatformUserAdminStore_Create_Success(t *testing.T) {
 	tx := &quotaFakeTx{}
 	tx.enqueueRows(
 		quotaFakeRow{values: []any{false}}, // username exists?
-		quotaFakeRow{values: []any{roleID}},
+		quotaFakeRow{values: []any{"platform-ops"}}, // role name by id
 		quotaFakeRow{values: []any{userID, now}},
 	)
 	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
 
 	out, err := store.Create(context.Background(), ports.PlatformUserCreate{
 		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops",
-		Role: "platform-ops", PasswordHash: "$2a$12$hashed",
+		RoleID: roleID, PasswordHash: "$2a$12$hashed",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if out.ID != userID || out.Username != "local:ops" || out.Role != "platform-ops" || out.Source != "local" {
+	if out.ID != userID || out.Username != "local:ops" || out.RoleID != roleID || out.Role != "platform-ops" || out.Source != "local" {
 		t.Fatalf("out=%+v", out)
 	}
 	if !hasExec(tx, "INSERT INTO user_roles") {
@@ -48,7 +48,7 @@ func TestPostgresPlatformUserAdminStore_Create_UsernameConflict(t *testing.T) {
 	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
 	_, err := store.Create(context.Background(), ports.PlatformUserCreate{
 		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops",
-		Role: "platform-ops", PasswordHash: "hash",
+		RoleID: uuid.MustParse("00000000-0000-0000-0000-000000000006"), PasswordHash: "hash",
 	})
 	if !errors.Is(err, ports.ErrUsernameAlreadyExists) {
 		t.Fatalf("err=%v", err)
@@ -62,13 +62,13 @@ func TestPostgresPlatformUserAdminStore_Create_UniqueViolationMapped(t *testing.
 	tx := &quotaFakeTx{}
 	tx.enqueueRows(
 		quotaFakeRow{values: []any{false}},
-		quotaFakeRow{values: []any{roleID}},
+		quotaFakeRow{values: []any{"platform-ops"}},
 		quotaFakeRow{err: &pgconn.PgError{Code: "23505"}},
 	)
 	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
 	_, err := store.Create(context.Background(), ports.PlatformUserCreate{
 		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops",
-		Role: "platform-ops", PasswordHash: "hash",
+		RoleID: roleID, PasswordHash: "hash",
 	})
 	if !errors.Is(err, ports.ErrUsernameAlreadyExists) {
 		t.Fatalf("err=%v", err)
@@ -86,7 +86,7 @@ func TestPostgresPlatformUserAdminStore_Create_RoleNotFound(t *testing.T) {
 	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
 	_, err := store.Create(context.Background(), ports.PlatformUserCreate{
 		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops",
-		Role: "tenant-admin", PasswordHash: "hash",
+		RoleID: uuid.MustParse("00000000-0000-0000-0000-000000000099"), PasswordHash: "hash",
 	})
 	if !errors.Is(err, ports.ErrRoleNotFound) {
 		t.Fatalf("err=%v", err)
@@ -112,14 +112,14 @@ func TestPostgresPlatformUserAdminStore_Get_Success(t *testing.T) {
 	var lastLogin *time.Time
 	tx := &quotaFakeTx{}
 	tx.enqueueRows(quotaFakeRow{values: []any{
-		userID, "ops@ani.io", "local:ops", &dn, "platform-ops", "active", lastLogin, created,
+		userID, "ops@ani.io", "local:ops", &dn, uuid.MustParse("00000000-0000-0000-0000-000000000006"), "platform-ops", "active", lastLogin, created,
 	}})
 	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
 	out, err := store.Get(context.Background(), userID)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if out.Username != "local:ops" || out.Role != "platform-ops" {
+	if out.Username != "local:ops" || out.RoleID != uuid.MustParse("00000000-0000-0000-0000-000000000006") || out.Role != "platform-ops" {
 		t.Fatalf("out=%+v", out)
 	}
 }
@@ -132,16 +132,16 @@ func TestPostgresPlatformUserAdminStore_List_Success(t *testing.T) {
 	created := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	tx := &quotaFakeTx{}
 	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
-		{values: []any{userID, "ops@ani.io", "local:ops", &dn, "platform-ops", "active", &last, created}},
+		{values: []any{userID, "ops@ani.io", "local:ops", &dn, uuid.MustParse("00000000-0000-0000-0000-000000000006"), "platform-ops", "active", &last, created}},
 	}})
 	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
 	res, err := store.List(context.Background(), ports.PlatformUserFilter{
-		Limit: 20, Role: "platform-ops", Status: "active", Source: "local", Search: "ops",
+		Limit: 20, RoleID: uuid.MustParse("00000000-0000-0000-0000-000000000006"), Status: "active", Source: "local", Search: "ops",
 	})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(res.Items) != 1 || res.Items[0].Role != "platform-ops" {
+	if len(res.Items) != 1 || res.Items[0].Role != "platform-ops" || res.Items[0].RoleID != uuid.MustParse("00000000-0000-0000-0000-000000000006") {
 		t.Fatalf("res=%+v", res)
 	}
 	if len(tx.querySQLs) != 1 {
@@ -162,7 +162,7 @@ func TestPostgresPlatformUserAdminStore_List_NextCursor(t *testing.T) {
 		dn := "Ops"
 		var lastLogin *time.Time
 		return quotaFakeRow{values: []any{
-			uuid.MustParse(id), "ops@ani.io", "local:ops", &dn, "platform-ops", "active", lastLogin, created,
+			uuid.MustParse(id), "ops@ani.io", "local:ops", &dn, uuid.MustParse("00000000-0000-0000-0000-000000000006"), "platform-ops", "active", lastLogin, created,
 		}}
 	}
 	t1 := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
@@ -235,8 +235,242 @@ func TestInferPlatformSource(t *testing.T) {
 
 func TestValidatePlatformUserCreateFields(t *testing.T) {
 	t.Parallel()
-	err := validatePlatformUserCreateFields("bad", "a:b", "", "", "")
+	err := validatePlatformUserCreateFields("bad", "a:b", "", uuid.Nil, "")
 	if !errors.Is(err, ports.ErrValidationFailed) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_ListPlatformRoles(t *testing.T) {
+	t.Parallel()
+	adminPerms := []byte(`[{"resource":"tenants","actions":["*"],"scope":"platform"}]`)
+	opsPerms := []byte(`[{"resource":"resource_pool","actions":["read","list"],"scope":"platform"}]`)
+	readonlyPerms := []byte(`[{"resource":"metering","actions":["read"],"scope":"platform"}]`)
+	tx := &quotaFakeTx{}
+	// fake 仅回放 SQL 过滤后的行：tenant-admin 等非 platform-% 不应出现在结果集。
+	adminID := uuid.MustParse("00000000-0000-0000-0000-000000000006")
+	opsID := uuid.MustParse("00000000-0000-0000-0000-000000000007")
+	roID := uuid.MustParse("00000000-0000-0000-0000-000000000008")
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		{values: []any{adminID, "platform-admin", adminPerms}},
+		{values: []any{opsID, "platform-ops", opsPerms}},
+		{values: []any{roID, "platform-readonly", readonlyPerms}},
+	}})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+
+	roles, err := store.ListPlatformRoles(context.Background())
+	if err != nil {
+		t.Fatalf("ListPlatformRoles: %v", err)
+	}
+	if len(roles) != 3 {
+		t.Fatalf("roles=%+v", roles)
+	}
+	sql := ""
+	if len(tx.querySQLs) == 1 {
+		sql = tx.querySQLs[0]
+	}
+	if !strings.Contains(sql, "tenant_id IS NULL") || !strings.Contains(sql, "name LIKE 'platform-%'") {
+		t.Fatalf("sql must filter platform roles only: %q", sql)
+	}
+	if roles[0].Name != "platform-admin" {
+		t.Fatalf("admin role=%+v", roles[0])
+	}
+	for _, role := range roles {
+		if strings.HasPrefix(role.Name, "tenant-") || !strings.HasPrefix(role.Name, "platform-") {
+			t.Fatalf("non-platform role leaked: %+v", role)
+		}
+		if len(role.Permissions) != 1 {
+			t.Fatalf("permissions=%+v", role.Permissions)
+		}
+		p := role.Permissions[0]
+		if p["resource"] == nil || p["actions"] == nil || p["scope"] == nil {
+			t.Fatalf("permission missing keys: %+v", p)
+		}
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_ListPlatformRoles_Empty(t *testing.T) {
+	t.Parallel()
+	tx := &quotaFakeTx{}
+	tx.enqueueQuery(&quotaFakeRows{rows: nil})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	roles, err := store.ListPlatformRoles(context.Background())
+	if err != nil {
+		t.Fatalf("ListPlatformRoles: %v", err)
+	}
+	if len(roles) != 0 {
+		t.Fatalf("roles=%+v", roles)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_GetPlatformUserPermissions_Success(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	raw := []byte(`[{"resource":"tenants","actions":["read"],"scope":"platform"}]`)
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{uuid.MustParse("00000000-0000-0000-0000-000000000006"), "platform-readonly", raw}})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+
+	out, err := store.GetPlatformUserPermissions(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("GetPlatformUserPermissions: %v", err)
+	}
+	if out.UserID != userID || out.RoleID != uuid.MustParse("00000000-0000-0000-0000-000000000006") || out.Role != "platform-readonly" {
+		t.Fatalf("out=%+v", out)
+	}
+	if len(out.Permissions) != 1 || out.Permissions[0]["resource"] != "tenants" {
+		t.Fatalf("permissions=%+v", out.Permissions)
+	}
+	sql := ""
+	if len(tx.querySQLs) == 1 {
+		sql = tx.querySQLs[0]
+	}
+	if !strings.Contains(sql, "r.tenant_id IS NULL") || !strings.Contains(sql, "r.name LIKE 'platform-%'") ||
+		!strings.Contains(sql, "u.is_deleted = FALSE") {
+		t.Fatalf("sql must require platform role + not deleted: %q", sql)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_GetPlatformUserPermissions_EmptyPermissions(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{uuid.MustParse("00000000-0000-0000-0000-000000000006"), "platform-ops", []byte(`[]`)}})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	out, err := store.GetPlatformUserPermissions(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("GetPlatformUserPermissions: %v", err)
+	}
+	if out.Role != "platform-ops" || len(out.Permissions) != 0 {
+		t.Fatalf("want empty permissions slice, got %+v", out)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_GetPlatformUserPermissions_NotFound(t *testing.T) {
+	t.Parallel()
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	_, err := store.GetPlatformUserPermissions(context.Background(), uuid.MustParse("11111111-1111-1111-1111-111111111111"))
+	if !errors.Is(err, ports.ErrPlatformUserNotFound) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_GetPlatformUserPermissions_SoftDeletedOrNonPlatform(t *testing.T) {
+	t.Parallel()
+	// 软删 / 无平台角色绑定 / 仅绑 tenant 角色：SQL 过滤后均无行 → PLATFORM_USER_NOT_FOUND。
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	_, err := store.GetPlatformUserPermissions(context.Background(), uuid.MustParse("22222222-2222-2222-2222-222222222222"))
+	if !errors.Is(err, ports.ErrPlatformUserNotFound) {
+		t.Fatalf("err=%v", err)
+	}
+	if len(tx.querySQLs) != 1 || !strings.Contains(tx.querySQLs[0], "r.name LIKE 'platform-%'") {
+		t.Fatalf("sql=%v", tx.querySQLs)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_ChangeRole_UpdateExisting(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	roleID := uuid.MustParse("00000000-0000-0000-0000-000000000006")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{true}},           // ensurePlatformUserExists
+		quotaFakeRow{values: []any{"platform-ops"}}, // lookup new role name
+		quotaFakeRow{values: []any{true}},           // binding exists
+		quotaFakeRow{values: []any{"platform-ops"}}, // current role（同角色升级路径不触发 last-admin）
+	)
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	if err := store.ChangeRole(context.Background(), userID, roleID); err != nil {
+		t.Fatalf("ChangeRole: %v", err)
+	}
+	if !hasExec(tx, "UPDATE user_roles") {
+		t.Fatalf("want UPDATE user_roles, exec=%v", tx.execSQLs)
+	}
+	if hasExec(tx, "DELETE FROM user_roles") || hasExec(tx, "INSERT INTO user_roles") {
+		t.Fatalf("update path must not delete/insert: %v", tx.execSQLs)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_ChangeRole_InsertWhenMissing(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	roleID := uuid.MustParse("00000000-0000-0000-0000-000000000006")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{true}},           // ensurePlatformUserExists
+		quotaFakeRow{values: []any{"platform-ops"}}, // lookup role name
+		quotaFakeRow{values: []any{false}},          // binding missing
+	)
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	if err := store.ChangeRole(context.Background(), userID, roleID); err != nil {
+		t.Fatalf("ChangeRole: %v", err)
+	}
+	if !hasExec(tx, "INSERT INTO user_roles") {
+		t.Fatalf("want INSERT user_roles, exec=%v", tx.execSQLs)
+	}
+	if hasExec(tx, "DELETE FROM user_roles") || hasExec(tx, "UPDATE user_roles") {
+		t.Fatalf("insert path must not delete/update: %v", tx.execSQLs)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_ChangeRole_LastPlatformAdmin(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	roleID := uuid.MustParse("00000000-0000-0000-0000-000000000007")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{true}},              // ensurePlatformUserExists
+		quotaFakeRow{values: []any{"platform-ops"}},    // lookup new role
+		quotaFakeRow{values: []any{true}},              // binding exists
+		quotaFakeRow{values: []any{"platform-admin"}},  // current role
+		quotaFakeRow{values: []any{int64(0)}},          // other active admins
+	)
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	err := store.ChangeRole(context.Background(), userID, roleID)
+	if !errors.Is(err, ports.ErrLastPlatformAdmin) {
+		t.Fatalf("err=%v", err)
+	}
+	if hasExec(tx, "UPDATE user_roles") || hasExec(tx, "INSERT INTO user_roles") {
+		t.Fatalf("last-admin must not mutate roles: %v", tx.execSQLs)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_ChangeRole_DemoteWhenOtherAdminsExist(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	roleID := uuid.MustParse("00000000-0000-0000-0000-000000000007")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{true}},              // ensurePlatformUserExists
+		quotaFakeRow{values: []any{"platform-ops"}},    // lookup new role
+		quotaFakeRow{values: []any{true}},              // binding exists
+		quotaFakeRow{values: []any{"platform-admin"}},  // current role
+		quotaFakeRow{values: []any{int64(1)}},          // other active admins
+	)
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	if err := store.ChangeRole(context.Background(), userID, roleID); err != nil {
+		t.Fatalf("ChangeRole: %v", err)
+	}
+	if !hasExec(tx, "UPDATE user_roles") {
+		t.Fatalf("want UPDATE user_roles, exec=%v", tx.execSQLs)
+	}
+}
+
+func TestDecodeRolePermissionsJSON(t *testing.T) {
+	t.Parallel()
+	empty, err := decodeRolePermissionsJSON(nil)
+	if err != nil || empty != nil {
+		t.Fatalf("nil raw: %v %#v", err, empty)
+	}
+	arr, err := decodeRolePermissionsJSON([]byte(`[{"resource":"metering","actions":["read"],"scope":"platform"}]`))
+	if err != nil || len(arr) != 1 || arr[0]["resource"] != "metering" {
+		t.Fatalf("arr=%v err=%v", arr, err)
+	}
+	if _, err := decodeRolePermissionsJSON([]byte(`{"bad":true}`)); err == nil {
+		t.Fatal("want decode error for object JSON")
 	}
 }

@@ -31,6 +31,8 @@ type adminPlatformUserAPI struct {
 //	POST   /admin/platform-users/:userId/disable
 //	POST   /admin/platform-users/:userId/enable
 //	DELETE /admin/platform-users/:userId
+//	GET    /admin/platform-users/roles
+//	GET    /admin/platform-users/:userId/permissions
 func registerAdminPlatformUserResources(v1 *route.RouterGroup, store ports.PlatformUserAdminStore) {
 	if store == nil {
 		return
@@ -38,6 +40,8 @@ func registerAdminPlatformUserResources(v1 *route.RouterGroup, store ports.Platf
 	api := adminPlatformUserAPI{store: store}
 	v1.POST("/admin/platform-users", api.createPlatformUser)
 	v1.GET("/admin/platform-users", api.listPlatformUsers)
+	v1.GET("/admin/platform-users/roles", api.listPlatformUserRoles)
+	v1.GET("/admin/platform-users/:userId/permissions", api.getPlatformUserPermissions)
 	v1.GET("/admin/platform-users/:userId", api.getPlatformUser)
 	v1.PUT("/admin/platform-users/:userId/role", api.updatePlatformUserRole)
 	v1.POST("/admin/platform-users/:userId/reset-password", api.resetPlatformUserPassword)
@@ -51,13 +55,13 @@ type adminPlatformUserCreateRequest struct {
 	Email          string `json:"email"`
 	Username       string `json:"username"`
 	DisplayName    string `json:"display_name"`
-	Role           string `json:"role"`
+	RoleID         string `json:"role_id"`
 	Password       string `json:"password"`
 }
 
 type adminPlatformUserRoleUpdateRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
-	Role           string `json:"role"`
+	RoleID         string `json:"role_id"`
 }
 
 type adminPlatformUserResetPasswordRequest struct {
@@ -74,6 +78,7 @@ type adminPlatformUserResponse struct {
 	Email       string     `json:"email"`
 	Username    string     `json:"username"`
 	DisplayName string     `json:"display_name"`
+	RoleID      string     `json:"role_id"`
 	Role        string     `json:"role"`
 	Status      string     `json:"status"`
 	Source      string     `json:"source"`
@@ -99,12 +104,17 @@ func (api *adminPlatformUserAPI) createPlatformUser(ctx context.Context, c *app.
 		writeDemoError(c, http.StatusInternalServerError, "INTERNAL", "hash password failed")
 		return
 	}
+	roleID, err := uuid.Parse(strings.TrimSpace(req.RoleID))
+	if err != nil {
+		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "role_id must be a uuid")
+		return
+	}
 	// 步骤 4：调 PlatformUserAdminStore.Create
 	created, err := api.store.Create(ctx, ports.PlatformUserCreate{
 		Email:        req.Email,
 		Username:     req.Username,
 		DisplayName:  req.DisplayName,
-		Role:         req.Role,
+		RoleID:       roleID,
 		PasswordHash: string(hash),
 	})
 	if err != nil {
@@ -134,10 +144,19 @@ func (api *adminPlatformUserAPI) listPlatformUsers(ctx context.Context, c *app.R
 		}
 	}
 	// 步骤 2：调 Store.List 并映射响应
+	var roleID uuid.UUID
+	if raw := strings.TrimSpace(string(c.Query("role_id"))); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "role_id must be a uuid")
+			return
+		}
+		roleID = parsed
+	}
 	res, err := api.store.List(ctx, ports.PlatformUserFilter{
 		Limit:  limit,
 		Cursor: string(c.Query("cursor")),
-		Role:   string(c.Query("role")),
+		RoleID: roleID,
 		Status: string(c.Query("status")),
 		Source: string(c.Query("source")),
 		Search: string(c.Query("search")),
@@ -174,8 +193,38 @@ func (api *adminPlatformUserAPI) getPlatformUser(ctx context.Context, c *app.Req
 	c.JSON(http.StatusOK, toAdminPlatformUserResponse(user))
 }
 
+func (api *adminPlatformUserAPI) listPlatformUserRoles(ctx context.Context, c *app.RequestContext) {
+	// 步骤 1：调 Store.ListPlatformRoles（不分页）
+	roles, err := api.store.ListPlatformRoles(ctx)
+	if err != nil {
+		writeAdminPlatformUserError(c, err)
+		return
+	}
+	// 步骤 2：组装响应 items
+	items := make([]map[string]any, 0, len(roles))
+	for _, role := range roles {
+		items = append(items, toAdminPlatformRoleJSON(role))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items})
+}
+
+func (api *adminPlatformUserAPI) getPlatformUserPermissions(ctx context.Context, c *app.RequestContext) {
+	// 步骤 1：解析 path userId
+	userID, ok := parseAdminPlatformUserID(c)
+	if !ok {
+		return
+	}
+	// 步骤 2：调 Store.GetPlatformUserPermissions
+	perms, err := api.store.GetPlatformUserPermissions(ctx, userID)
+	if err != nil {
+		writeAdminPlatformUserError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toAdminPlatformUserPermissionsJSON(perms))
+}
+
 func (api *adminPlatformUserAPI) updatePlatformUserRole(ctx context.Context, c *app.RequestContext) {
-	// 步骤 1：解析 path + body
+	// 步骤 1：解析 path + body（幂等由网关统一中间件处理，本 handler 不校验 idempotency_key）
 	userID, ok := parseAdminPlatformUserID(c)
 	if !ok {
 		return
@@ -185,12 +234,13 @@ func (api *adminPlatformUserAPI) updatePlatformUserRole(ctx context.Context, c *
 		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid role update request")
 		return
 	}
-	if strings.TrimSpace(req.IdempotencyKey) == "" {
-		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "idempotency_key required")
+	roleID, err := uuid.Parse(strings.TrimSpace(req.RoleID))
+	if err != nil {
+		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "role_id must be a uuid")
 		return
 	}
 	// 步骤 2：调 Store.ChangeRole
-	if err := api.store.ChangeRole(ctx, userID, req.Role); err != nil {
+	if err := api.store.ChangeRole(ctx, userID, roleID); err != nil {
 		writeAdminPlatformUserError(c, err)
 		return
 	}
@@ -201,7 +251,7 @@ func (api *adminPlatformUserAPI) updatePlatformUserRole(ctx context.Context, c *
 }
 
 func (api *adminPlatformUserAPI) resetPlatformUserPassword(ctx context.Context, c *app.RequestContext) {
-	// 步骤 1：解析 path + body（明文密码仅本次透传）
+	// 步骤 1：解析 path + body（明文密码仅本次透传；幂等由网关统一中间件处理）
 	userID, ok := parseAdminPlatformUserID(c)
 	if !ok {
 		return
@@ -209,10 +259,6 @@ func (api *adminPlatformUserAPI) resetPlatformUserPassword(ctx context.Context, 
 	var req adminPlatformUserResetPasswordRequest
 	if err := c.BindJSON(&req); err != nil {
 		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid reset password request")
-		return
-	}
-	if strings.TrimSpace(req.IdempotencyKey) == "" {
-		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "idempotency_key required")
 		return
 	}
 	// 步骤 2：调 Store.ResetPassword（Store 内 bcrypt）
@@ -235,20 +281,14 @@ func (api *adminPlatformUserAPI) enablePlatformUser(ctx context.Context, c *app.
 }
 
 func (api *adminPlatformUserAPI) mutatePlatformUserStatus(ctx context.Context, c *app.RequestContext, status, message string) {
-	// 步骤 1：解析 path + idempotency_key
+	// 步骤 1：解析 path（幂等由网关统一中间件处理，本 handler 不校验 idempotency_key）
 	userID, ok := parseAdminPlatformUserID(c)
 	if !ok {
 		return
 	}
 	var req adminPlatformUserIdempotentRequest
-	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request")
-		return
-	}
-	if strings.TrimSpace(req.IdempotencyKey) == "" {
-		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "idempotency_key required")
-		return
-	}
+	// body 可空；兼容仅 header 幂等键或空 body 的调用方（Services→Core）
+	_ = c.BindJSON(&req)
 	// 步骤 2：调 Store.SetStatus
 	if err := api.store.SetStatus(ctx, userID, status); err != nil {
 		writeAdminPlatformUserError(c, err)
@@ -261,20 +301,13 @@ func (api *adminPlatformUserAPI) mutatePlatformUserStatus(ctx context.Context, c
 }
 
 func (api *adminPlatformUserAPI) deletePlatformUser(ctx context.Context, c *app.RequestContext) {
-	// 步骤 1：解析 path + idempotency_key
+	// 步骤 1：解析 path（幂等由网关统一中间件处理，本 handler 不校验 idempotency_key）
 	userID, ok := parseAdminPlatformUserID(c)
 	if !ok {
 		return
 	}
 	var req adminPlatformUserIdempotentRequest
-	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid delete request")
-		return
-	}
-	if strings.TrimSpace(req.IdempotencyKey) == "" {
-		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "idempotency_key required")
-		return
-	}
+	_ = c.BindJSON(&req)
 	// 步骤 2：调 Store.SoftDelete
 	if err := api.store.SoftDelete(ctx, userID); err != nil {
 		writeAdminPlatformUserError(c, err)
@@ -306,6 +339,7 @@ func toAdminPlatformUserResponse(u ports.PlatformUserAdmin) adminPlatformUserRes
 		Email:       u.Email,
 		Username:    stripAdminPlatformUsernamePrefix(u.Username),
 		DisplayName: dn,
+		RoleID:      u.RoleID.String(),
 		Role:        u.Role,
 		Status:      u.Status,
 		Source:      u.Source,
@@ -322,6 +356,23 @@ func stripAdminPlatformUsernamePrefix(username string) string {
 		return strings.TrimPrefix(username, "oidc:")
 	default:
 		return username
+	}
+}
+
+func toAdminPlatformRoleJSON(role ports.PlatformRole) map[string]any {
+	return map[string]any{
+		"id":          role.ID.String(),
+		"name":        role.Name,
+		"permissions": role.Permissions,
+	}
+}
+
+func toAdminPlatformUserPermissionsJSON(p ports.PlatformUserPermissions) map[string]any {
+	return map[string]any{
+		"user_id":     p.UserID.String(),
+		"role_id":     p.RoleID.String(),
+		"role":        p.Role,
+		"permissions": p.Permissions,
 	}
 }
 

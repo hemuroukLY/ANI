@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -61,6 +62,7 @@ func registerPlatformAdminsAPI(svc *route.RouterGroup, api *platformAdminsAPI) {
 	// 静态段先于参数段：/roles 必须在 /:userId 之前注册。
 	svc.GET("/platform-admins/roles", api.listPlatformAdminRoles)
 	svc.GET("/platform-admins/:userId", api.getPlatformAdmin)
+	svc.GET("/platform-admins/:userId/permissions", api.getPlatformAdminPermissions)
 	svc.PUT("/platform-admins/:userId/role", api.updatePlatformAdminRole)
 	svc.POST("/platform-admins/:userId/reset-password", api.resetPlatformAdminPassword)
 	svc.POST("/platform-admins/:userId/disable", api.disablePlatformAdmin)
@@ -88,7 +90,7 @@ func (api *platformAdminsAPI) createPlatformAdmin(ctx context.Context, c *app.Re
 		Email          string `json:"email"`
 		Username       string `json:"username"`
 		DisplayName    string `json:"display_name"`
-		Role           string `json:"role"`
+		RoleID         string `json:"role_id"`
 		Password       string `json:"password"`
 		IdempotencyKey string `json:"idempotency_key"`
 	}
@@ -106,7 +108,7 @@ func (api *platformAdminsAPI) createPlatformAdmin(ctx context.Context, c *app.Re
 		Email:          body.Email,
 		Username:       body.Username,
 		DisplayName:    body.DisplayName,
-		Role:           body.Role,
+		RoleId:         body.RoleID,
 		Password:       body.Password,
 	})
 	if err != nil {
@@ -129,7 +131,7 @@ func (api *platformAdminsAPI) listPlatformAdmins(ctx context.Context, c *app.Req
 		return
 	}
 	res, err := api.client.ListPlatformAdmins(callCtx, &platformsettingsv1.ListPlatformAdminsRequest{
-		Role:   c.Query("role"),
+		RoleId: c.Query("role_id"),
 		Status: c.Query("status"),
 		Source: c.Query("source"),
 		Search: c.Query("search"),
@@ -185,13 +187,30 @@ func (api *platformAdminsAPI) getPlatformAdmin(ctx context.Context, c *app.Reque
 	c.JSON(http.StatusOK, platformAdminDetailJSON(res))
 }
 
+func (api *platformAdminsAPI) getPlatformAdminPermissions(ctx context.Context, c *app.RequestContext) {
+	if api.client == nil {
+		writePlatformAdminError(c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "platform-admins grpc client unavailable")
+		return
+	}
+	callCtx, cancel := platformAdminCallCtx(ctx, c)
+	defer cancel()
+	res, err := api.client.GetPlatformAdminPermissions(callCtx, &platformsettingsv1.GetPlatformAdminPermissionsRequest{
+		UserId: c.Param("userId"),
+	})
+	if err != nil {
+		mapPlatformAdminError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, platformAdminPermissionsJSON(res))
+}
+
 func (api *platformAdminsAPI) updatePlatformAdminRole(ctx context.Context, c *app.RequestContext) {
 	if api.client == nil {
 		writePlatformAdminError(c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "platform-admins grpc client unavailable")
 		return
 	}
 	var body struct {
-		Role           string `json:"role"`
+		RoleID         string `json:"role_id"`
 		IdempotencyKey string `json:"idempotency_key"`
 	}
 	if err := c.BindJSON(&body); err != nil {
@@ -205,7 +224,7 @@ func (api *platformAdminsAPI) updatePlatformAdminRole(ctx context.Context, c *ap
 	defer cancel()
 	res, err := api.client.UpdatePlatformAdminRole(callCtx, &platformsettingsv1.UpdatePlatformAdminRoleRequest{
 		UserId:         c.Param("userId"),
-		Role:           body.Role,
+		RoleId:         body.RoleID,
 		IdempotencyKey: body.IdempotencyKey,
 	})
 	if err != nil {
@@ -333,6 +352,7 @@ func platformAdminListItemJSON(item *platformsettingsv1.PlatformAdminListItem) m
 		"id":            item.GetId(),
 		"username":      item.GetUsername(),
 		"display_name":  item.GetDisplayName(),
+		"role_id":       item.GetRoleId(),
 		"role":          item.GetRole(),
 		"status":        item.GetStatus(),
 		"source":        item.GetSource(),
@@ -349,6 +369,7 @@ func platformAdminDetailJSON(item *platformsettingsv1.PlatformAdminDetail) map[s
 		"email":         item.GetEmail(),
 		"username":      item.GetUsername(),
 		"display_name":  item.GetDisplayName(),
+		"role_id":       item.GetRoleId(),
 		"role":          item.GetRole(),
 		"status":        item.GetStatus(),
 		"source":        item.GetSource(),
@@ -361,21 +382,32 @@ func platformRoleJSON(item *platformsettingsv1.PlatformRole) map[string]any {
 	if item == nil {
 		return map[string]any{}
 	}
-	out := map[string]any{
+	return map[string]any{
+		"id":          item.GetId(),
 		"name":        item.GetName(),
-		"label":       item.GetLabel(),
-		"description": item.GetDescription(),
+		"permissions": platformPermissionsJSON(item.GetPermissions()),
 	}
-	// 生成物仍为旧 4 维 PlatformRolePermissions；原样透出字段供过渡期使用。
-	if perms := item.GetPermissions(); perms != nil {
-		out["permissions"] = map[string]any{
-			"tenant_ops":     perms.GetTenantOps(),
-			"resource_pool":  perms.GetResourcePool(),
-			"platform_user":  perms.GetPlatformUser(),
-			"audit_export":   perms.GetAuditExport(),
+}
+
+func platformAdminPermissionsJSON(item *platformsettingsv1.PlatformAdminPermissions) map[string]any {
+	if item == nil {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"user_id":     item.GetUserId(),
+		"role_id":     item.GetRoleId(),
+		"role":        item.GetRole(),
+		"permissions": platformPermissionsJSON(item.GetPermissions()),
+	}
+}
+
+func platformPermissionsJSON(items []*structpb.Struct) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		if it == nil {
+			continue
 		}
-	} else {
-		out["permissions"] = []any{}
+		out = append(out, it.AsMap())
 	}
 	return out
 }

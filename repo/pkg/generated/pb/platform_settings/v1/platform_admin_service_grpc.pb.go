@@ -20,16 +20,17 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	PlatformAdminService_CreatePlatformAdmin_FullMethodName        = "/platform_settings.v1.PlatformAdminService/CreatePlatformAdmin"
-	PlatformAdminService_ListPlatformAdmins_FullMethodName         = "/platform_settings.v1.PlatformAdminService/ListPlatformAdmins"
-	PlatformAdminService_ListPlatformAdminRoles_FullMethodName     = "/platform_settings.v1.PlatformAdminService/ListPlatformAdminRoles"
-	PlatformAdminService_GetPlatformAdmin_FullMethodName           = "/platform_settings.v1.PlatformAdminService/GetPlatformAdmin"
-	PlatformAdminService_UpdatePlatformAdminRole_FullMethodName    = "/platform_settings.v1.PlatformAdminService/UpdatePlatformAdminRole"
-	PlatformAdminService_ResetPlatformAdminPassword_FullMethodName = "/platform_settings.v1.PlatformAdminService/ResetPlatformAdminPassword"
-	PlatformAdminService_DisablePlatformAdmin_FullMethodName       = "/platform_settings.v1.PlatformAdminService/DisablePlatformAdmin"
-	PlatformAdminService_EnablePlatformAdmin_FullMethodName        = "/platform_settings.v1.PlatformAdminService/EnablePlatformAdmin"
-	PlatformAdminService_DeletePlatformAdmin_FullMethodName        = "/platform_settings.v1.PlatformAdminService/DeletePlatformAdmin"
-	PlatformAdminService_ListPlatformAdminAuditLogs_FullMethodName = "/platform_settings.v1.PlatformAdminService/ListPlatformAdminAuditLogs"
+	PlatformAdminService_CreatePlatformAdmin_FullMethodName         = "/platform_settings.v1.PlatformAdminService/CreatePlatformAdmin"
+	PlatformAdminService_ListPlatformAdmins_FullMethodName          = "/platform_settings.v1.PlatformAdminService/ListPlatformAdmins"
+	PlatformAdminService_ListPlatformAdminRoles_FullMethodName      = "/platform_settings.v1.PlatformAdminService/ListPlatformAdminRoles"
+	PlatformAdminService_GetPlatformAdmin_FullMethodName            = "/platform_settings.v1.PlatformAdminService/GetPlatformAdmin"
+	PlatformAdminService_GetPlatformAdminPermissions_FullMethodName = "/platform_settings.v1.PlatformAdminService/GetPlatformAdminPermissions"
+	PlatformAdminService_UpdatePlatformAdminRole_FullMethodName     = "/platform_settings.v1.PlatformAdminService/UpdatePlatformAdminRole"
+	PlatformAdminService_ResetPlatformAdminPassword_FullMethodName  = "/platform_settings.v1.PlatformAdminService/ResetPlatformAdminPassword"
+	PlatformAdminService_DisablePlatformAdmin_FullMethodName        = "/platform_settings.v1.PlatformAdminService/DisablePlatformAdmin"
+	PlatformAdminService_EnablePlatformAdmin_FullMethodName         = "/platform_settings.v1.PlatformAdminService/EnablePlatformAdmin"
+	PlatformAdminService_DeletePlatformAdmin_FullMethodName         = "/platform_settings.v1.PlatformAdminService/DeletePlatformAdmin"
+	PlatformAdminService_ListPlatformAdminAuditLogs_FullMethodName  = "/platform_settings.v1.PlatformAdminService/ListPlatformAdminAuditLogs"
 )
 
 // PlatformAdminServiceClient is the client API for PlatformAdminService service.
@@ -40,6 +41,7 @@ type PlatformAdminServiceClient interface {
 	ListPlatformAdmins(ctx context.Context, in *ListPlatformAdminsRequest, opts ...grpc.CallOption) (*ListPlatformAdminsResponse, error)
 	ListPlatformAdminRoles(ctx context.Context, in *ListPlatformAdminRolesRequest, opts ...grpc.CallOption) (*ListPlatformAdminRolesResponse, error)
 	GetPlatformAdmin(ctx context.Context, in *GetPlatformAdminRequest, opts ...grpc.CallOption) (*PlatformAdminDetail, error)
+	GetPlatformAdminPermissions(ctx context.Context, in *GetPlatformAdminPermissionsRequest, opts ...grpc.CallOption) (*PlatformAdminPermissions, error)
 	UpdatePlatformAdminRole(ctx context.Context, in *UpdatePlatformAdminRoleRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	ResetPlatformAdminPassword(ctx context.Context, in *ResetPlatformAdminPasswordRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	DisablePlatformAdmin(ctx context.Context, in *DisablePlatformAdminRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
@@ -86,6 +88,15 @@ func (c *platformAdminServiceClient) ListPlatformAdminRoles(ctx context.Context,
 func (c *platformAdminServiceClient) GetPlatformAdmin(ctx context.Context, in *GetPlatformAdminRequest, opts ...grpc.CallOption) (*PlatformAdminDetail, error) {
 	out := new(PlatformAdminDetail)
 	err := c.cc.Invoke(ctx, PlatformAdminService_GetPlatformAdmin_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *platformAdminServiceClient) GetPlatformAdminPermissions(ctx context.Context, in *GetPlatformAdminPermissionsRequest, opts ...grpc.CallOption) (*PlatformAdminPermissions, error) {
+	out := new(PlatformAdminPermissions)
+	err := c.cc.Invoke(ctx, PlatformAdminService_GetPlatformAdminPermissions_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +165,7 @@ type PlatformAdminServiceServer interface {
 	ListPlatformAdmins(context.Context, *ListPlatformAdminsRequest) (*ListPlatformAdminsResponse, error)
 	ListPlatformAdminRoles(context.Context, *ListPlatformAdminRolesRequest) (*ListPlatformAdminRolesResponse, error)
 	GetPlatformAdmin(context.Context, *GetPlatformAdminRequest) (*PlatformAdminDetail, error)
+	GetPlatformAdminPermissions(context.Context, *GetPlatformAdminPermissionsRequest) (*PlatformAdminPermissions, error)
 	UpdatePlatformAdminRole(context.Context, *UpdatePlatformAdminRoleRequest) (*v1.IdempotentResult, error)
 	ResetPlatformAdminPassword(context.Context, *ResetPlatformAdminPasswordRequest) (*v1.IdempotentResult, error)
 	DisablePlatformAdmin(context.Context, *DisablePlatformAdminRequest) (*v1.IdempotentResult, error)
@@ -178,6 +190,9 @@ func (UnimplementedPlatformAdminServiceServer) ListPlatformAdminRoles(context.Co
 }
 func (UnimplementedPlatformAdminServiceServer) GetPlatformAdmin(context.Context, *GetPlatformAdminRequest) (*PlatformAdminDetail, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetPlatformAdmin not implemented")
+}
+func (UnimplementedPlatformAdminServiceServer) GetPlatformAdminPermissions(context.Context, *GetPlatformAdminPermissionsRequest) (*PlatformAdminPermissions, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetPlatformAdminPermissions not implemented")
 }
 func (UnimplementedPlatformAdminServiceServer) UpdatePlatformAdminRole(context.Context, *UpdatePlatformAdminRoleRequest) (*v1.IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdatePlatformAdminRole not implemented")
@@ -278,6 +293,24 @@ func _PlatformAdminService_GetPlatformAdmin_Handler(srv interface{}, ctx context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(PlatformAdminServiceServer).GetPlatformAdmin(ctx, req.(*GetPlatformAdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlatformAdminService_GetPlatformAdminPermissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPlatformAdminPermissionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlatformAdminServiceServer).GetPlatformAdminPermissions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlatformAdminService_GetPlatformAdminPermissions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlatformAdminServiceServer).GetPlatformAdminPermissions(ctx, req.(*GetPlatformAdminPermissionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -412,6 +445,10 @@ var PlatformAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetPlatformAdmin",
 			Handler:    _PlatformAdminService_GetPlatformAdmin_Handler,
+		},
+		{
+			MethodName: "GetPlatformAdminPermissions",
+			Handler:    _PlatformAdminService_GetPlatformAdminPermissions_Handler,
 		},
 		{
 			MethodName: "UpdatePlatformAdminRole",

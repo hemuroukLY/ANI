@@ -29,7 +29,7 @@ func (c *CorePlatformUserClient) Create(ctx context.Context, in ports.PlatformUs
 		"email":        in.Email,
 		"username":     in.Username,
 		"display_name": in.DisplayName,
-		"role":         in.Role,
+		"role_id":      in.RoleID,
 		"password":     in.Password,
 	}
 	raw, err := c.sdk.Request("POST", "/admin/platform-users", anisdk.RequestOptions{Body: body, Context: ctx})
@@ -55,8 +55,8 @@ func (c *CorePlatformUserClient) Create(ctx context.Context, in ports.PlatformUs
 func (c *CorePlatformUserClient) List(ctx context.Context, filter ports.PlatformUserListFilter) (ports.PlatformUserListDTO, error) {
 	// 步骤 1：组装游标与过滤 query
 	params := anisdk.CursorParams(filter.Limit, filter.Cursor)
-	if filter.Role != "" {
-		params["role"] = filter.Role
+	if filter.RoleID != "" {
+		params["role_id"] = filter.RoleID
 	}
 	if filter.Status != "" {
 		params["status"] = filter.Status
@@ -108,11 +108,12 @@ func (c *CorePlatformUserClient) Get(ctx context.Context, userID uuid.UUID) (por
 }
 
 // ChangeRole 调用 Core PUT /admin/platform-users/{userId}/role。
-func (c *CorePlatformUserClient) ChangeRole(ctx context.Context, userID uuid.UUID, role string) error {
-	// 步骤 1：拼路径并提交新角色
+// 幂等由网关层处理；本客户端不重复实现 idempotency_key。
+func (c *CorePlatformUserClient) ChangeRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) error {
+	// 步骤 1：拼路径并提交新角色 id
 	path := fmt.Sprintf("/admin/platform-users/%s/role", userID.String())
 	_, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{
-		Body:    map[string]any{"role": role},
+		Body:    map[string]any{"role_id": roleID.String()},
 		Context: ctx,
 	})
 	// 步骤 2：映射 Core 错误码为领域哨兵
@@ -154,9 +155,41 @@ func (c *CorePlatformUserClient) SoftDelete(ctx context.Context, userID uuid.UUI
 	return mapSDKError(err)
 }
 
-// ListPlatformRoles 待 #7 增补 Core roles API / SDK operation 后实现。
+// ListPlatformRoles 调用 Core GET /admin/platform-users/roles。
 func (c *CorePlatformUserClient) ListPlatformRoles(ctx context.Context) ([]ports.PlatformRoleDTO, error) {
-	_ = ctx
-	// TODO(issue-007): wire GET /admin/platform-users/roles once Core SDK operation exists.
-	return nil, ports.ErrNotImplemented
+	// 步骤 1：调用 Core 角色列表接口
+	raw, err := c.sdk.Request("GET", "/admin/platform-users/roles", anisdk.RequestOptions{Context: ctx})
+	if err != nil {
+		return nil, mapSDKError(err)
+	}
+	// 步骤 2：解码 items[]
+	obj, err := asObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	itemsRaw, err := asObjectSlice(obj["items"])
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ports.PlatformRoleDTO, 0, len(itemsRaw))
+	for _, it := range itemsRaw {
+		dto, err := decodePlatformRole(it)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, dto)
+	}
+	return items, nil
+}
+
+// GetPlatformUserPermissions 调用 Core GET /admin/platform-users/{userId}/permissions。
+func (c *CorePlatformUserClient) GetPlatformUserPermissions(ctx context.Context, userID uuid.UUID) (ports.PlatformUserPermissionsDTO, error) {
+	// 步骤 1：拼路径并调用 Core 权限查询接口
+	path := fmt.Sprintf("/admin/platform-users/%s/permissions", userID.String())
+	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{Context: ctx})
+	if err != nil {
+		return ports.PlatformUserPermissionsDTO{}, mapSDKError(err)
+	}
+	// 步骤 2：解码为 PlatformUserPermissionsDTO
+	return decodePlatformUserPermissions(raw)
 }

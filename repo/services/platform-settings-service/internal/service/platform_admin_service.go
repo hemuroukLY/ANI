@@ -10,6 +10,7 @@ import (
 	"github.com/kubercloud/ani/services/platform-settings-service/internal/repo/ports"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -43,11 +44,11 @@ func (s *PlatformAdminService) CreatePlatformAdmin(ctx context.Context, req *pla
 		return nil, err
 	}
 
-	// 步骤 1：入参校验；失败审计写入 role（不含 password）
+	// 步骤 1：入参校验；失败审计写入 role_id（不含 password）
 	// 幂等由网关层处理，本服务不消费 idempotency_key。
-	if detail := validateCreatePlatformAdmin(req.GetEmail(), req.GetUsername(), req.GetDisplayName(), req.GetRole(), req.GetPassword()); detail != "" {
+	if detail := validateCreatePlatformAdmin(req.GetEmail(), req.GetUsername(), req.GetDisplayName(), req.GetRoleId(), req.GetPassword()); detail != "" {
 		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, detail)
-		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"role": strings.TrimSpace(req.GetRole())}, err)
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"role_id": strings.TrimSpace(req.GetRoleId())}, err)
 		return nil, err
 	}
 	if s.coreClient == nil {
@@ -61,7 +62,7 @@ func (s *PlatformAdminService) CreatePlatformAdmin(ctx context.Context, req *pla
 		Email:       strings.TrimSpace(req.GetEmail()),
 		Username:    strings.TrimSpace(req.GetUsername()),
 		DisplayName: strings.TrimSpace(req.GetDisplayName()),
-		Role:        strings.TrimSpace(req.GetRole()),
+		RoleID:      strings.TrimSpace(req.GetRoleId()),
 		Password:    req.GetPassword(),
 	})
 	if err != nil {
@@ -106,7 +107,13 @@ func (s *PlatformAdminService) ListPlatformAdmins(ctx context.Context, req *plat
 	// 步骤 2：组装过滤条件（source 过滤枚举 local|third_party，透传 Core）
 	filter := ports.PlatformUserListFilter{Limit: limit, Cursor: cursor}
 	if req != nil {
-		filter.Role = req.GetRole()
+		roleID := strings.TrimSpace(req.GetRoleId())
+		if roleID != "" {
+			if _, err := uuid.Parse(roleID); err != nil {
+				return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "role_id must be a uuid")
+			}
+			filter.RoleID = roleID
+		}
 		filter.Status = req.GetStatus()
 		filter.Source = req.GetSource()
 		filter.Search = req.GetSearch()
@@ -127,8 +134,26 @@ func (s *PlatformAdminService) ListPlatformAdmins(ctx context.Context, req *plat
 	}, nil
 }
 
-func (s *PlatformAdminService) ListPlatformAdminRoles(context.Context, *platformsettingsv1.ListPlatformAdminRolesRequest) (*platformsettingsv1.ListPlatformAdminRolesResponse, error) {
-	return nil, unimplemented()
+func (s *PlatformAdminService) ListPlatformAdminRoles(ctx context.Context, _ *platformsettingsv1.ListPlatformAdminRolesRequest) (*platformsettingsv1.ListPlatformAdminRolesResponse, error) {
+	// 只读：不写审计。
+	if s.coreClient == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core client not configured")
+	}
+	// 步骤 1：调 Core 角色列表
+	roles, err := s.coreClient.ListPlatformRoles(ctx)
+	if err != nil {
+		return nil, mapDomainError(err)
+	}
+	// 步骤 2：映射 name + permissions 数组（原样）
+	items := make([]*platformsettingsv1.PlatformRole, 0, len(roles))
+	for _, role := range roles {
+		item, mapErr := toPlatformRole(role)
+		if mapErr != nil {
+			return nil, businessError(codes.Internal, ports.ErrCoreUnavailable, mapErr.Error())
+		}
+		items = append(items, item)
+	}
+	return &platformsettingsv1.ListPlatformAdminRolesResponse{Items: items}, nil
 }
 
 func (s *PlatformAdminService) GetPlatformAdmin(ctx context.Context, req *platformsettingsv1.GetPlatformAdminRequest) (*platformsettingsv1.PlatformAdminDetail, error) {
@@ -153,8 +178,105 @@ func (s *PlatformAdminService) GetPlatformAdmin(ctx context.Context, req *platfo
 	return toPlatformAdminDetail(dto), nil
 }
 
-func (s *PlatformAdminService) UpdatePlatformAdminRole(context.Context, *platformsettingsv1.UpdatePlatformAdminRoleRequest) (*commonv1.IdempotentResult, error) {
-	return nil, unimplemented()
+func (s *PlatformAdminService) GetPlatformAdminPermissions(ctx context.Context, req *platformsettingsv1.GetPlatformAdminPermissionsRequest) (*platformsettingsv1.PlatformAdminPermissions, error) {
+	// 只读：不写审计。
+	if s.coreClient == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core client not configured")
+	}
+	if req == nil || strings.TrimSpace(req.GetUserId()) == "" {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "user_id required")
+	}
+	// 步骤 1：校验 userId UUID
+	userID, err := uuid.Parse(strings.TrimSpace(req.GetUserId()))
+	if err != nil {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "user_id must be a uuid")
+	}
+	// 步骤 2：调 Core 权限查询
+	dto, err := s.coreClient.GetPlatformUserPermissions(ctx, userID)
+	if err != nil {
+		return nil, mapDomainError(err)
+	}
+	// 步骤 3：映射 user_id / role / permissions
+	perms, mapErr := toStructPermissions(dto.Permissions)
+	if mapErr != nil {
+		return nil, businessError(codes.Internal, ports.ErrCoreUnavailable, mapErr.Error())
+	}
+	return &platformsettingsv1.PlatformAdminPermissions{
+		UserId:      dto.UserID,
+		RoleId:      dto.RoleID,
+		Role:        dto.Role,
+		Permissions: perms,
+	}, nil
+}
+
+func (s *PlatformAdminService) UpdatePlatformAdminRole(ctx context.Context, req *platformsettingsv1.UpdatePlatformAdminRoleRequest) (*commonv1.IdempotentResult, error) {
+	const action = "platform_admin.change_role"
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.auditStore, action, nil, err)
+		return nil, err
+	}
+	// 步骤 1：校验 user_id / role_id（不白名单三角色；幂等仅外层网关，本服务不消费）
+	userIDRaw := strings.TrimSpace(req.GetUserId())
+	roleIDRaw := strings.TrimSpace(req.GetRoleId())
+	if userIDRaw == "" {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "user_id required")
+		writeAuditFailure(ctx, s.auditStore, action, nil, err)
+		return nil, err
+	}
+	userID, err := uuid.Parse(userIDRaw)
+	if err != nil {
+		mapped := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "user_id must be a uuid")
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userIDRaw}, mapped)
+		return nil, mapped
+	}
+	if roleIDRaw == "" {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "role_id required")
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, err)
+		return nil, err
+	}
+	roleID, err := uuid.Parse(roleIDRaw)
+	if err != nil {
+		mapped := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "role_id must be a uuid")
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, mapped)
+		return nil, mapped
+	}
+	if s.coreClient == nil {
+		err := businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core client not configured")
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, err)
+		return nil, err
+	}
+
+	// 步骤 2：改前取 old_role（不存在 → 404）；解析 new_role 名供审计（SPEC: old_role/new_role）
+	current, err := s.coreClient.Get(ctx, userID)
+	if err != nil {
+		mapped := mapDomainError(err)
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, mapped)
+		return nil, mapped
+	}
+	newRoleName := resolvePlatformRoleName(ctx, s.coreClient, roleID.String())
+
+	// 步骤 3：调 Core ChangeRole（Services→Core 不传幂等键；幂等仅外层网关）
+	if err := s.coreClient.ChangeRole(ctx, userID, roleID); err != nil {
+		mapped := mapDomainError(err)
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{
+			"target_id": userID.String(),
+			"old_role":  current.Role,
+			"new_role":  newRoleName,
+		}, mapped)
+		return nil, mapped
+	}
+
+	// 步骤 4：成功审计 target_id + old_role + new_role
+	writeAuditSuccess(ctx, s.auditStore, action, map[string]any{
+		"target_id": userID.String(),
+		"old_role":  current.Role,
+		"new_role":  newRoleName,
+	})
+	return &commonv1.IdempotentResult{
+		Id:      userID.String(),
+		Message: "platform admin role updated",
+	}, nil
 }
 
 func (s *PlatformAdminService) ResetPlatformAdminPassword(context.Context, *platformsettingsv1.ResetPlatformAdminPasswordRequest) (*commonv1.IdempotentResult, error) {
@@ -181,6 +303,7 @@ func toPlatformAdminListItem(it ports.PlatformUserDTO) *platformsettingsv1.Platf
 	item := &platformsettingsv1.PlatformAdminListItem{
 		Id:       it.ID,
 		Username: stripPlatformUsernamePrefix(it.Username),
+		RoleId:   it.RoleID,
 		Role:     it.Role,
 		Status:   it.Status,
 		Source:   normalizePlatformSource(it.Username, it.Source),
@@ -199,6 +322,7 @@ func toPlatformAdminDetail(it ports.PlatformUserDTO) *platformsettingsv1.Platfor
 		Id:        it.ID,
 		Email:     it.Email,
 		Username:  stripPlatformUsernamePrefix(it.Username),
+		RoleId:    it.RoleID,
 		Role:      it.Role,
 		Status:    it.Status,
 		Source:    normalizePlatformSource(it.Username, it.Source),
@@ -211,6 +335,50 @@ func toPlatformAdminDetail(it ports.PlatformUserDTO) *platformsettingsv1.Platfor
 		detail.LastLoginAt = timestamppb.New(*it.LastLoginAt)
 	}
 	return detail
+}
+
+func toPlatformRole(role ports.PlatformRoleDTO) (*platformsettingsv1.PlatformRole, error) {
+	perms, err := toStructPermissions(role.Permissions)
+	if err != nil {
+		return nil, err
+	}
+	return &platformsettingsv1.PlatformRole{
+		Id:          role.ID,
+		Name:        role.Name,
+		Permissions: perms,
+	}, nil
+}
+
+// resolvePlatformRoleName 将 role_id 解析为角色名供审计；失败时回退为 role_id 本身。
+func resolvePlatformRoleName(ctx context.Context, client ports.CorePlatformUserClient, roleID string) string {
+	if client == nil || strings.TrimSpace(roleID) == "" {
+		return roleID
+	}
+	roles, err := client.ListPlatformRoles(ctx)
+	if err != nil {
+		return roleID
+	}
+	for _, role := range roles {
+		if role.ID == roleID {
+			return role.Name
+		}
+	}
+	return roleID
+}
+
+func toStructPermissions(items []map[string]any) ([]*structpb.Struct, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	out := make([]*structpb.Struct, 0, len(items))
+	for _, item := range items {
+		st, err := structpb.NewStruct(item)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, nil
 }
 
 // stripPlatformUsernamePrefix 对外响应剥除 local:/oidc: 存储前缀。

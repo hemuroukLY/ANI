@@ -108,7 +108,8 @@ func (tx *quotaFakeTx) Query(_ context.Context, sql string, _ ...any) (ports.Row
 	return r, nil
 }
 
-func (tx *quotaFakeTx) QueryRow(_ context.Context, _ string, _ ...any) ports.Row {
+func (tx *quotaFakeTx) QueryRow(_ context.Context, sql string, _ ...any) ports.Row {
+	tx.querySQLs = append(tx.querySQLs, sql)
 	if len(tx.queryRows) == 0 {
 		return quotaFakeRow{err: ports.ErrUnsupported}
 	}

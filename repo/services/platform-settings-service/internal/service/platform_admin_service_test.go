@@ -26,6 +26,16 @@ type fakeCoreClient struct {
 	getID  uuid.UUID
 	getRes ports.PlatformUserDTO
 	getErr error
+
+	rolesRes []ports.PlatformRoleDTO
+	rolesErr error
+
+	permsRes ports.PlatformUserPermissionsDTO
+	permsErr error
+
+	changeRoleID    uuid.UUID
+	changeRoleVal   uuid.UUID
+	changeRoleErr   error
 }
 
 func (f *fakeCoreClient) Create(_ context.Context, in ports.PlatformUserCreateInput) (string, error) {
@@ -52,8 +62,13 @@ func (f *fakeCoreClient) Get(_ context.Context, id uuid.UUID) (ports.PlatformUse
 	}
 	return ports.PlatformUserDTO{}, ports.ErrNotImplemented
 }
-func (f *fakeCoreClient) ChangeRole(context.Context, uuid.UUID, string) error {
-	return ports.ErrNotImplemented
+func (f *fakeCoreClient) ChangeRole(_ context.Context, id uuid.UUID, roleID uuid.UUID) error {
+	f.changeRoleID = id
+	f.changeRoleVal = roleID
+	if f.changeRoleErr != nil {
+		return f.changeRoleErr
+	}
+	return nil
 }
 func (f *fakeCoreClient) ResetPassword(context.Context, uuid.UUID, string) error {
 	return ports.ErrNotImplemented
@@ -63,7 +78,19 @@ func (f *fakeCoreClient) SetStatus(context.Context, uuid.UUID, string) error {
 }
 func (f *fakeCoreClient) SoftDelete(context.Context, uuid.UUID) error { return ports.ErrNotImplemented }
 func (f *fakeCoreClient) ListPlatformRoles(context.Context) ([]ports.PlatformRoleDTO, error) {
-	return nil, ports.ErrNotImplemented
+	if f.rolesErr != nil {
+		return nil, f.rolesErr
+	}
+	return f.rolesRes, nil
+}
+func (f *fakeCoreClient) GetPlatformUserPermissions(context.Context, uuid.UUID) (ports.PlatformUserPermissionsDTO, error) {
+	if f.permsErr != nil {
+		return ports.PlatformUserPermissionsDTO{}, f.permsErr
+	}
+	if f.permsRes.UserID != "" || f.permsRes.Role != "" {
+		return f.permsRes, nil
+	}
+	return ports.PlatformUserPermissionsDTO{}, ports.ErrNotImplemented
 }
 
 type recordingAuditStore struct {
@@ -104,7 +131,7 @@ func TestPlatformAdminService_Create_Success(t *testing.T) {
 	svc := NewPlatformAdminService(core, audit)
 
 	res, err := svc.CreatePlatformAdmin(context.Background(), &platformsettingsv1.CreatePlatformAdminRequest{
-		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", Role: "platform-ops",
+		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", RoleId: "00000000-0000-0000-0000-000000000006",
 		Password: "Abcd1234!",
 	})
 	if err != nil {
@@ -122,8 +149,8 @@ func TestPlatformAdminService_Create_Success(t *testing.T) {
 	if audit.logs[0].Details["target_id"] != core.createID {
 		t.Fatalf("details=%+v", audit.logs[0].Details)
 	}
-	if _, ok := audit.logs[0].Details["role"]; ok {
-		t.Fatal("success audit must not include role")
+	if _, ok := audit.logs[0].Details["role_id"]; ok {
+		t.Fatal("success audit must not include role_id")
 	}
 	if _, ok := audit.logs[0].Details["password"]; ok {
 		t.Fatal("password must not appear in audit details")
@@ -135,7 +162,7 @@ func TestPlatformAdminService_Create_UsernameConflict(t *testing.T) {
 	core := &fakeCoreClient{createErr: ports.ErrUsernameAlreadyExists}
 	svc := NewPlatformAdminService(core, &recordingAuditStore{})
 	_, err := svc.CreatePlatformAdmin(context.Background(), &platformsettingsv1.CreatePlatformAdminRequest{
-		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", Role: "platform-ops", Password: "Abcd1234!",
+		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", RoleId: "00000000-0000-0000-0000-000000000006", Password: "Abcd1234!",
 	})
 	st := status.Convert(err)
 	if st.Code() != codes.AlreadyExists || !strings.HasPrefix(st.Message(), "USERNAME_ALREADY_EXISTS") {
@@ -148,7 +175,7 @@ func TestPlatformAdminService_Create_Validation(t *testing.T) {
 	audit := &recordingAuditStore{}
 	svc := NewPlatformAdminService(&fakeCoreClient{}, audit)
 	_, err := svc.CreatePlatformAdmin(context.Background(), &platformsettingsv1.CreatePlatformAdminRequest{
-		Email: "bad", Username: "ops:x", DisplayName: "", Role: "any-role", Password: "short",
+		Email: "bad", Username: "ops:x", DisplayName: "", RoleId: "not-a-uuid", Password: "short",
 	})
 	st := status.Convert(err)
 	if st.Code() != codes.InvalidArgument || !strings.HasPrefix(st.Message(), "VALIDATION_FAILED") {
@@ -157,22 +184,22 @@ func TestPlatformAdminService_Create_Validation(t *testing.T) {
 	if len(audit.logs) != 1 || audit.logs[0].Result != "failed" || audit.logs[0].Action != "platform_admin.create" {
 		t.Fatalf("validation must write failed audit: %+v", audit.logs)
 	}
-	if audit.logs[0].Details["role"] != "any-role" {
-		t.Fatalf("validation audit must include role: %+v", audit.logs[0].Details)
+	if audit.logs[0].Details["role_id"] != "not-a-uuid" {
+		t.Fatalf("validation audit must include role_id: %+v", audit.logs[0].Details)
 	}
 	if _, ok := audit.logs[0].Details["password"]; ok {
 		t.Fatal("password must not appear in audit details")
 	}
 }
 
-func TestPlatformAdminService_Create_RoleRequired(t *testing.T) {
+func TestPlatformAdminService_Create_RoleIDRequired(t *testing.T) {
 	t.Parallel()
 	svc := NewPlatformAdminService(&fakeCoreClient{}, &recordingAuditStore{})
 	_, err := svc.CreatePlatformAdmin(context.Background(), &platformsettingsv1.CreatePlatformAdminRequest{
-		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", Role: "  ", Password: "Abcd1234!",
+		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", RoleId: "  ", Password: "Abcd1234!",
 	})
 	st := status.Convert(err)
-	if st.Code() != codes.InvalidArgument || !strings.Contains(st.Message(), "role required") {
+	if st.Code() != codes.InvalidArgument || !strings.Contains(st.Message(), "role_id required") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -182,7 +209,7 @@ func TestPlatformAdminService_Create_RoleNotFoundFromCore(t *testing.T) {
 	core := &fakeCoreClient{createErr: ports.ErrRoleNotFound}
 	svc := NewPlatformAdminService(core, &recordingAuditStore{})
 	_, err := svc.CreatePlatformAdmin(context.Background(), &platformsettingsv1.CreatePlatformAdminRequest{
-		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", Role: "future-role", Password: "Abcd1234!",
+		Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", RoleId: "00000000-0000-0000-0000-000000000006", Password: "Abcd1234!",
 	})
 	st := status.Convert(err)
 	if st.Code() != codes.NotFound || !strings.HasPrefix(st.Message(), "ROLE_NOT_FOUND") {
@@ -202,7 +229,7 @@ func TestPlatformAdminService_Create_AuditWriteErrorDoesNotFail(t *testing.T) {
 	}
 	svc := NewPlatformAdminService(core, audit)
 	res, err := svc.CreatePlatformAdmin(context.Background(), &platformsettingsv1.CreatePlatformAdminRequest{
-		Email: "a@ani.io", Username: "admin", DisplayName: "Admin", Role: "platform-admin", Password: "Abcd1234!",
+		Email: "a@ani.io", Username: "admin", DisplayName: "Admin", RoleId: "00000000-0000-0000-0000-000000000006", Password: "Abcd1234!",
 	})
 	if err != nil || res.GetId() == "" {
 		t.Fatalf("create must succeed despite audit error: err=%v res=%+v", err, res)
@@ -217,7 +244,7 @@ func TestListPlatformAdmins_Success(t *testing.T) {
 		listRes: ports.PlatformUserListDTO{
 			Items: []ports.PlatformUserDTO{{
 				ID: "11111111-1111-1111-1111-111111111111", Username: "local:ops",
-				DisplayName: &dn, Role: "platform-ops", Status: "active", Source: "local",
+				DisplayName: &dn, RoleID: "00000000-0000-0000-0000-000000000006", Role: "platform-ops", Status: "active", Source: "local",
 				LastLoginAt: &last,
 			}},
 			NextCursor: "n1",
@@ -225,13 +252,13 @@ func TestListPlatformAdmins_Success(t *testing.T) {
 	}
 	svc := NewPlatformAdminService(core, fakeAuditStore{})
 	res, err := svc.ListPlatformAdmins(context.Background(), &platformsettingsv1.ListPlatformAdminsRequest{
-		Role: "platform-ops", Status: "active", Source: "local", Search: "ops",
+		RoleId: "00000000-0000-0000-0000-000000000006", Status: "active", Source: "local", Search: "ops",
 		Page: &commonv1.CursorPageRequest{Limit: 10, Cursor: "c0"},
 	})
 	if err != nil {
 		t.Fatalf("ListPlatformAdmins: %v", err)
 	}
-	if core.listFilter.Limit != 10 || core.listFilter.Cursor != "c0" || core.listFilter.Role != "platform-ops" {
+	if core.listFilter.Limit != 10 || core.listFilter.Cursor != "c0" || core.listFilter.RoleID != "00000000-0000-0000-0000-000000000006" {
 		t.Fatalf("filter=%+v", core.listFilter)
 	}
 	if len(res.Items) != 1 || res.NextCursor != "n1" || res.Items[0].DisplayName != "Ops" {
@@ -266,7 +293,7 @@ func TestListPlatformAdmins_SourceInferOIDC(t *testing.T) {
 		listRes: ports.PlatformUserListDTO{
 			Items: []ports.PlatformUserDTO{{
 				ID: "22222222-2222-2222-2222-222222222222", Username: "oidc:alice",
-				Role: "platform-readonly", Status: "active", Source: "",
+				RoleID: "00000000-0000-0000-0000-000000000008", Role: "platform-readonly", Status: "active", Source: "",
 			}},
 		},
 	}
@@ -328,7 +355,7 @@ func TestGetPlatformAdmin_Success(t *testing.T) {
 	core := &fakeCoreClient{
 		getRes: ports.PlatformUserDTO{
 			ID: id, Email: "ops@ani.io", Username: "local:ops", DisplayName: &dn,
-			Role: "platform-ops", Status: "active", Source: "local",
+			RoleID: "00000000-0000-0000-0000-000000000006", Role: "platform-ops", Status: "active", Source: "local",
 			LastLoginAt: &last, CreatedAt: created,
 		},
 	}
@@ -343,7 +370,7 @@ func TestGetPlatformAdmin_Success(t *testing.T) {
 	if res.GetId() != id || res.GetEmail() != "ops@ani.io" || res.GetUsername() != "ops" {
 		t.Fatalf("detail identity=%+v", res)
 	}
-	if res.GetDisplayName() != "Ops" || res.GetRole() != "platform-ops" || res.GetStatus() != "active" || res.GetSource() != "local" {
+	if res.GetDisplayName() != "Ops" || res.GetRoleId() != "00000000-0000-0000-0000-000000000006" || res.GetRole() != "platform-ops" || res.GetStatus() != "active" || res.GetSource() != "local" {
 		t.Fatalf("detail fields=%+v", res)
 	}
 	if res.GetLastLoginAt() == nil || !res.GetLastLoginAt().AsTime().Equal(last) {
@@ -408,8 +435,6 @@ func TestUnimplementedRPCs(t *testing.T) {
 	t.Parallel()
 	svc := NewPlatformAdminService(&fakeCoreClient{}, fakeAuditStore{})
 	checks := []error{
-		func() error { _, err := svc.ListPlatformAdminRoles(context.Background(), nil); return err }(),
-		func() error { _, err := svc.UpdatePlatformAdminRole(context.Background(), nil); return err }(),
 		func() error { _, err := svc.ResetPlatformAdminPassword(context.Background(), nil); return err }(),
 		func() error { _, err := svc.DisablePlatformAdmin(context.Background(), nil); return err }(),
 		func() error { _, err := svc.EnablePlatformAdmin(context.Background(), nil); return err }(),
@@ -420,6 +445,143 @@ func TestUnimplementedRPCs(t *testing.T) {
 		if status.Code(err) != codes.Unimplemented {
 			t.Fatalf("case %d: %v", i, err)
 		}
+	}
+}
+
+func TestPlatformAdminService_ListPlatformAdminRoles(t *testing.T) {
+	t.Parallel()
+	core := &fakeCoreClient{
+		rolesRes: []ports.PlatformRoleDTO{{
+			ID: "00000000-0000-0000-0000-000000000006", Name: "platform-ops",
+			Permissions: []map[string]any{
+				{"resource": "tenants", "actions": []any{"*"}, "scope": "platform"},
+			},
+		}},
+	}
+	svc := NewPlatformAdminService(core, fakeAuditStore{})
+	res, err := svc.ListPlatformAdminRoles(context.Background(), &platformsettingsv1.ListPlatformAdminRolesRequest{})
+	if err != nil {
+		t.Fatalf("ListPlatformAdminRoles: %v", err)
+	}
+	if len(res.Items) != 1 || res.Items[0].GetName() != "platform-ops" {
+		t.Fatalf("res=%+v", res)
+	}
+	perms := res.Items[0].GetPermissions()
+	if len(perms) != 1 || perms[0].AsMap()["resource"] != "tenants" {
+		t.Fatalf("permissions=%v", perms)
+	}
+}
+
+func TestPlatformAdminService_GetPlatformAdminPermissions(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	core := &fakeCoreClient{
+		permsRes: ports.PlatformUserPermissionsDTO{
+			UserID: id, RoleID: "00000000-0000-0000-0000-000000000006", Role: "platform-readonly",
+			Permissions: []map[string]any{{"resource": "metering", "actions": []any{"read"}, "scope": "platform"}},
+		},
+	}
+	svc := NewPlatformAdminService(core, fakeAuditStore{})
+	res, err := svc.GetPlatformAdminPermissions(context.Background(), &platformsettingsv1.GetPlatformAdminPermissionsRequest{UserId: id})
+	if err != nil {
+		t.Fatalf("GetPlatformAdminPermissions: %v", err)
+	}
+	if res.GetUserId() != id || res.GetRole() != "platform-readonly" || len(res.GetPermissions()) != 1 {
+		t.Fatalf("res=%+v", res)
+	}
+}
+
+func TestPlatformAdminService_GetPlatformAdminPermissions_NotFound(t *testing.T) {
+	t.Parallel()
+	svc := NewPlatformAdminService(&fakeCoreClient{permsErr: ports.ErrPlatformUserNotFound}, fakeAuditStore{})
+	_, err := svc.GetPlatformAdminPermissions(context.Background(), &platformsettingsv1.GetPlatformAdminPermissionsRequest{
+		UserId: "11111111-1111-1111-1111-111111111111",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.NotFound || !strings.HasPrefix(st.Message(), "PLATFORM_USER_NOT_FOUND") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPlatformAdminService_UpdatePlatformAdminRole_Success(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	const roleID = "00000000-0000-0000-0000-000000000006"
+	audit := &recordingAuditStore{}
+	core := &fakeCoreClient{
+		getRes: ports.PlatformUserDTO{ID: id, Role: "platform-ops"},
+		rolesRes: []ports.PlatformRoleDTO{
+			{ID: roleID, Name: "platform-readonly"},
+		},
+	}
+	svc := NewPlatformAdminService(core, audit)
+	res, err := svc.UpdatePlatformAdminRole(context.Background(), &platformsettingsv1.UpdatePlatformAdminRoleRequest{
+		UserId: id, RoleId: roleID, IdempotencyKey: "44444444-4444-4444-4444-444444444444",
+	})
+	if err != nil {
+		t.Fatalf("UpdatePlatformAdminRole: %v", err)
+	}
+	if res.GetId() != id || core.changeRoleVal != uuid.MustParse(roleID) {
+		t.Fatalf("res=%+v change=%v", res, core.changeRoleVal)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Action != "platform_admin.change_role" || audit.logs[0].Result != "success" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+	if audit.logs[0].Details["old_role"] != "platform-ops" || audit.logs[0].Details["new_role"] != "platform-readonly" {
+		t.Fatalf("details=%v", audit.logs[0].Details)
+	}
+}
+
+func TestPlatformAdminService_UpdatePlatformAdminRole_LastAdmin(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	const roleID = "00000000-0000-0000-0000-000000000006"
+	audit := &recordingAuditStore{}
+	svc := NewPlatformAdminService(&fakeCoreClient{
+		getRes:        ports.PlatformUserDTO{ID: id, Role: "platform-admin"},
+		rolesRes:      []ports.PlatformRoleDTO{{ID: roleID, Name: "platform-ops"}},
+		changeRoleErr: ports.ErrLastPlatformAdmin,
+	}, audit)
+	_, err := svc.UpdatePlatformAdminRole(context.Background(), &platformsettingsv1.UpdatePlatformAdminRoleRequest{
+		UserId: id, RoleId: roleID,
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.FailedPrecondition || !strings.HasPrefix(st.Message(), "LAST_PLATFORM_ADMIN") {
+		t.Fatalf("err=%v", err)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Result != "failed" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+	if audit.logs[0].Details["old_role"] != "platform-admin" || audit.logs[0].Details["new_role"] != "platform-ops" {
+		t.Fatalf("details=%v", audit.logs[0].Details)
+	}
+}
+
+func TestPlatformAdminService_UpdatePlatformAdminRole_RoleNotFound(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	svc := NewPlatformAdminService(&fakeCoreClient{
+		getRes:        ports.PlatformUserDTO{ID: id, Role: "platform-ops"},
+		changeRoleErr: ports.ErrRoleNotFound,
+	}, &recordingAuditStore{})
+	_, err := svc.UpdatePlatformAdminRole(context.Background(), &platformsettingsv1.UpdatePlatformAdminRoleRequest{
+		UserId: id, RoleId: "00000000-0000-0000-0000-000000000006",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.NotFound || !strings.HasPrefix(st.Message(), "ROLE_NOT_FOUND") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPlatformAdminService_UpdatePlatformAdminRole_UserNotFound(t *testing.T) {
+	t.Parallel()
+	svc := NewPlatformAdminService(&fakeCoreClient{getErr: ports.ErrPlatformUserNotFound}, &recordingAuditStore{})
+	_, err := svc.UpdatePlatformAdminRole(context.Background(), &platformsettingsv1.UpdatePlatformAdminRoleRequest{
+		UserId: "11111111-1111-1111-1111-111111111111", RoleId: "00000000-0000-0000-0000-000000000006",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.NotFound || !strings.HasPrefix(st.Message(), "PLATFORM_USER_NOT_FOUND") {
+		t.Fatalf("err=%v", err)
 	}
 }
 

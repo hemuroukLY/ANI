@@ -156,6 +156,7 @@ func decodePlatformUser(raw any) (ports.PlatformUserDTO, error) {
 		Email:       stringField(obj, "email"),
 		Username:    stringField(obj, "username"), // 含 local:/oidc: 前缀；Services 层对外响应剥除
 		DisplayName: optionalStringField(obj, "display_name"),
+		RoleID:      stringField(obj, "role_id"),
 		Role:        stringField(obj, "role"),
 		Status:      stringField(obj, "status"),
 		Source:      stringField(obj, "source"),
@@ -163,6 +164,59 @@ func decodePlatformUser(raw any) (ports.PlatformUserDTO, error) {
 	}
 	if created != nil {
 		out.CreatedAt = *created
+	}
+	return out, nil
+}
+
+func decodePlatformRole(raw any) (ports.PlatformRoleDTO, error) {
+	obj, err := asObject(raw)
+	if err != nil {
+		return ports.PlatformRoleDTO{}, err
+	}
+	perms, err := permissionsField(obj, "permissions")
+	if err != nil {
+		return ports.PlatformRoleDTO{}, err
+	}
+	return ports.PlatformRoleDTO{
+		ID:          stringField(obj, "id"),
+		Name:        stringField(obj, "name"),
+		Permissions: perms,
+	}, nil
+}
+
+func decodePlatformUserPermissions(raw any) (ports.PlatformUserPermissionsDTO, error) {
+	obj, err := asObject(raw)
+	if err != nil {
+		return ports.PlatformUserPermissionsDTO{}, err
+	}
+	perms, err := permissionsField(obj, "permissions")
+	if err != nil {
+		return ports.PlatformUserPermissionsDTO{}, err
+	}
+	return ports.PlatformUserPermissionsDTO{
+		UserID:      stringField(obj, "user_id"),
+		RoleID:      stringField(obj, "role_id"),
+		Role:        stringField(obj, "role"),
+		Permissions: perms,
+	}, nil
+}
+
+func permissionsField(m map[string]any, key string) ([]map[string]any, error) {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return nil, nil
+	}
+	items, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%w: expected permissions array", ports.ErrCoreUnavailable)
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		obj, err := asObject(it)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, obj)
 	}
 	return out, nil
 }

@@ -41,8 +41,7 @@ func (s *PostgresPlatformUserAdminStore) Create(ctx context.Context, in ports.Pl
 	email := strings.TrimSpace(in.Email)
 	username := strings.TrimSpace(in.Username)
 	displayName := strings.TrimSpace(in.DisplayName)
-	role := strings.TrimSpace(in.Role)
-	if err := validatePlatformUserCreateFields(email, username, displayName, role, in.PasswordHash); err != nil {
+	if err := validatePlatformUserCreateFields(email, username, displayName, in.RoleID, in.PasswordHash); err != nil {
 		return ports.PlatformUserAdmin{}, err
 	}
 	prefixed := "local:" + username
@@ -63,16 +62,10 @@ func (s *PostgresPlatformUserAdminStore) Create(ctx context.Context, in ports.Pl
 			return ports.ErrUsernameAlreadyExists
 		}
 
-		// 步骤 3：解析平台角色（tenant_id IS NULL 且 name LIKE 'platform-%'）
-		var roleID uuid.UUID
-		if err := tx.QueryRow(ctx, `
-			SELECT id FROM roles
-			WHERE tenant_id IS NULL AND name = $1 AND name LIKE 'platform-%'
-		`, role).Scan(&roleID); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ports.ErrRoleNotFound
-			}
-			return fmt.Errorf("lookup platform role: %w", err)
+		// 步骤 3：按 role_id 解析平台角色（tenant_id IS NULL 且 name LIKE 'platform-%'）
+		roleName, err := lookupPlatformRoleNameByID(ctx, tx, in.RoleID)
+		if err != nil {
+			return err
 		}
 
 		// 步骤 4：插入 users + 绑定 user_roles
@@ -93,19 +86,19 @@ func (s *PostgresPlatformUserAdminStore) Create(ctx context.Context, in ports.Pl
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)
-		`, userID, roleID); err != nil {
+		`, userID, in.RoleID); err != nil {
 			return fmt.Errorf("bind platform role: %w", err)
 		}
 
 		// 步骤 5：组装返回 DTO（source 由 username 前缀推断）
-		// TODO(list/detail): 对外 API 响应应剥掉 local:/oidc: 前缀；当前 Store 仍返回库内带前缀值，列表/详情后续统一处理。
 		dn := displayName
 		out = ports.PlatformUserAdmin{
 			ID:          userID,
 			Email:       email,
 			Username:    prefixed,
 			DisplayName: &dn,
-			Role:        role,
+			RoleID:      in.RoleID,
+			Role:        roleName,
 			Status:      "active",
 			Source:      inferPlatformSource(prefixed),
 			CreatedAt:   createdAt,
@@ -153,8 +146,8 @@ func (s *PostgresPlatformUserAdminStore) List(ctx context.Context, filter ports.
 		return fmt.Sprintf("$%d", len(args))
 	}
 
-	if role := strings.TrimSpace(filter.Role); role != "" {
-		where = append(where, "r.name = "+argN(role))
+	if filter.RoleID != uuid.Nil {
+		where = append(where, "r.id = "+argN(filter.RoleID))
 	}
 	if status := strings.TrimSpace(filter.Status); status != "" {
 		switch status {
@@ -184,7 +177,7 @@ func (s *PostgresPlatformUserAdminStore) List(ctx context.Context, filter ports.
 	// 步骤 3：查询 limit+1 行以判断下一页
 	limitParam := argN(limit + 1)
 	query := `
-		SELECT u.id, u.email, u.username, u.display_name, r.name, u.status,
+		SELECT u.id, u.email, u.username, u.display_name, r.id, r.name, u.status,
 		       u.last_login_at, u.created_at
 		FROM users u
 		JOIN user_roles ur ON ur.user_id = u.id
@@ -229,7 +222,7 @@ func (s *PostgresPlatformUserAdminStore) Get(ctx context.Context, userID uuid.UU
 	err := s.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		// 步骤 1：JOIN 平台角色查询未软删除账号
 		row := tx.QueryRow(ctx, `
-			SELECT u.id, u.email, u.username, u.display_name, r.name, u.status,
+			SELECT u.id, u.email, u.username, u.display_name, r.id, r.name, u.status,
 			       u.last_login_at, u.created_at
 			FROM users u
 			JOIN user_roles ur ON ur.user_id = u.id
@@ -255,39 +248,67 @@ func (s *PostgresPlatformUserAdminStore) Get(ctx context.Context, userID uuid.UU
 	return out, nil
 }
 
-// ChangeRole 在事务内删除旧平台角色绑定并插入新角色。
-func (s *PostgresPlatformUserAdminStore) ChangeRole(ctx context.Context, userID uuid.UUID, newRole string) error {
-	// 步骤 1：校验目标角色非空
-	newRole = strings.TrimSpace(newRole)
-	if newRole == "" {
-		return fmt.Errorf("%w: role required", ports.ErrValidationFailed)
+// ChangeRole 若已有平台角色绑定则更新 role_id，否则插入；按 role_id 校验目标角色。
+// 将唯一活跃 platform-admin 降级为非 admin → ErrLastPlatformAdmin。
+func (s *PostgresPlatformUserAdminStore) ChangeRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) error {
+	// 步骤 1：校验目标角色 id
+	if roleID == uuid.Nil {
+		return fmt.Errorf("%w: role_id required", ports.ErrValidationFailed)
 	}
 	return s.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		// 步骤 2：确认平台账号存在
 		if err := ensurePlatformUserExists(ctx, tx, userID); err != nil {
 			return err
 		}
-		// 步骤 3：解析目标平台角色 id
-		var roleID uuid.UUID
-		if err := tx.QueryRow(ctx, `
-			SELECT id FROM roles
-			WHERE tenant_id IS NULL AND name = $1 AND name LIKE 'platform-%'
-		`, newRole).Scan(&roleID); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ports.ErrRoleNotFound
-			}
-			return fmt.Errorf("lookup platform role: %w", err)
+		// 步骤 3：校验目标平台角色 id 存在
+		newRoleName, err := lookupPlatformRoleNameByID(ctx, tx, roleID)
+		if err != nil {
+			return err
 		}
-		// 步骤 4：清旧平台角色绑定后写入新绑定
-		if _, err := tx.Exec(ctx, `
-			DELETE FROM user_roles
-			WHERE user_id = $1
-			  AND role_id IN (
-				SELECT id FROM roles
-				WHERE tenant_id IS NULL AND name LIKE 'platform-%'
-			  )
-		`, userID); err != nil {
-			return fmt.Errorf("clear platform roles: %w", err)
+		// 步骤 4：已有平台角色绑定 → UPDATE role_id；否则 INSERT
+		var bindingExists bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM user_roles ur
+				JOIN roles r ON r.id = ur.role_id
+				WHERE ur.user_id = $1
+				  AND r.tenant_id IS NULL
+				  AND r.name LIKE 'platform-%'
+			)
+		`, userID).Scan(&bindingExists); err != nil {
+			return fmt.Errorf("check platform role binding: %w", err)
+		}
+		if bindingExists {
+			// 步骤 4a：降级最后活跃 platform-admin → 拒绝
+			currentRole, roleErr := platformUserRole(ctx, tx, userID)
+			if roleErr != nil {
+				return roleErr
+			}
+			if currentRole == "platform-admin" && newRoleName != "platform-admin" {
+				n, countErr := countActivePlatformAdminsTx(ctx, tx, userID)
+				if countErr != nil {
+					return countErr
+				}
+				if n <= 0 {
+					return ports.ErrLastPlatformAdmin
+				}
+			}
+			tag, err := tx.Exec(ctx, `
+				UPDATE user_roles ur
+				SET role_id = $2
+				FROM roles r
+				WHERE ur.user_id = $1
+				  AND ur.role_id = r.id
+				  AND r.tenant_id IS NULL
+				  AND r.name LIKE 'platform-%'
+			`, userID, roleID)
+			if err != nil {
+				return fmt.Errorf("update platform role: %w", err)
+			}
+			if tag.RowsAffected == 0 {
+				return ports.ErrRoleChangeInvalid
+			}
+			return nil
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)
@@ -428,7 +449,7 @@ func (s *PostgresPlatformUserAdminStore) ListPlatformRoles(ctx context.Context) 
 	err := s.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		// 步骤 1：查询平台角色行
 		rows, qErr := tx.Query(ctx, `
-			SELECT name, permissions
+			SELECT id, name, permissions
 			FROM roles
 			WHERE tenant_id IS NULL AND name LIKE 'platform-%'
 			ORDER BY name
@@ -439,21 +460,19 @@ func (s *PostgresPlatformUserAdminStore) ListPlatformRoles(ctx context.Context) 
 		defer rows.Close()
 		// 步骤 2：解码 permissions JSONB 并组装 DTO
 		for rows.Next() {
+			var id uuid.UUID
 			var name string
 			var raw []byte
-			if scanErr := rows.Scan(&name, &raw); scanErr != nil {
+			if scanErr := rows.Scan(&id, &name, &raw); scanErr != nil {
 				return fmt.Errorf("scan platform role: %w", scanErr)
 			}
-			var perms []map[string]any
-			if len(raw) > 0 {
-				if umErr := json.Unmarshal(raw, &perms); umErr != nil {
-					return fmt.Errorf("decode platform role permissions: %w", umErr)
-				}
+			perms, decErr := decodeRolePermissionsJSON(raw)
+			if decErr != nil {
+				return decErr
 			}
 			out = append(out, ports.PlatformRole{
+				ID:          id,
 				Name:        name,
-				Label:       name,
-				Description: "",
 				Permissions: perms,
 			})
 		}
@@ -463,6 +482,59 @@ func (s *PostgresPlatformUserAdminStore) ListPlatformRoles(ctx context.Context) 
 		return nil, err
 	}
 	return out, nil
+}
+
+// GetPlatformUserPermissions 返回指定平台账号当前绑定角色及 permissions JSONB 原样。
+func (s *PostgresPlatformUserAdminStore) GetPlatformUserPermissions(ctx context.Context, userID uuid.UUID) (ports.PlatformUserPermissions, error) {
+	var out ports.PlatformUserPermissions
+	err := s.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 步骤 1：JOIN 查询平台账号绑定角色
+		var roleID uuid.UUID
+		var roleName string
+		var raw []byte
+		qErr := tx.QueryRow(ctx, `
+			SELECT r.id, r.name, r.permissions
+			FROM users u
+			JOIN user_roles ur ON ur.user_id = u.id
+			JOIN roles r ON r.id = ur.role_id
+			  AND r.tenant_id IS NULL
+			  AND r.name LIKE 'platform-%'
+			WHERE u.id = $1 AND u.tenant_id IS NULL AND u.is_deleted = FALSE
+		`, userID).Scan(&roleID, &roleName, &raw)
+		if qErr != nil {
+			if errors.Is(qErr, pgx.ErrNoRows) {
+				return ports.ErrPlatformUserNotFound
+			}
+			return fmt.Errorf("get platform user permissions: %w", qErr)
+		}
+		// 步骤 2：解码 permissions
+		perms, decErr := decodeRolePermissionsJSON(raw)
+		if decErr != nil {
+			return decErr
+		}
+		out = ports.PlatformUserPermissions{
+			UserID:      userID,
+			RoleID:      roleID,
+			Role:        roleName,
+			Permissions: perms,
+		}
+		return nil
+	})
+	if err != nil {
+		return ports.PlatformUserPermissions{}, err
+	}
+	return out, nil
+}
+
+func decodeRolePermissionsJSON(raw []byte) ([]map[string]any, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var perms []map[string]any
+	if err := json.Unmarshal(raw, &perms); err != nil {
+		return nil, fmt.Errorf("decode role permissions: %w", err)
+	}
+	return perms, nil
 }
 
 type scannable interface {
@@ -475,12 +547,13 @@ func scanPlatformUserAdmin(row scannable) (ports.PlatformUserAdmin, error) {
 		email       string
 		username    string
 		displayName *string
+		roleID      uuid.UUID
 		role        string
 		status      string
 		lastLoginAt *time.Time
 		createdAt   time.Time
 	)
-	if err := row.Scan(&id, &email, &username, &displayName, &role, &status, &lastLoginAt, &createdAt); err != nil {
+	if err := row.Scan(&id, &email, &username, &displayName, &roleID, &role, &status, &lastLoginAt, &createdAt); err != nil {
 		return ports.PlatformUserAdmin{}, err
 	}
 	// TODO(list/detail): username 当前为库内值（含 local:/oidc:）；对外列表/详情后续剥前缀。
@@ -489,12 +562,31 @@ func scanPlatformUserAdmin(row scannable) (ports.PlatformUserAdmin, error) {
 		Email:       email,
 		Username:    username,
 		DisplayName: displayName,
+		RoleID:      roleID,
 		Role:        role,
 		Status:      status,
 		Source:      inferPlatformSource(username),
 		LastLoginAt: lastLoginAt,
 		CreatedAt:   createdAt,
 	}, nil
+}
+
+func lookupPlatformRoleNameByID(ctx context.Context, tx ports.MetadataTx, roleID uuid.UUID) (string, error) {
+	if roleID == uuid.Nil {
+		return "", fmt.Errorf("%w: role_id required", ports.ErrValidationFailed)
+	}
+	var name string
+	err := tx.QueryRow(ctx, `
+		SELECT name FROM roles
+		WHERE id = $1 AND tenant_id IS NULL AND name LIKE 'platform-%'
+	`, roleID).Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ports.ErrRoleNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup platform role: %w", err)
+	}
+	return name, nil
 }
 
 func ensurePlatformUserExists(ctx context.Context, tx ports.MetadataTx, userID uuid.UUID) error {
@@ -569,7 +661,7 @@ func isPGUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-func validatePlatformUserCreateFields(email, username, displayName, role, passwordHash string) error {
+func validatePlatformUserCreateFields(email, username, displayName string, roleID uuid.UUID, passwordHash string) error {
 	if email == "" {
 		return fmt.Errorf("%w: email required", ports.ErrValidationFailed)
 	}
@@ -586,8 +678,8 @@ func validatePlatformUserCreateFields(email, username, displayName, role, passwo
 	if n := len([]rune(displayName)); n < 1 || n > 128 {
 		return fmt.Errorf("%w: display_name must be 1-128 characters", ports.ErrValidationFailed)
 	}
-	if role == "" {
-		return fmt.Errorf("%w: role required", ports.ErrValidationFailed)
+	if roleID == uuid.Nil {
+		return fmt.Errorf("%w: role_id required", ports.ErrValidationFailed)
 	}
 	if strings.TrimSpace(passwordHash) == "" {
 		return fmt.Errorf("%w: password_hash required", ports.ErrValidationFailed)

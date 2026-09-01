@@ -22,6 +22,7 @@ import (
 //	POST   /admin/platform-users/{userId}/enable
 //	DELETE /admin/platform-users/{userId}
 //	GET    /admin/platform-users/roles
+//	GET    /admin/platform-users/{userId}/permissions
 type PlatformUserAdminStore interface {
 	// Create inserts a platform account (tenant_id IS NULL) and binds a platform role.
 	// passwordHash is pre-computed by the caller; Store does not hash.
@@ -36,9 +37,11 @@ type PlatformUserAdminStore interface {
 	// Missing / soft-deleted → ErrPlatformUserNotFound.
 	Get(ctx context.Context, userID uuid.UUID) (PlatformUserAdmin, error)
 
-	// ChangeRole deletes old user_roles and inserts the new role inside a transaction.
-	// Unknown role → ErrRoleNotFound; illegal transition → ErrRoleChangeInvalid.
-	ChangeRole(ctx context.Context, userID uuid.UUID, newRole string) error
+	// ChangeRole upserts the platform role binding for a platform account.
+	// Existing platform role row → UPDATE role_id; otherwise INSERT.
+	// Unknown / non-platform role_id → ErrRoleNotFound; illegal transition → ErrRoleChangeInvalid.
+	// Demoting the last active platform-admin → ErrLastPlatformAdmin.
+	ChangeRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) error
 
 	// ResetPassword validates the new password differs from the old, hashes, and updates password_hash.
 	// Same as old → ErrPasswordSameAsOld; missing user → ErrPlatformUserNotFound.
@@ -57,6 +60,10 @@ type PlatformUserAdminStore interface {
 
 	// ListPlatformRoles returns platform built-in roles (tenant_id IS NULL) from the roles table.
 	ListPlatformRoles(ctx context.Context) ([]PlatformRole, error)
+
+	// GetPlatformUserPermissions returns the bound platform role and permissions JSONB for one account.
+	// Missing / soft-deleted / non-platform → ErrPlatformUserNotFound.
+	GetPlatformUserPermissions(ctx context.Context, userID uuid.UUID) (PlatformUserPermissions, error)
 }
 
 // PlatformUserAdmin is the Core platform-admin view (never includes password_hash).
@@ -68,6 +75,7 @@ type PlatformUserAdmin struct {
 	Email       string
 	Username    string
 	DisplayName *string
+	RoleID      uuid.UUID
 	Role        string // platform-admin | platform-ops | platform-readonly
 	Status      string // active | disabled
 	Source      string // local | third_party | unknown（由 username 前缀推断）
@@ -80,7 +88,7 @@ type PlatformUserCreate struct {
 	Email        string
 	Username     string // without prefix; Store prepends local:
 	DisplayName  string
-	Role         string
+	RoleID       uuid.UUID // roles.id（tenant_id IS NULL 且 name LIKE 'platform-%'）
 	PasswordHash string
 }
 
@@ -88,7 +96,7 @@ type PlatformUserCreate struct {
 type PlatformUserFilter struct {
 	Limit  int
 	Cursor string
-	Role   string
+	RoleID uuid.UUID // uuid.Nil = 不按角色过滤
 	Status string
 	Source string // local | third_party (username prefix filter；third_party → oidc:)
 	Search string // 对外 username ILIKE（剥 local:/oidc: 前缀后匹配）
@@ -102,8 +110,15 @@ type PlatformUserListResult struct {
 
 // PlatformRole is a platform built-in role; Permissions is roles.permissions JSONB as-is.
 type PlatformRole struct {
+	ID          uuid.UUID
 	Name        string
-	Label       string
-	Description string
 	Permissions []map[string]any // resource/actions/scope entries (tenants / resource_pool / users / metering)
+}
+
+// PlatformUserPermissions is one platform account's bound role and permissions JSONB as-is.
+type PlatformUserPermissions struct {
+	UserID      uuid.UUID
+	RoleID      uuid.UUID
+	Role        string
+	Permissions []map[string]any
 }
