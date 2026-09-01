@@ -110,6 +110,33 @@ func TestMapSDKError_BusinessCodes(t *testing.T) {
 	}
 }
 
+func TestCorePlatformUserClient_Get_Success(t *testing.T) {
+	t.Parallel()
+
+	id := "33333333-3333-3333-3333-333333333333"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/admin/platform-users/"+id {
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": id, "email": "ops@ani.io", "username": "local:ops", "display_name": "Ops",
+			"role": "platform-ops", "status": "active", "source": "local",
+			"created_at": "2026-08-31T00:00:00Z",
+		})
+	}))
+	defer srv.Close()
+
+	client := &CorePlatformUserClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	out, err := client.Get(context.Background(), uuid.MustParse(id))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if out.ID != id || out.Username != "local:ops" || out.Role != "platform-ops" {
+		t.Fatalf("out=%+v", out)
+	}
+}
+
 func TestCorePlatformUserClient_Get_404CoreUnavailable(t *testing.T) {
 	t.Parallel()
 

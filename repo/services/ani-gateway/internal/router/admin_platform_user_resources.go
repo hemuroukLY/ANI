@@ -112,7 +112,7 @@ func (api *adminPlatformUserAPI) createPlatformUser(ctx context.Context, c *app.
 		return
 	}
 	// 步骤 5：返回 UserMutationResult
-	// TODO(list/detail): created.Username 含 local: 前缀；对外列表/详情后续剥前缀。
+	// Create 响应仅 id/message；username 前缀在列表/详情由 toAdminPlatformUserResponse 剥除。
 	c.JSON(http.StatusOK, map[string]string{
 		"id":      created.ID.String(),
 		"message": "platform user created",
@@ -129,6 +129,9 @@ func (api *adminPlatformUserAPI) listPlatformUsers(ctx context.Context, c *app.R
 			return
 		}
 		limit = n
+		if limit > 100 {
+			limit = 100
+		}
 	}
 	// 步骤 2：调 Store.List 并映射响应
 	res, err := api.store.List(ctx, ports.PlatformUserFilter{
@@ -298,17 +301,27 @@ func toAdminPlatformUserResponse(u ports.PlatformUserAdmin) adminPlatformUserRes
 	if u.DisplayName != nil {
 		dn = *u.DisplayName
 	}
-	// TODO(list/detail): Username 当前透传库内带前缀值；对外列表/详情后续剥 local:/oidc:。
 	return adminPlatformUserResponse{
 		ID:          u.ID.String(),
 		Email:       u.Email,
-		Username:    u.Username,
+		Username:    stripAdminPlatformUsernamePrefix(u.Username),
 		DisplayName: dn,
 		Role:        u.Role,
 		Status:      u.Status,
 		Source:      u.Source,
 		LastLoginAt: u.LastLoginAt,
 		CreatedAt:   u.CreatedAt,
+	}
+}
+
+func stripAdminPlatformUsernamePrefix(username string) string {
+	switch {
+	case strings.HasPrefix(username, "local:"):
+		return strings.TrimPrefix(username, "local:")
+	case strings.HasPrefix(username, "oidc:"):
+		return strings.TrimPrefix(username, "oidc:")
+	default:
+		return username
 	}
 }
 

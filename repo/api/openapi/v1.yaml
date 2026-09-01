@@ -9320,8 +9320,8 @@ paths:
         - { name: cursor, in: query, schema: { type: string } }
         - { name: role, in: query, schema: { type: string }, description: "按平台角色名过滤；不写死枚举" }
         - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
-        - { name: source, in: query, schema: { type: string, enum: [local, oidc] }, description: "按 username 前缀过滤；oidc 结果在响应中映射为 third_party" }
-        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username" }
+        - { name: source, in: query, schema: { type: string, enum: [local, third_party] }, description: "按 username 前缀过滤；third_party → oidc:%" }
+        - { name: search, in: query, schema: { type: string }, description: "对外 username 模糊匹配（不含 local:/oidc: 前缀）" }
       responses:
         "200":
           description: 平台运营账号列表

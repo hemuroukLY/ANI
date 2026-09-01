@@ -150,4 +150,41 @@ func TestHandler_AdminGetPlatformUser(t *testing.T) {
 	if resp.StatusCode() != http.StatusOK {
 		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
 	}
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["username"] != "ops" {
+		t.Fatalf("username=%v", payload["username"])
+	}
+}
+
+func TestHandler_AdminListPlatformUsers(t *testing.T) {
+	t.Parallel()
+	id := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	dn := "Ops"
+	store := &fakeAdminPlatformUserStore{
+		listRes: ports.PlatformUserListResult{
+			Items: []ports.PlatformUserAdmin{{
+				ID: id, Email: "ops@ani.io", Username: "local:ops", DisplayName: &dn,
+				Role: "platform-ops", Status: "active", Source: "local",
+				CreatedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+			}},
+			NextCursor: "next1",
+		},
+	}
+	h := setupAdminPlatformUserTestServer(t, store)
+	resp := performAdminPlatformUser(h, http.MethodGet, "/api/v1/admin/platform-users?limit=10&role=platform-ops&search=ops", "")
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := payload["items"].([]any)
+	first, _ := items[0].(map[string]any)
+	if first["username"] != "ops" {
+		t.Fatalf("username=%v", first["username"])
+	}
 }

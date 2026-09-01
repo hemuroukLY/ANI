@@ -20,6 +20,9 @@ import (
 
 const bcryptCost = 12
 
+// platformUsernameSearchExpr 剥除 local:/oidc: 后再 ILIKE，避免按存储前缀误命中。
+const platformUsernameSearchExpr = `REGEXP_REPLACE(u.username, '^(local:|oidc:)', '')`
+
 // PostgresPlatformUserAdminStore 实现 ports.PlatformUserAdminStore（platform RLS bypass）。
 type PostgresPlatformUserAdminStore struct {
 	store ports.MetadataStore
@@ -154,21 +157,24 @@ func (s *PostgresPlatformUserAdminStore) List(ctx context.Context, filter ports.
 		where = append(where, "r.name = "+argN(role))
 	}
 	if status := strings.TrimSpace(filter.Status); status != "" {
-		where = append(where, "u.status = "+argN(status))
+		switch status {
+		case "active", "disabled":
+			where = append(where, "u.status = "+argN(status))
+		default:
+			return ports.PlatformUserListResult{}, fmt.Errorf("%w: status must be active or disabled", ports.ErrValidationFailed)
+		}
 	}
 	switch src := strings.TrimSpace(filter.Source); src {
 	case "local":
 		where = append(where, "u.username LIKE 'local:%'")
-	case "oidc":
+	case "third_party":
 		where = append(where, "u.username LIKE 'oidc:%'")
 	case "":
 	default:
-		return ports.PlatformUserListResult{}, fmt.Errorf("%w: source must be local or oidc", ports.ErrValidationFailed)
+		return ports.PlatformUserListResult{}, fmt.Errorf("%w: source must be local or third_party", ports.ErrValidationFailed)
 	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
-		pat := "%" + search + "%"
-		p1, p2 := argN(pat), argN(pat)
-		where = append(where, fmt.Sprintf("(u.email ILIKE %s OR u.username ILIKE %s)", p1, p2))
+		where = append(where, platformUsernameSearchExpr+" ILIKE "+argN("%"+search+"%"))
 	}
 	if hasCursor {
 		p1, p2 := argN(cursorCreatedAt), argN(cursorID)

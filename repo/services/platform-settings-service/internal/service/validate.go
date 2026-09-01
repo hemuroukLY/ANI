@@ -78,3 +78,18 @@ func validatePasswordComplexity(password string) string {
 	}
 	return ""
 }
+
+// validateListPlatformAdminFilters 校验列表 query 枚举；role/search 透传 Core。
+func validateListPlatformAdminFilters(status, source string) string {
+	switch strings.TrimSpace(status) {
+	case "", "active", "disabled":
+	default:
+		return "status must be active or disabled"
+	}
+	switch strings.TrimSpace(source) {
+	case "", "local", "third_party":
+	default:
+		return "source must be local or third_party"
+	}
+	return ""
+}

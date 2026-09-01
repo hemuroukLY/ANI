@@ -28,12 +28,30 @@ func (r quotaFakeRow) Scan(dest ...any) error {
 		switch ptr := target.(type) {
 		case *string:
 			*ptr = r.values[i].(string)
+		case **string:
+			if r.values[i] == nil {
+				*ptr = nil
+			} else if sp, ok := r.values[i].(*string); ok {
+				*ptr = sp
+			} else {
+				s := r.values[i].(string)
+				*ptr = &s
+			}
 		case *bool:
 			*ptr = r.values[i].(bool)
 		case *int64:
 			*ptr = r.values[i].(int64)
 		case *time.Time:
 			*ptr = r.values[i].(time.Time)
+		case **time.Time:
+			if r.values[i] == nil {
+				*ptr = nil
+			} else if tp, ok := r.values[i].(*time.Time); ok {
+				*ptr = tp
+			} else {
+				tm := r.values[i].(time.Time)
+				*ptr = &tm
+			}
 		case *[]byte:
 			*ptr = r.values[i].([]byte)
 		case *uuid.UUID:
@@ -52,6 +70,7 @@ func (r quotaFakeRow) Scan(dest ...any) error {
 type quotaFakeTx struct {
 	queryRows    []quotaFakeRow
 	queryResults []*quotaFakeRows
+	querySQLs    []string
 	execFn       func(sql string, args []any) int64
 	execErr      func(sql string, args []any) error
 	execSQLs     []string
@@ -79,7 +98,8 @@ func (tx *quotaFakeTx) Exec(_ context.Context, sql string, args ...any) (ports.C
 	return ports.CommandTag{RowsAffected: ra}, nil
 }
 
-func (tx *quotaFakeTx) Query(context.Context, string, ...any) (ports.Rows, error) {
+func (tx *quotaFakeTx) Query(_ context.Context, sql string, _ ...any) (ports.Rows, error) {
+	tx.querySQLs = append(tx.querySQLs, sql)
 	if len(tx.queryResults) == 0 {
 		return &quotaFakeRows{}, nil
 	}

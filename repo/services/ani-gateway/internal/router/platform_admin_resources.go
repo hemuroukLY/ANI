@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -23,7 +24,8 @@ import (
 // 把 REST 请求转发到 platform-settings-service 的 gRPC，并把 gRPC 错误映射为 HTTP 状态与业务码。
 const (
 	platformSettingsServiceDefaultAddr = "127.0.0.1:9106"
-	platformAdminCallTimeout           = 5 * time.Second
+	// platformAdminCallTimeout 需覆盖 Services→Core SDK（10s）及 gRPC 一跳余量。
+	platformAdminCallTimeout = 12 * time.Second
 )
 
 // platformAdminsAPI 持有 platform-settings-service gRPC 客户端。
@@ -67,10 +69,14 @@ func registerPlatformAdminsAPI(svc *route.RouterGroup, api *platformAdminsAPI) {
 	svc.GET("/platform-admins/:userId/audit-logs", api.listPlatformAdminAuditLogs)
 }
 
-// platformAdminCallCtx 构造 gRPC 调用 context：5s 超时 + request_id / user_id metadata。
+// platformAdminCallCtx 构造 gRPC 调用 context：12s 超时 + request_id / user_id metadata。
 func platformAdminCallCtx(ctx context.Context, c *app.RequestContext) (context.Context, context.CancelFunc) {
-	_ = platformAdminCallTimeout // keep named constant for AC readability; same duration as tenantCallTimeout
-	return tenantCallCtx(ctx, c)
+	callCtx, cancel := context.WithTimeout(ctx, platformAdminCallTimeout)
+	callCtx = metadata.AppendToOutgoingContext(callCtx, "x-request-id", middleware.GetRequestID(c))
+	if userID := strings.TrimSpace(middleware.GetUserID(c)); userID != "" {
+		callCtx = metadata.AppendToOutgoingContext(callCtx, "x-user-id", userID)
+	}
+	return callCtx, cancel
 }
 
 func (api *platformAdminsAPI) createPlatformAdmin(ctx context.Context, c *app.RequestContext) {
@@ -117,12 +123,17 @@ func (api *platformAdminsAPI) listPlatformAdmins(ctx context.Context, c *app.Req
 	}
 	callCtx, cancel := platformAdminCallCtx(ctx, c)
 	defer cancel()
+	limit, err := parseCursorLimitQuery(c)
+	if err != nil {
+		writePlatformAdminError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
 	res, err := api.client.ListPlatformAdmins(callCtx, &platformsettingsv1.ListPlatformAdminsRequest{
 		Role:   c.Query("role"),
 		Status: c.Query("status"),
 		Source: c.Query("source"),
 		Search: c.Query("search"),
-		Page:   &commonv1.CursorPageRequest{Limit: cursorLimit(c), Cursor: c.Query("cursor")},
+		Page:   &commonv1.CursorPageRequest{Limit: limit, Cursor: c.Query("cursor")},
 	})
 	if err != nil {
 		mapPlatformAdminError(c, err)

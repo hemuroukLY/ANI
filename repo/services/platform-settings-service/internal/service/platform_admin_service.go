@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/google/uuid"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	platformsettingsv1 "github.com/kubercloud/ani/pkg/generated/pb/platform_settings/v1"
 	"github.com/kubercloud/ani/services/platform-settings-service/internal/repo/ports"
@@ -81,9 +82,11 @@ func (s *PlatformAdminService) CreatePlatformAdmin(ctx context.Context, req *pla
 }
 
 func (s *PlatformAdminService) ListPlatformAdmins(ctx context.Context, req *platformsettingsv1.ListPlatformAdminsRequest) (*platformsettingsv1.ListPlatformAdminsResponse, error) {
+	// 只读：不写审计。
 	if s.coreClient == nil {
 		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core client not configured")
 	}
+	// 步骤 1：分页默认 limit=20，上限 100；校验 status/source 枚举
 	limit := 20
 	cursor := ""
 	if req != nil && req.GetPage() != nil {
@@ -95,6 +98,12 @@ func (s *PlatformAdminService) ListPlatformAdmins(ctx context.Context, req *plat
 		}
 		cursor = req.GetPage().GetCursor()
 	}
+	if req != nil {
+		if detail := validateListPlatformAdminFilters(req.GetStatus(), req.GetSource()); detail != "" {
+			return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, detail)
+		}
+	}
+	// 步骤 2：组装过滤条件（source 过滤枚举 local|third_party，透传 Core）
 	filter := ports.PlatformUserListFilter{Limit: limit, Cursor: cursor}
 	if req != nil {
 		filter.Role = req.GetRole()
@@ -102,26 +111,15 @@ func (s *PlatformAdminService) ListPlatformAdmins(ctx context.Context, req *plat
 		filter.Source = req.GetSource()
 		filter.Search = req.GetSearch()
 	}
+	// 步骤 3：调 Core List
 	res, err := s.coreClient.List(ctx, filter)
 	if err != nil {
 		return nil, mapDomainError(err)
 	}
+	// 步骤 4：映射列表项（不含 email；剥 username 前缀；source 推断）
 	items := make([]*platformsettingsv1.PlatformAdminListItem, 0, len(res.Items))
 	for _, it := range res.Items {
-		item := &platformsettingsv1.PlatformAdminListItem{
-			Id:       it.ID,
-			Username: it.Username,
-			Role:     it.Role,
-			Status:   it.Status,
-			Source:   it.Source,
-		}
-		if it.DisplayName != nil {
-			item.DisplayName = *it.DisplayName
-		}
-		if it.LastLoginAt != nil {
-			item.LastLoginAt = timestamppb.New(*it.LastLoginAt)
-		}
-		items = append(items, item)
+		items = append(items, toPlatformAdminListItem(it))
 	}
 	return &platformsettingsv1.ListPlatformAdminsResponse{
 		Items:      items,
@@ -133,8 +131,26 @@ func (s *PlatformAdminService) ListPlatformAdminRoles(context.Context, *platform
 	return nil, unimplemented()
 }
 
-func (s *PlatformAdminService) GetPlatformAdmin(context.Context, *platformsettingsv1.GetPlatformAdminRequest) (*platformsettingsv1.PlatformAdminDetail, error) {
-	return nil, unimplemented()
+func (s *PlatformAdminService) GetPlatformAdmin(ctx context.Context, req *platformsettingsv1.GetPlatformAdminRequest) (*platformsettingsv1.PlatformAdminDetail, error) {
+	// 只读：不写审计。
+	if s.coreClient == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core client not configured")
+	}
+	if req == nil || strings.TrimSpace(req.GetUserId()) == "" {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "user_id required")
+	}
+	// 步骤 1：校验 userId UUID
+	userID, err := uuid.Parse(strings.TrimSpace(req.GetUserId()))
+	if err != nil {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "user_id must be a uuid")
+	}
+	// 步骤 2：调 Core Get；不存在 → PLATFORM_USER_NOT_FOUND
+	dto, err := s.coreClient.Get(ctx, userID)
+	if err != nil {
+		return nil, mapDomainError(err)
+	}
+	// 步骤 3：映射详情全字段（含 email/created_at；不含 password）
+	return toPlatformAdminDetail(dto), nil
 }
 
 func (s *PlatformAdminService) UpdatePlatformAdminRole(context.Context, *platformsettingsv1.UpdatePlatformAdminRoleRequest) (*commonv1.IdempotentResult, error) {
@@ -159,4 +175,68 @@ func (s *PlatformAdminService) DeletePlatformAdmin(context.Context, *platformset
 
 func (s *PlatformAdminService) ListPlatformAdminAuditLogs(context.Context, *platformsettingsv1.ListPlatformAdminAuditLogsRequest) (*platformsettingsv1.ListPlatformAdminAuditLogsResponse, error) {
 	return nil, unimplemented()
+}
+
+func toPlatformAdminListItem(it ports.PlatformUserDTO) *platformsettingsv1.PlatformAdminListItem {
+	item := &platformsettingsv1.PlatformAdminListItem{
+		Id:       it.ID,
+		Username: stripPlatformUsernamePrefix(it.Username),
+		Role:     it.Role,
+		Status:   it.Status,
+		Source:   normalizePlatformSource(it.Username, it.Source),
+	}
+	if it.DisplayName != nil {
+		item.DisplayName = *it.DisplayName
+	}
+	if it.LastLoginAt != nil {
+		item.LastLoginAt = timestamppb.New(*it.LastLoginAt)
+	}
+	return item
+}
+
+func toPlatformAdminDetail(it ports.PlatformUserDTO) *platformsettingsv1.PlatformAdminDetail {
+	detail := &platformsettingsv1.PlatformAdminDetail{
+		Id:        it.ID,
+		Email:     it.Email,
+		Username:  stripPlatformUsernamePrefix(it.Username),
+		Role:      it.Role,
+		Status:    it.Status,
+		Source:    normalizePlatformSource(it.Username, it.Source),
+		CreatedAt: timestamppb.New(it.CreatedAt),
+	}
+	if it.DisplayName != nil {
+		detail.DisplayName = *it.DisplayName
+	}
+	if it.LastLoginAt != nil {
+		detail.LastLoginAt = timestamppb.New(*it.LastLoginAt)
+	}
+	return detail
+}
+
+// stripPlatformUsernamePrefix 对外响应剥除 local:/oidc: 存储前缀。
+func stripPlatformUsernamePrefix(username string) string {
+	switch {
+	case strings.HasPrefix(username, "local:"):
+		return strings.TrimPrefix(username, "local:")
+	case strings.HasPrefix(username, "oidc:"):
+		return strings.TrimPrefix(username, "oidc:")
+	default:
+		return username
+	}
+}
+
+// normalizePlatformSource：oidc: → third_party，local: → local；已有合法 source 优先保留。
+func normalizePlatformSource(username, source string) string {
+	switch strings.TrimSpace(source) {
+	case "local", "third_party", "unknown":
+		return strings.TrimSpace(source)
+	}
+	switch {
+	case strings.HasPrefix(username, "oidc:"):
+		return "third_party"
+	case strings.HasPrefix(username, "local:"):
+		return "local"
+	default:
+		return "unknown"
+	}
 }

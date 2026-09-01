@@ -90,8 +90,8 @@ type PlatformUserFilter struct {
 	Cursor string
 	Role   string
 	Status string
-	Source string // local | oidc (username prefix filter)
-	Search string // email / username ILIKE
+	Source string // local | third_party (username prefix filter；third_party → oidc:)
+	Search string // 对外 username ILIKE（剥 local:/oidc: 前缀后匹配）
 }
 
 // PlatformUserListResult is a cursor page of platform admins.

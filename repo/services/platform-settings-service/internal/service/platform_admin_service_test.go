@@ -22,6 +22,10 @@ type fakeCoreClient struct {
 	createIn  ports.PlatformUserCreateInput
 	createID  string
 	createErr error
+
+	getID  uuid.UUID
+	getRes ports.PlatformUserDTO
+	getErr error
 }
 
 func (f *fakeCoreClient) Create(_ context.Context, in ports.PlatformUserCreateInput) (string, error) {
@@ -38,7 +42,14 @@ func (f *fakeCoreClient) List(_ context.Context, filter ports.PlatformUserListFi
 	f.listFilter = filter
 	return f.listRes, f.listErr
 }
-func (f *fakeCoreClient) Get(context.Context, uuid.UUID) (ports.PlatformUserDTO, error) {
+func (f *fakeCoreClient) Get(_ context.Context, id uuid.UUID) (ports.PlatformUserDTO, error) {
+	f.getID = id
+	if f.getErr != nil {
+		return ports.PlatformUserDTO{}, f.getErr
+	}
+	if f.getRes.ID != "" {
+		return f.getRes, nil
+	}
 	return ports.PlatformUserDTO{}, ports.ErrNotImplemented
 }
 func (f *fakeCoreClient) ChangeRole(context.Context, uuid.UUID, string) error {
@@ -226,6 +237,52 @@ func TestListPlatformAdmins_Success(t *testing.T) {
 	if len(res.Items) != 1 || res.NextCursor != "n1" || res.Items[0].DisplayName != "Ops" {
 		t.Fatalf("res=%+v", res)
 	}
+	if res.Items[0].Username != "ops" || res.Items[0].Source != "local" {
+		t.Fatalf("item username/source unexpected: %+v", res.Items[0])
+	}
+}
+
+func TestListPlatformAdmins_EmptyAndLimitClamp(t *testing.T) {
+	t.Parallel()
+	core := &fakeCoreClient{listRes: ports.PlatformUserListDTO{Items: nil, NextCursor: ""}}
+	svc := NewPlatformAdminService(core, fakeAuditStore{})
+	res, err := svc.ListPlatformAdmins(context.Background(), &platformsettingsv1.ListPlatformAdminsRequest{
+		Page: &commonv1.CursorPageRequest{Limit: 500},
+	})
+	if err != nil {
+		t.Fatalf("ListPlatformAdmins: %v", err)
+	}
+	if core.listFilter.Limit != 100 {
+		t.Fatalf("limit clamp want 100 got %d", core.listFilter.Limit)
+	}
+	if len(res.Items) != 0 || res.NextCursor != "" {
+		t.Fatalf("empty list want items=[] next_cursor=\"\" got %+v", res)
+	}
+}
+
+func TestListPlatformAdmins_SourceInferOIDC(t *testing.T) {
+	t.Parallel()
+	core := &fakeCoreClient{
+		listRes: ports.PlatformUserListDTO{
+			Items: []ports.PlatformUserDTO{{
+				ID: "22222222-2222-2222-2222-222222222222", Username: "oidc:alice",
+				Role: "platform-readonly", Status: "active", Source: "",
+			}},
+		},
+	}
+	svc := NewPlatformAdminService(core, fakeAuditStore{})
+	res, err := svc.ListPlatformAdmins(context.Background(), &platformsettingsv1.ListPlatformAdminsRequest{
+		Source: "third_party",
+	})
+	if err != nil {
+		t.Fatalf("ListPlatformAdmins: %v", err)
+	}
+	if core.listFilter.Source != "third_party" {
+		t.Fatalf("source filter=%q", core.listFilter.Source)
+	}
+	if res.Items[0].Username != "alice" || res.Items[0].Source != "third_party" {
+		t.Fatalf("item=%+v", res.Items[0])
+	}
 }
 
 func TestListPlatformAdmins_CoreUnavailable(t *testing.T) {
@@ -234,6 +291,87 @@ func TestListPlatformAdmins_CoreUnavailable(t *testing.T) {
 	_, err := svc.ListPlatformAdmins(context.Background(), &platformsettingsv1.ListPlatformAdminsRequest{})
 	st := status.Convert(err)
 	if st.Code() != codes.Unavailable || st.Message() != "CORE_UNAVAILABLE" {
+		t.Fatalf("err=%v code=%v msg=%q", err, st.Code(), st.Message())
+	}
+}
+
+func TestListPlatformAdmins_InvalidSource(t *testing.T) {
+	t.Parallel()
+	svc := NewPlatformAdminService(&fakeCoreClient{}, fakeAuditStore{})
+	_, err := svc.ListPlatformAdmins(context.Background(), &platformsettingsv1.ListPlatformAdminsRequest{
+		Source: "oidc",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.InvalidArgument || !strings.Contains(st.Message(), "VALIDATION_FAILED") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestListPlatformAdmins_InvalidStatus(t *testing.T) {
+	t.Parallel()
+	svc := NewPlatformAdminService(&fakeCoreClient{}, fakeAuditStore{})
+	_, err := svc.ListPlatformAdmins(context.Background(), &platformsettingsv1.ListPlatformAdminsRequest{
+		Status: "pending",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.InvalidArgument || !strings.Contains(st.Message(), "VALIDATION_FAILED") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestGetPlatformAdmin_Success(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	dn := "Ops"
+	last := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	created := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	core := &fakeCoreClient{
+		getRes: ports.PlatformUserDTO{
+			ID: id, Email: "ops@ani.io", Username: "local:ops", DisplayName: &dn,
+			Role: "platform-ops", Status: "active", Source: "local",
+			LastLoginAt: &last, CreatedAt: created,
+		},
+	}
+	svc := NewPlatformAdminService(core, fakeAuditStore{})
+	res, err := svc.GetPlatformAdmin(context.Background(), &platformsettingsv1.GetPlatformAdminRequest{UserId: id})
+	if err != nil {
+		t.Fatalf("GetPlatformAdmin: %v", err)
+	}
+	if core.getID.String() != id {
+		t.Fatalf("getID=%s", core.getID)
+	}
+	if res.GetId() != id || res.GetEmail() != "ops@ani.io" || res.GetUsername() != "ops" {
+		t.Fatalf("detail identity=%+v", res)
+	}
+	if res.GetDisplayName() != "Ops" || res.GetRole() != "platform-ops" || res.GetStatus() != "active" || res.GetSource() != "local" {
+		t.Fatalf("detail fields=%+v", res)
+	}
+	if res.GetLastLoginAt() == nil || !res.GetLastLoginAt().AsTime().Equal(last) {
+		t.Fatalf("last_login_at=%v", res.GetLastLoginAt())
+	}
+	if res.GetCreatedAt() == nil || !res.GetCreatedAt().AsTime().Equal(created) {
+		t.Fatalf("created_at=%v", res.GetCreatedAt())
+	}
+}
+
+func TestGetPlatformAdmin_NotFound(t *testing.T) {
+	t.Parallel()
+	svc := NewPlatformAdminService(&fakeCoreClient{getErr: ports.ErrPlatformUserNotFound}, fakeAuditStore{})
+	_, err := svc.GetPlatformAdmin(context.Background(), &platformsettingsv1.GetPlatformAdminRequest{
+		UserId: "11111111-1111-1111-1111-111111111111",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.NotFound || !strings.HasPrefix(st.Message(), "PLATFORM_USER_NOT_FOUND") {
+		t.Fatalf("err=%v code=%v msg=%q", err, st.Code(), st.Message())
+	}
+}
+
+func TestGetPlatformAdmin_InvalidUserID(t *testing.T) {
+	t.Parallel()
+	svc := NewPlatformAdminService(&fakeCoreClient{}, fakeAuditStore{})
+	_, err := svc.GetPlatformAdmin(context.Background(), &platformsettingsv1.GetPlatformAdminRequest{UserId: "not-a-uuid"})
+	st := status.Convert(err)
+	if st.Code() != codes.InvalidArgument || !strings.HasPrefix(st.Message(), "VALIDATION_FAILED") {
 		t.Fatalf("err=%v code=%v msg=%q", err, st.Code(), st.Message())
 	}
 }
@@ -270,7 +408,6 @@ func TestUnimplementedRPCs(t *testing.T) {
 	t.Parallel()
 	svc := NewPlatformAdminService(&fakeCoreClient{}, fakeAuditStore{})
 	checks := []error{
-		func() error { _, err := svc.GetPlatformAdmin(context.Background(), nil); return err }(),
 		func() error { _, err := svc.ListPlatformAdminRoles(context.Background(), nil); return err }(),
 		func() error { _, err := svc.UpdatePlatformAdminRole(context.Background(), nil); return err }(),
 		func() error { _, err := svc.ResetPlatformAdminPassword(context.Background(), nil); return err }(),

@@ -154,7 +154,7 @@ func decodePlatformUser(raw any) (ports.PlatformUserDTO, error) {
 	out := ports.PlatformUserDTO{
 		ID:          stringField(obj, "id"),
 		Email:       stringField(obj, "email"),
-		Username:    stringField(obj, "username"), // TODO(list/detail): 含 local: 前缀，后续剥除
+		Username:    stringField(obj, "username"), // 含 local:/oidc: 前缀；Services 层对外响应剥除
 		DisplayName: optionalStringField(obj, "display_name"),
 		Role:        stringField(obj, "role"),
 		Status:      stringField(obj, "status"),

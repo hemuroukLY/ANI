@@ -217,11 +217,11 @@ func TestHandler_CreateFlow(t *testing.T) {
 	fake := &fakePlatformAdminClient{
 		listResp: &platformsettingsv1.ListPlatformAdminsResponse{
 			Items: []*platformsettingsv1.PlatformAdminListItem{
-				{Id: id, Username: "local:ops", DisplayName: "Ops", Role: "platform-ops", Status: "active", Source: "local"},
+				{Id: id, Username: "ops", DisplayName: "Ops", Role: "platform-ops", Status: "active", Source: "local"},
 			},
 		},
 		getResp: &platformsettingsv1.PlatformAdminDetail{
-			Id: id, Email: "ops@ani.io", Username: "local:ops", DisplayName: "Ops",
+			Id: id, Email: "ops@ani.io", Username: "ops", DisplayName: "Ops",
 			Role: "platform-ops", Status: "active", Source: "local",
 		},
 	}
@@ -253,6 +253,18 @@ func TestHandler_CreateFlow(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("list=%v", listed)
 	}
+	first, _ := items[0].(map[string]any)
+	if _, hasEmail := first["email"]; hasEmail {
+		t.Fatalf("list item must not include email: %v", first)
+	}
+	for _, key := range []string{"id", "username", "display_name", "role", "status", "source"} {
+		if first[key] == nil || first[key] == "" {
+			t.Fatalf("missing list field %s: %v", key, first)
+		}
+	}
+	if first["username"] != "ops" {
+		t.Fatalf("username=%v", first["username"])
+	}
 
 	detailResp := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins/"+id, "")
 	if detailResp.StatusCode() != http.StatusOK {
@@ -265,8 +277,57 @@ func TestHandler_CreateFlow(t *testing.T) {
 			t.Fatalf("missing detail field %s: %v", key, detail)
 		}
 	}
-	if detail["email"] != "ops@ani.io" || detail["role"] != "platform-ops" {
+	if detail["email"] != "ops@ani.io" || detail["role"] != "platform-ops" || detail["username"] != "ops" {
 		t.Fatalf("detail=%v", detail)
+	}
+}
+
+func TestPlatformAdmins_ListInvalidLimit(t *testing.T) {
+	fake := &fakePlatformAdminClient{}
+	h := setupPlatformAdminTestServer(t, fake)
+	resp := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins?limit=abc", "")
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if !strings.Contains(string(resp.Body()), "VALIDATION_FAILED") {
+		t.Fatalf("body=%s", resp.Body())
+	}
+	if fake.lastList != nil {
+		t.Fatalf("unexpected list call on invalid limit")
+	}
+}
+
+func TestPlatformAdmins_ListEmpty(t *testing.T) {
+	fake := &fakePlatformAdminClient{
+		listResp: &platformsettingsv1.ListPlatformAdminsResponse{Items: nil, NextCursor: ""},
+	}
+	h := setupPlatformAdminTestServer(t, fake)
+	resp := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins", "")
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode(), resp.Body())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := payload["items"].([]any)
+	if len(items) != 0 {
+		t.Fatalf("want empty items got %v", payload)
+	}
+	if payload["next_cursor"] != nil {
+		t.Fatalf("want next_cursor null/empty got %v", payload["next_cursor"])
+	}
+}
+
+func TestPlatformAdmins_GetNotFound(t *testing.T) {
+	fake := &fakePlatformAdminClient{err: status.Error(codes.NotFound, "PLATFORM_USER_NOT_FOUND")}
+	h := setupPlatformAdminTestServer(t, fake)
+	resp := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "")
+	if resp.StatusCode() != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if !strings.Contains(string(resp.Body()), "PLATFORM_USER_NOT_FOUND") {
+		t.Fatalf("body=%s", resp.Body())
 	}
 }
 
