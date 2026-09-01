@@ -24,9 +24,21 @@ var (
 	ErrQuotaUpdateUncertain       = errors.New("quota update uncertain: transaction commit status unknown")
 	ErrReservationNotFound        = errors.New("resource reservation not found")
 
+	// Tenant user admin sentinel errors (users / user_roles / roles).
+	ErrUserNotFound           = errors.New("user not found")
+	ErrUserAlreadyTenantAdmin = errors.New("user already tenant admin")
+	ErrTenantOwnerRoleLocked  = errors.New("tenant owner role locked")
+	ErrLastTenantOwner        = errors.New("last tenant owner")
+	ErrTransferTargetInvalid  = errors.New("transfer target invalid")
+	ErrRoleChangeInvalid      = errors.New("role change invalid")
+	ErrPasswordSameAsOld      = errors.New("password same as old")
 	// Metadata transaction sentinel errors.
 	ErrMetadataTenantTxBegin    = errors.New("metadata tenant tx begin")
 	ErrMetadataTenantTxCommit   = errors.New("metadata tenant tx commit")
 	ErrMetadataPlatformTxBegin  = errors.New("metadata platform tx begin")
 	ErrMetadataPlatformTxCommit = errors.New("metadata platform tx commit")
+
+	// Reservation sentinel errors (BOSS reservation management).
+	ErrReservationExceedsQuota = errors.New("allocated_gpu_count exceeds total quota")
+	ErrReservedInsufficient    = errors.New("reserved quota insufficient: allocated - used - reserved < request")
 )

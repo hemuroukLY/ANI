@@ -43,11 +43,6 @@ func main() {
 		logger.Error("failed to configure secret provider runtime", "err", err)
 		os.Exit(1)
 	}
-	gpuInventory, err := newGatewayGPUInventory(gatewayGPUInventoryRuntimeConfigFromEnv())
-	if err != nil {
-		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
-		os.Exit(1)
-	}
 	kubernetesRESTClient, err := newGatewayKubernetesClient(gatewayGPUInventoryRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure kubernetes rest client for orphan discovery", "err", err)
@@ -58,11 +53,18 @@ func main() {
 		logger.Error("failed to configure network provider runtime", "err", err)
 		os.Exit(1)
 	}
-	storageService, closeStorageRuntime, err := newGatewayStorageService(runtimeCtx, gatewayStorageRuntimeConfigFromEnv())
+	storageRuntimeCfg := gatewayStorageRuntimeConfigFromEnv()
+	storageService, closeStorageRuntime, err := newGatewayStorageService(runtimeCtx, storageRuntimeCfg)
 	if err != nil {
 		logger.Error("failed to configure storage provider runtime", "err", err)
 		os.Exit(1)
 	}
+	logger.Info("storage provider runtime configured",
+		"provider", strings.TrimSpace(storageRuntimeCfg.ProviderMode),
+		"object_store", strings.TrimSpace(storageRuntimeCfg.ObjectStoreProvider),
+		"control_plane_store", storageNeedsControlPlaneStore(storageRuntimeCfg),
+		"router_default_in_memory_service", storageService == nil,
+	)
 	if closeStorageRuntime != nil {
 		defer closeStorageRuntime()
 	}
@@ -92,6 +94,14 @@ func main() {
 			"shared_network_storage_registry", true,
 		)
 	}
+	if instanceRuntime.ReconcileController != nil {
+		go func() {
+			logger.Info("workload reconcile controller starting")
+			if err := instanceRuntime.ReconcileController.Start(runtimeCtx); err != nil {
+				logger.Error("workload reconcile controller stopped with error", "err", err)
+			}
+		}()
+	}
 	gpuSchedulingQueueStore, err := newGatewayGPUSchedulingQueueStore(gatewayGPUSchedulingQueueRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure gpu scheduling queue store runtime", "err", err)
@@ -100,6 +110,11 @@ func main() {
 	gpuInstanceStore, err := newGatewayGPUInstanceStore(runtimeCtx, gatewayGPUInstanceStoreConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure gpu instance store runtime", "err", err)
+		os.Exit(1)
+	}
+	gpuSpecStore, err := newGatewayGPUSpecStore(gatewayGPUInventoryRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure gpu spec store runtime", "err", err)
 		os.Exit(1)
 	}
 	vectorStoreRuntimeConfig := gatewayVectorStoreRuntimeConfigFromEnv()
@@ -151,6 +166,19 @@ func main() {
 			"provider", strings.TrimSpace(os.Getenv("INSTANCE_OBSERVABILITY_PROVIDER")),
 		)
 	}
+	inferenceServiceClient, closeInferenceGRPC, err := newGatewayInferenceServiceClient(runtimeCtx, gatewayInferenceServiceRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure inference-service gRPC client", "err", err)
+		os.Exit(1)
+	}
+	if closeInferenceGRPC != nil {
+		defer closeInferenceGRPC()
+	}
+	if inferenceServiceClient != nil {
+		logger.Info("inference-service gRPC client configured",
+			"addr", strings.TrimSpace(os.Getenv("INFERENCE_SERVICE_GRPC_ADDR")),
+		)
+	}
 	kbServiceClient, closeKBGRPC, err := newGatewayKBServiceClient(runtimeCtx, gatewayKBServiceRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure kb-service gRPC client", "err", err)
@@ -164,20 +192,53 @@ func main() {
 			"addr", strings.TrimSpace(os.Getenv("KB_SERVICE_GRPC_ADDR")),
 		)
 	}
+	modelServiceClient, closeModelGRPC, err := newGatewayModelServiceClient(runtimeCtx, gatewayModelServiceRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure model-service gRPC client", "err", err)
+		os.Exit(1)
+	}
+	if closeModelGRPC != nil {
+		defer closeModelGRPC()
+	}
+	if modelServiceClient != nil {
+		logger.Info("model-service gRPC client configured",
+			"addr", strings.TrimSpace(os.Getenv("MODEL_SERVICE_GRPC_ADDR")),
+		)
+	}
 	middleware.StartAuditWorker()
-	middleware.Register(h, gatewayStore)
-	quotaAdminService, closeQuotaStore, err := newGatewayQuotaStore(runtimeCtx)
+	if err := middleware.Register(h, gatewayStore); err != nil {
+		logger.Error("failed to configure gateway authz", "err", err)
+		os.Exit(1)
+	}
+	quotaAdminService, quotaStoreService, quotaMetadataStore, closeQuotaStore, err := newGatewayQuotaStore(runtimeCtx)
 	if err != nil {
 		logger.Error("failed to configure quota admin store", "err", err)
 		os.Exit(1)
 	}
 	defer closeQuotaStore()
+	platformWorkloadRuntimeConfig := gatewayPlatformWorkloadRuntimeConfigFromEnv()
+	platformWorkloadService, closePlatformWorkload, err := newGatewayPlatformWorkloadService(runtimeCtx, platformWorkloadRuntimeConfig)
+	if err != nil {
+		logger.Error("failed to configure platform workload provider runtime", "err", err)
+		os.Exit(1)
+	}
+	defer closePlatformWorkload()
+	platformWorkloadProvider := strings.TrimSpace(platformWorkloadRuntimeConfig.ProviderMode)
+	if platformWorkloadProvider == "" {
+		platformWorkloadProvider = "local"
+	}
+	logger.Info("platform workload provider runtime configured", "provider", platformWorkloadProvider)
 	tenantService, closeTenantStore, err := newGatewayTenantStore(runtimeCtx)
 	if err != nil {
 		logger.Error("failed to configure tenant admin store", "err", err)
 		os.Exit(1)
 	}
 	defer closeTenantStore()
+	gpuInventory, err := newGatewayGPUInventory(gatewayGPUInventoryRuntimeConfigFromEnv(), gpuSchedulingQueueStore, gpuSpecStore, quotaStoreService)
+	if err != nil {
+		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
+		os.Exit(1)
+	}
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
@@ -207,11 +268,17 @@ func main() {
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
 		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
+		InferenceServiceClient:                inferenceServiceClient,
+		ModelServiceClient:                    modelServiceClient,
 		KBServiceClient:                       kbServiceClient,
 		KBSSEConfig:                           newGatewaySSEConfig(gatewaySSERuntimeConfigFromEnv()),
 		AsyncTaskStore:                        instanceRuntime.AsyncTasks,
 		QuotaAdminService:                     quotaAdminService,
+		PlatformWorkloadService:               platformWorkloadService,
 		TenantService:                         tenantService,
+		GPUSpecStore:                          gpuSpecStore,
+		MetadataStore:                         quotaMetadataStore,
+		QuotaStoreService:                     quotaStoreService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

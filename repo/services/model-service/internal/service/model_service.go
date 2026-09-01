@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -75,11 +76,35 @@ func (s *ModelService) GetModel(ctx context.Context, req *modelv1.GetModelReques
 		return nil, toStatus(err)
 	}
 	ctx = withTenant(ctx, tenantID)
-	model, err := s.repo.GetByID(ctx, s.db, id)
+	model, err := s.repo.GetByID(ctx, s.db, tenantID, id)
 	if err != nil {
 		return nil, toStatus(err)
 	}
+	if !modelOwnedBy(model, tenantID) {
+		return nil, toStatus(types.Wrapf(types.ErrNotFound, "model not found"))
+	}
 	return modelToPB(model), nil
+}
+
+func (s *ModelService) GetModelVersion(ctx context.Context, req *modelv1.GetModelVersionRequest) (*modelv1.GetModelVersionResponse, error) {
+	tenantID, versionID, err := parseTenantAndID(req.GetTenantId(), req.GetModelVersionId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	ctx = withTenant(ctx, tenantID)
+	model, version, err := s.repo.GetVersionByID(ctx, s.db, tenantID, versionID)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	if !modelOwnedBy(model, tenantID) {
+		return nil, toStatus(types.Wrapf(types.ErrNotFound, "model not found"))
+	}
+	versionPB := versionToPB(version)
+	versionPB.EncryptHint = ""
+	return &modelv1.GetModelVersionResponse{
+		Model:   modelToPB(model),
+		Version: versionPB,
+	}, nil
 }
 
 func (s *ModelService) ListModels(ctx context.Context, req *modelv1.ListModelsRequest) (*modelv1.ListModelsResponse, error) {
@@ -96,12 +121,18 @@ func (s *ModelService) ListModels(ctx context.Context, req *modelv1.ListModelsRe
 		cursor = req.GetPage().GetCursor()
 	}
 	models, total, nextCursor, err := s.repo.List(ctx, s.db, repo.ListFilter{
-		Status: req.GetStatus(),
-		Limit:  limit,
-		Cursor: cursor,
+		TenantID: tenantID,
+		Status:   req.GetStatus(),
+		Limit:    limit,
+		Cursor:   cursor,
 	})
 	if err != nil {
 		return nil, toStatus(err)
+	}
+	for _, model := range models {
+		if !modelOwnedBy(model, tenantID) {
+			return nil, status.Error(codes.Internal, "internal error")
+		}
 	}
 	out := &modelv1.ListModelsResponse{
 		Models: make([]*modelv1.Model, 0, len(models)),
@@ -127,7 +158,7 @@ func (s *ModelService) DeleteModel(ctx context.Context, req *modelv1.DeleteModel
 		return nil, status.Errorf(codes.Internal, "begin transaction")
 	}
 	defer rollback(ctx, tx)
-	if err := s.repo.SoftDelete(ctx, tx, id); err != nil {
+	if err := s.repo.SoftDelete(ctx, tx, tenantID, id); err != nil {
 		return nil, toStatus(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -152,6 +183,7 @@ func (s *ModelService) CreateModelVersion(ctx context.Context, req *modelv1.Crea
 	defer rollback(ctx, tx)
 
 	version, err := s.repo.CreateVersion(ctx, tx, repo.CreateVersionReq{
+		TenantID:       tenantID,
 		ModelID:        modelID,
 		Version:        req.GetVersion(),
 		Format:         req.GetFormat(),
@@ -183,7 +215,40 @@ func (s *ModelService) GetModelDownloadURL(ctx context.Context, req *modelv1.Get
 	return nil, status.Error(codes.Unimplemented, "model download presigned URL requires MinIO client wiring")
 }
 
-var modelNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{0,62}$`)
+var (
+	modelNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{0,62}$`)
+	pvcClaimPattern  = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+)
+
+// validateStoragePath accepts tenant-local model directories only:
+// pvc://<dns-1123-claim>[#/absolute-path]. HuggingFace / ModelScope / MinIO
+// object:// paths are the next source slice, not this one. HostPath is never a
+// product source.
+func validateStoragePath(raw string) error {
+	path := strings.TrimSpace(raw)
+	if path == "" {
+		return types.Wrapf(types.ErrBadRequest, "storage_path required")
+	}
+	if strings.Contains(path, "..") {
+		return types.Wrapf(types.ErrBadRequest, "storage_path must not contain ..")
+	}
+	rest, ok := strings.CutPrefix(path, "pvc://")
+	if !ok {
+		return types.Wrapf(types.ErrBadRequest, "storage_path must be pvc://<claim>[#/path] for a tenant-local model directory")
+	}
+	claim, subpath, found := strings.Cut(rest, "#")
+	claim = strings.TrimSpace(claim)
+	if !pvcClaimPattern.MatchString(claim) {
+		return types.Wrapf(types.ErrBadRequest, "invalid pvc claim name")
+	}
+	if found {
+		subpath = strings.TrimSpace(subpath)
+		if subpath == "" || !strings.HasPrefix(subpath, "/") {
+			return types.Wrapf(types.ErrBadRequest, "pvc subpath must be an absolute path")
+		}
+	}
+	return nil
+}
 
 func validateModelName(name string) error {
 	if !modelNamePattern.MatchString(name) {
@@ -201,8 +266,8 @@ func validateModelVersionReq(req *modelv1.CreateModelVersionRequest) error {
 	default:
 		return types.Wrapf(types.ErrBadRequest, "invalid model format")
 	}
-	if req.GetStoragePath() == "" {
-		return types.Wrapf(types.ErrBadRequest, "storage_path required")
+	if err := validateStoragePath(req.GetStoragePath()); err != nil {
+		return err
 	}
 	if req.GetSizeBytes() < 0 {
 		return types.Wrapf(types.ErrBadRequest, "size_bytes must be non-negative")
@@ -239,6 +304,10 @@ func parseTenantAndID(tenantID, id string) (uuid.UUID, uuid.UUID, error) {
 
 func withTenant(ctx context.Context, tenantID uuid.UUID) context.Context {
 	return types.WithTenant(ctx, &types.TenantContext{TenantID: tenantID})
+}
+
+func modelOwnedBy(model *repo.Model, tenantID uuid.UUID) bool {
+	return model != nil && tenantID != uuid.Nil && model.TenantID == tenantID
 }
 
 func modelToPB(model *repo.Model) *modelv1.Model {

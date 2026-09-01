@@ -64,10 +64,45 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** 获取模型版本列表 */
+        get: operations["listModelVersions"];
         put?: never;
         /** 上传模型版本 */
         post: operations["createModelVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/models/{model_id}/upload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 申请模型文件预签名上传地址 */
+        post: operations["getModelUploadURL"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-import-tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询模型异步导入任务 */
+        get: operations["getModelImportTask"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -194,6 +229,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inference-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询推理访问策略 */
+        get: operations["listInferenceAccessPolicies"];
+        put?: never;
+        /** 创建推理访问策略 */
+        post: operations["createInferenceAccessPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inference-policies/{policy_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取推理访问策略 */
+        get: operations["getInferenceAccessPolicy"];
+        put?: never;
+        post?: never;
+        /** 删除推理访问策略 */
+        delete: operations["deleteInferenceAccessPolicy"];
+        options?: never;
+        head?: never;
+        /** 更新推理访问策略 */
+        patch: operations["patchInferenceAccessPolicy"];
+        trace?: never;
+    };
+    "/inference-policy-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询推理访问策略命中记录 */
+        get: operations["listInferencePolicyEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inference-services/{service_id}/policies": {
         parameters: {
             query?: never;
@@ -201,11 +290,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        /**
-         * 更新推理服务限流与访问策略
-         * @description P1 兼容预留路径；P0 未建设调用网关，真实 handler 必须返回 501 FEATURE_NOT_AVAILABLE，不得伪造策略已生效。
-         */
+        /** 查询推理服务绑定的访问策略 */
+        get: operations["listInferenceServicePolicies"];
+        /** 更新推理服务绑定的访问策略 */
         put: operations["updateInferenceServicePolicies"];
         post?: never;
         delete?: never;
@@ -1136,6 +1223,144 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/platform-admins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 平台运营账号列表（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listPlatformAdmins"];
+        put?: never;
+        /** 创建平台运营账号（需 platform-admin） */
+        post: operations["createPlatformAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询可分配的平台角色与权限矩阵（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listPlatformAdminRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询平台运营账号详情（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["getPlatformAdmin"];
+        put?: never;
+        post?: never;
+        /** 软删除平台运营账号（需 platform-admin） */
+        delete: operations["deletePlatformAdmin"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/{userId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改平台运营账号角色（需 platform-admin） */
+        put: operations["updatePlatformAdminRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/{userId}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重置平台运营账号密码（需 platform-admin） */
+        post: operations["resetPlatformAdminPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/{userId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 禁用平台运营账号（需 platform-admin） */
+        post: operations["disablePlatformAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/{userId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 启用平台运营账号（需 platform-admin） */
+        post: operations["enablePlatformAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/{userId}/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询平台运营账号操作历史（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listPlatformAdminAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenant-admins": {
         parameters: {
             query?: never;
@@ -1216,6 +1441,23 @@ export interface paths {
         get: operations["getTenantAdminRole"];
         /** 修改管理员角色（需 platform-admin / platform-ops） */
         put: operations["updateTenantAdminRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/admins/{userId}/changeable-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询可变更角色选项（排除 tenant-owner）（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["getChangeableRoles"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1348,6 +1590,7 @@ export interface components {
             id: string;
             name: string;
             display_name?: string;
+            description?: string | null;
             /** @enum {string} */
             source: "upload" | "huggingface" | "modelscope" | "builtin";
             capabilities?: string[];
@@ -1356,6 +1599,9 @@ export interface components {
             total_size_bytes?: number;
             /** Format: date-time */
             created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+            versions?: components["schemas"]["ModelVersion"][];
         };
         ModelVersion: {
             /** Format: uuid */
@@ -1367,8 +1613,24 @@ export interface components {
             format: "safetensors" | "gguf" | "pytorch";
             is_encrypted?: boolean;
             size_bytes?: number;
+            checksum_sha256?: string | null;
+            storage_path?: string;
             /** Format: date-time */
             created_at: string;
+        };
+        CreateModelUploadURLRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            version: string;
+            file_name: string;
+            size_bytes: number;
+        };
+        ModelUploadURLResponse: {
+            /** Format: uri */
+            upload_url: string;
+            storage_path: string;
+            /** Format: date-time */
+            expires_at: string;
         };
         InferenceService: {
             /** Format: uuid */
@@ -1442,11 +1704,18 @@ export interface components {
             /** Format: date-time */
             updated_at?: string | null;
         };
+        /**
+         * @description 推理服务每个副本申请的加速器资源。
+         *     spec_id 是 GPU 型号，count_per_replica 是申请卡数，memory 是申请显存（MiB）。
+         *     不填 memory 为整卡，填写 memory 为 vGPU。
+         */
         InferenceServiceAccelerator: {
-            /** @description Core GPUSpec ID；P0 仅接受通过 live gate 的整卡 GPU 规格 */
+            /** @description GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。只表示型号。历史 -full/-Nx ID 实现剥掉后缀后仍按型号处理。 */
             spec_id: string;
-            /** @description 每个独立副本或 leader-worker group 申请的 accelerator 总数 */
+            /** @description 每个独立副本或 leader-worker group 的申请卡数。整卡和 vGPU 都必填，最小为 1。 */
             count_per_replica: number;
+            /** @description 申请显存，单位 MiB。这是 GPU 显存，不是 resources.memory 的内存预算。省略为整卡；填写为 vGPU。 */
+            memory?: number;
         };
         InferenceServiceResources: {
             /** @description 每个单节点 Pod 或跨节点 group 的 CPU 预算 */
@@ -1945,21 +2214,120 @@ export interface components {
             /** @enum {string} */
             status: "success" | "timeout" | "error";
         };
+        InferenceAccessPolicyScope: {
+            /** @enum {string} */
+            type: "tenant_default" | "inference_service" | "api_key" | "inference_service_api_key";
+            inference_service_ids?: string[];
+            api_key_ids?: string[];
+        };
+        InferenceAccessPolicyAccess: {
+            allow_all_tenant_keys: boolean;
+            allow_api_key_ids?: string[];
+            deny_api_key_ids?: string[];
+        };
+        InferenceAccessPolicyRateLimits: {
+            qps?: number | null;
+            rpm?: number | null;
+        };
+        InferenceAccessPolicyConcurrency: {
+            max_in_flight?: number | null;
+            /** @default 60 */
+            lease_ttl_seconds: number;
+        };
+        InferenceAccessPolicy: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            name: string;
+            /** @enum {string} */
+            status: "enabled" | "disabled";
+            description?: string | null;
+            priority: number;
+            scope: components["schemas"]["InferenceAccessPolicyScope"];
+            access: components["schemas"]["InferenceAccessPolicyAccess"];
+            rate_limits: components["schemas"]["InferenceAccessPolicyRateLimits"];
+            concurrency: components["schemas"]["InferenceAccessPolicyConcurrency"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        CreateInferenceAccessPolicyRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            name: string;
+            description?: string | null;
+            /**
+             * @default enabled
+             * @enum {string}
+             */
+            status: "enabled" | "disabled";
+            /** @default 1000 */
+            priority: number;
+            scope: components["schemas"]["InferenceAccessPolicyScope"];
+            access: components["schemas"]["InferenceAccessPolicyAccess"];
+            rate_limits?: components["schemas"]["InferenceAccessPolicyRateLimits"];
+            concurrency?: components["schemas"]["InferenceAccessPolicyConcurrency"];
+        };
+        PatchInferenceAccessPolicyRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            name?: string;
+            description?: string | null;
+            /** @enum {string} */
+            status?: "enabled" | "disabled";
+            priority?: number;
+            scope?: components["schemas"]["InferenceAccessPolicyScope"];
+            access?: components["schemas"]["InferenceAccessPolicyAccess"];
+            rate_limits?: components["schemas"]["InferenceAccessPolicyRateLimits"];
+            concurrency?: components["schemas"]["InferenceAccessPolicyConcurrency"];
+        };
+        InferenceAccessPolicyListResponse: {
+            items: components["schemas"]["InferenceAccessPolicy"][];
+            next_cursor?: string | null;
+        };
+        InferenceAccessPolicyBinding: {
+            /** Format: uuid */
+            policy_id: string;
+            inference_service_ids: string[];
+        };
+        InferenceAccessPolicyEvent: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            /** Format: uuid */
+            policy_id?: string | null;
+            /** Format: uuid */
+            inference_service_id: string;
+            /** Format: uuid */
+            api_key_id?: string | null;
+            key_prefix?: string | null;
+            request_id?: string | null;
+            openai_path?: string;
+            external_model?: string | null;
+            /** @enum {string} */
+            decision: "allow" | "deny" | "rate_limited" | "concurrency_limited" | "policy_unavailable";
+            reason_code: string;
+            http_status: number;
+            retry_after_seconds?: number | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        InferenceAccessPolicyEventListResponse: {
+            items: components["schemas"]["InferenceAccessPolicyEvent"][];
+            next_cursor?: string | null;
+        };
         InferenceServicePolicies: {
-            rate_limit_rpm?: number | null;
-            max_concurrency?: number | null;
-            allowed_tenant_ids?: string[] | null;
-            /** @enum {string|null} */
-            auth_mode?: "api_key" | "jwt" | "none" | null;
+            /** Format: uuid */
+            service_id: string;
+            policies: components["schemas"]["InferenceAccessPolicy"][];
         };
         UpdateInferenceServicePoliciesRequest: {
             /** Format: uuid */
             idempotency_key: string;
-            rate_limit_rpm?: number | null;
-            max_concurrency?: number | null;
-            allowed_tenant_ids?: string[];
-            /** @enum {string} */
-            auth_mode?: "api_key" | "jwt" | "none";
+            policy_ids: string[];
         };
         KBCitation: {
             /** Format: uuid */
@@ -2331,12 +2699,114 @@ export interface components {
             id: string;
             message: string;
         };
+        PlatformAdminListItem: {
+            /** Format: uuid */
+            id: string;
+            username: string;
+            display_name: string;
+            /** @enum {string} */
+            role: "platform-admin" | "platform-ops" | "platform-readonly";
+            /** @enum {string} */
+            status: "active" | "disabled";
+            /** @enum {string} */
+            source: "local" | "third_party";
+            /** Format: date-time */
+            last_login_at?: string | null;
+        };
+        PlatformAdminDetail: {
+            /** Format: uuid */
+            id: string;
+            /** Format: email */
+            email: string;
+            username: string;
+            display_name: string;
+            /** @enum {string} */
+            role: "platform-admin" | "platform-ops" | "platform-readonly";
+            /** @enum {string} */
+            status: "active" | "disabled";
+            /** @enum {string} */
+            source: "local" | "third_party";
+            /** Format: date-time */
+            last_login_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PlatformAdminListResponse: {
+            items: components["schemas"]["PlatformAdminListItem"][];
+            /** @description 下一页游标；null 表示已无更多数据 */
+            next_cursor?: string | null;
+        };
+        PlatformAdminCreateRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /**
+             * Format: email
+             * @description RFC 5322
+             */
+            email: string;
+            /** @description 不含冒号 */
+            username: string;
+            display_name: string;
+            /** @enum {string} */
+            role: "platform-admin" | "platform-ops" | "platform-readonly";
+            /** @description 四类中至少三类 */
+            password: string;
+        };
+        PlatformAdminRoleUpdateRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /** @enum {string} */
+            role: "platform-admin" | "platform-ops" | "platform-readonly";
+        };
+        PlatformRole: {
+            /** @enum {string} */
+            name: "platform-admin" | "platform-ops" | "platform-readonly";
+            label: string;
+            description: string;
+            permissions: {
+                /** @enum {string} */
+                tenant_ops: "read" | "write" | "none";
+                /** @enum {string} */
+                resource_pool: "read" | "write" | "none";
+                /** @enum {string} */
+                platform_user: "read" | "write" | "none";
+                /** @enum {string} */
+                audit_export: "read" | "write" | "none";
+            };
+        };
+        PlatformRoleListResponse: {
+            items: components["schemas"]["PlatformRole"][];
+        };
+        PlatformAdminAuditLog: {
+            /** Format: uuid */
+            id: string;
+            /** @description 如 platform_admin.create / change_role / reset_password / disable / enable / delete */
+            action: string;
+            resource: string;
+            /** @enum {string} */
+            result: "success" | "failed";
+            details?: {
+                [key: string]: unknown;
+            } | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PlatformAdminAuditLogListResponse: {
+            items: components["schemas"]["PlatformAdminAuditLog"][];
+            /** @description 下一页游标；null 表示已无更多数据 */
+            next_cursor?: string | null;
+        };
         TenantRef: {
             /** Format: uuid */
             id: string;
             name: string;
             display_name: string;
-            mfa_required: boolean;
         };
         /** @description 跨租户管理员列表项。仅返回 role ∈ (tenant-owner, tenant-admin) 或正在被邀请的用户； is_inviting 仅作标记，不影响 role/status（邀请中用户仍展示原有角色，可为 user）。 列表不返回 created_at/updated_at。 */
         AdminWithTenant: {
@@ -2434,6 +2904,17 @@ export interface components {
                 transfer: "read" | "write" | "none";
             };
         };
+        /** @description 可变更角色选项（当前为 tenant-owner 时 changeable_roles 为空） */
+        ChangeableRolesResponse: {
+            /** @enum {string} */
+            current_role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            changeable_roles: {
+                /** @enum {string} */
+                role: "user" | "auditor" | "tenant-admin";
+                /** @description 展示名（普通成员 / 审计员 / 租户管理员） */
+                label: string;
+            }[];
+        };
         TenantAdminAuditLog: {
             /** Format: uuid */
             id: string;
@@ -2441,7 +2922,7 @@ export interface components {
             action: string;
             resource: string;
             /** @enum {string} */
-            result: "success" | "failed";
+            result: "success" | "failure";
             /** Format: uuid */
             user_id?: string | null;
             details?: {
@@ -2672,6 +3153,10 @@ export interface operations {
     listModels: {
         parameters: {
             query?: {
+                /** @description 按模型名称或显示名称搜索 */
+                keyword?: string;
+                source?: "upload" | "huggingface" | "modelscope" | "builtin";
+                capability?: "text-generation" | "embedding" | "speech-to-text";
                 status?: "pending" | "downloading" | "ready" | "error" | "deleted";
                 limit?: number;
                 /** @description 上一页返回的 next_cursor */
@@ -2791,6 +3276,8 @@ export interface operations {
                     "application/json": components["schemas"]["Model"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -2812,6 +3299,47 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 模型仍被未删除的推理服务引用（code=MODEL_IN_USE） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listModelVersions: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 模型版本列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CursorPage"] & {
+                        items?: components["schemas"]["ModelVersion"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -2850,6 +3378,67 @@ export interface operations {
                     "application/json": components["schemas"]["ModelVersion"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getModelUploadURL: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateModelUploadURLRequest"];
+            };
+        };
+        responses: {
+            /** @description 已创建有时限的模型文件预签名上传地址 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelUploadURLResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getModelImportTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 模型异步导入任务 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listInferenceServices: {
@@ -3112,6 +3701,189 @@ export interface operations {
             504: components["responses"]["RuntimeTimeout"];
         };
     };
+    listInferenceAccessPolicies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 推理访问策略列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceAccessPolicyListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createInferenceAccessPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateInferenceAccessPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description 已创建推理访问策略 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceAccessPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
+        };
+    };
+    getInferenceAccessPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                policy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 推理访问策略 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceAccessPolicy"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteInferenceAccessPolicy: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                policy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除推理访问策略 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    patchInferenceAccessPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                policy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchInferenceAccessPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description 已更新推理访问策略 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceAccessPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
+        };
+    };
+    listInferencePolicyEvents: {
+        parameters: {
+            query?: {
+                inference_service_id?: string;
+                policy_id?: string;
+                api_key_id?: string;
+                decision?: "allow" | "deny" | "rate_limited" | "concurrency_limited" | "policy_unavailable";
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 推理访问策略命中记录 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceAccessPolicyEventListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listInferenceServicePolicies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                service_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 推理服务策略绑定 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceServicePolicies"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     updateInferenceServicePolicies: {
         parameters: {
             query?: never;
@@ -3127,7 +3899,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 更新后的策略 */
+            /** @description 更新后的推理服务策略绑定 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3138,9 +3910,9 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            501: components["responses"]["FeatureNotAvailable"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
         };
     };
     listKnowledgeBases: {
@@ -5027,6 +5799,331 @@ export interface operations {
             504: components["responses"]["GatewayTimeout"];
         };
     };
+    listPlatformAdmins: {
+        parameters: {
+            query?: {
+                /** @description 每页数量 */
+                limit?: number;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string;
+                role?: "platform-admin" | "platform-ops" | "platform-readonly";
+                status?: "active" | "disabled";
+                /** @description 按 username 前缀过滤；oidc 结果在响应中映射为 third_party */
+                source?: "local" | "oidc";
+                /** @description 模糊匹配 email/username */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台运营账号列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformAdminListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createPlatformAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformAdminCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号已创建 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            /** @description VALIDATION_FAILED */
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description FORBIDDEN */
+            403: components["responses"]["Forbidden"];
+            /** @description ROLE_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description EMAIL_ALREADY_EXISTS / USERNAME_ALREADY_EXISTS / IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listPlatformAdminRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台角色列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformRoleListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getPlatformAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台运营账号详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformAdminDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deletePlatformAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdempotentOnlyRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description FORBIDDEN */
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            /** @description LAST_PLATFORM_ADMIN */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    updatePlatformAdminRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformAdminRoleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号角色已修改 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            /** @description VALIDATION_FAILED */
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description FORBIDDEN */
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            /** @description ROLE_CHANGE_INVALID */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    resetPlatformAdminPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号密码已重置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            /** @description VALIDATION_FAILED */
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description FORBIDDEN */
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            /** @description PASSWORD_SAME_AS_OLD */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    disablePlatformAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdempotentOnlyRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号已禁用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description FORBIDDEN */
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            /** @description LAST_PLATFORM_ADMIN */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    enablePlatformAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdempotentOnlyRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号已启用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description FORBIDDEN */
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listPlatformAdminAuditLogs: {
+        parameters: {
+            query?: {
+                /** @description 每页数量 */
+                limit?: number;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string;
+                /** @description 过滤操作类型 */
+                action?: string;
+                result?: "success" | "failed";
+            };
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台运营账号操作历史 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformAdminAuditLogListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+        };
+    };
     listAllTenantAdmins: {
         parameters: {
             query?: {
@@ -5249,6 +6346,33 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
         };
     };
+    getChangeableRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可变更角色列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeableRolesResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+        };
+    };
     transferTenantOwnership: {
         parameters: {
             query?: never;
@@ -5397,7 +6521,7 @@ export interface operations {
                 cursor?: string;
                 /** @description 过滤操作类型 */
                 action?: string;
-                result?: "success" | "failed";
+                result?: "success" | "failure";
             };
             header?: never;
             path: {

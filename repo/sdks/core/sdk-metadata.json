@@ -8,19 +8,67 @@
       "operationId": "listPlanBoundTenantCounts",
       "method": "GET",
       "path": "/admin/plans/bound-tenant-counts",
-      "scope": "scope:quota:read"
+      "scope": "scope:tenant:read"
     },
     {
       "operationId": "listPlanBindableTenants",
       "method": "GET",
       "path": "/admin/plans/{plan_id}/bindable-tenants",
-      "scope": "scope:quota:read"
+      "scope": "scope:tenant:read"
     },
     {
       "operationId": "listPlanBoundTenants",
       "method": "GET",
       "path": "/admin/plans/{plan_id}/bound-tenants",
-      "scope": "scope:quota:read"
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "listPlatformUsers",
+      "method": "GET",
+      "path": "/admin/platform-users",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "createPlatformUser",
+      "method": "POST",
+      "path": "/admin/platform-users",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "deletePlatformUser",
+      "method": "DELETE",
+      "path": "/admin/platform-users/{userId}",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "getPlatformUser",
+      "method": "GET",
+      "path": "/admin/platform-users/{userId}",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "disablePlatformUser",
+      "method": "POST",
+      "path": "/admin/platform-users/{userId}/disable",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "enablePlatformUser",
+      "method": "POST",
+      "path": "/admin/platform-users/{userId}/enable",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "resetPlatformUserPassword",
+      "method": "POST",
+      "path": "/admin/platform-users/{userId}/reset-password",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "updatePlatformUserRole",
+      "method": "PUT",
+      "path": "/admin/platform-users/{userId}/role",
+      "scope": "scope:users:write"
     },
     {
       "operationId": "listQuotaMeta",
@@ -29,16 +77,22 @@
       "scope": "scope:quota:read"
     },
     {
+      "operationId": "listTenantUsers",
+      "method": "GET",
+      "path": "/admin/tenant-users",
+      "scope": "scope:users:read"
+    },
+    {
       "operationId": "getTenant",
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}",
-      "scope": "scope:quota:read"
+      "scope": "scope:tenant:read"
     },
     {
       "operationId": "updateTenantPlan",
       "method": "PUT",
       "path": "/admin/tenants/{tenant_id}/plan",
-      "scope": "scope:quota:write"
+      "scope": "scope:tenant:write"
     },
     {
       "operationId": "deleteTenantQuota",
@@ -81,6 +135,60 @@
       "method": "PUT",
       "path": "/admin/tenants/{tenant_id}/reservations",
       "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "transferCoreTenantOwnership",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/transfer-ownership",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "lookupTenantUser",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/user-lookup",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "deleteTenantUser",
+      "method": "DELETE",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "getTenantUser",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "getTenantUserChangeableRoles",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/changeable-roles",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "resetTenantUserPassword",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/reset-password",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "getTenantUserRole",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/role",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "updateTenantUserRole",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/role",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "updateTenantUserStatus",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/status",
+      "scope": "scope:users:write"
     },
     {
       "operationId": "listAPIKeys",
@@ -911,6 +1019,12 @@
       "scope": "scope:objects:read"
     },
     {
+      "operationId": "completeStorageObject",
+      "method": "POST",
+      "path": "/objects/{object_id}/complete",
+      "scope": "scope:objects:create"
+    },
+    {
       "operationId": "downloadStorageObject",
       "method": "GET",
       "path": "/objects/{object_id}/download",
@@ -1298,6 +1412,8 @@
     "BucketObjectPresignedURLRequest",
     "BucketObjectUploadRequest",
     "BucketPrefixCreateRequest",
+    "ChangeableRoleOption",
+    "ChangeableRolesResponse",
     "CloneSandboxCheckpointRequest",
     "CompleteOIDCLoginRequest",
     "CoreDevProfileInfo",
@@ -1449,6 +1565,12 @@
     "PlanBoundTenantCount",
     "PlanBoundTenantCountList",
     "PlatformPasswordLoginRequest",
+    "PlatformUser",
+    "PlatformUserCreateRequest",
+    "PlatformUserIdempotentRequest",
+    "PlatformUserListResponse",
+    "PlatformUserResetPasswordRequest",
+    "PlatformUserRoleUpdateRequest",
     "PlatformWorkload",
     "PlatformWorkloadAcceleratorCapability",
     "PlatformWorkloadAcceleratorResources",
@@ -1548,6 +1670,7 @@
     "StorageFilesystemMountRequest",
     "StorageFilesystemUnmountRequest",
     "StorageObject",
+    "StorageObjectCompleteRequest",
     "StorageObjectDownloadInfo",
     "StorageObjectListResponse",
     "StorageObjectUploadRequest",
@@ -1565,11 +1688,20 @@
     "TenantPlanUpdateRequest",
     "TenantSummary",
     "TenantSummaryList",
+    "TenantUser",
+    "TenantUserListResponse",
+    "TenantUserPermissions",
     "TokenPairResponse",
     "TokenUsageReport",
     "UpdateEmailRecipientRequest",
     "UpdateNetworkSecurityGroupRuleRequest",
     "UpdateObservabilityAlertRuleRequest",
+    "UserMutationResult",
+    "UserResetPasswordRequest",
+    "UserRoleUpdateRequest",
+    "UserStatusUpdateRequest",
+    "UserTenantRef",
+    "UserTransferOwnershipRequest",
     "VectorStore",
     "VectorStoreDeletePrecheck",
     "VectorStoreDocumentDeleteResponse",
@@ -1591,6 +1723,15 @@
     "WriteSandboxFileRequest"
   ],
   "idempotencyOperations": [
+    "createPlatformUser",
+    "disablePlatformUser",
+    "enablePlatformUser",
+    "resetPlatformUserPassword",
+    "updatePlatformUserRole",
+    "transferCoreTenantOwnership",
+    "resetTenantUserPassword",
+    "updateTenantUserRole",
+    "updateTenantUserStatus",
     "createStorageBucket",
     "setStorageBucketACL",
     "createStorageBucketLifecycleRule",
@@ -1632,6 +1773,7 @@
     "createNetworkVPC",
     "createStorageObject",
     "uploadStorageObject",
+    "completeStorageObject",
     "createObservabilityAlertRule",
     "updateObservabilityAlertRule",
     "createPlatformWorkload",
@@ -1654,6 +1796,8 @@
     "unmountStorageVolume"
   ],
   "cursorPaginationOperations": [
+    "listPlatformUsers",
+    "listTenantUsers",
     "listStorageBuckets",
     "listBucketObjects",
     "listEncryptionKeys",
@@ -1703,8 +1847,12 @@
     "GPU_TYPE_NOT_IN_NODES",
     "INTERNAL_ERROR",
     "INVALID_FILTER",
+    "LAST_PLATFORM_ADMIN",
+    "LAST_TENANT_OWNER",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
+    "PASSWORD_SAME_AS_OLD",
+    "PLATFORM_USER_NOT_FOUND",
     "PRECONDITION_FAILED",
     "QUOTA_ALREADY_EXISTS",
     "QUOTA_EXCEEDED",
@@ -1714,10 +1862,15 @@
     "RATE_LIMIT_EXCEEDED",
     "RESERVATION_EXCEEDS_QUOTA",
     "RESERVED_INSUFFICIENT",
+    "ROLE_CHANGE_INVALID",
     "TENANT_NOT_FOUND",
+    "TENANT_OWNER_ROLE_LOCKED",
     "TENANT_PLAN_NOT_FOUND",
+    "TRANSFER_TARGET_INVALID",
     "UNAUTHORIZED",
     "UNAVAILABLE",
+    "USER_ALREADY_TENANT_ADMIN",
+    "USER_NOT_FOUND",
     "VALIDATION_FAILED",
     "VECTOR_STORE_NOT_FOUND"
   ]
