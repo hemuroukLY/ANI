@@ -283,20 +283,117 @@ func (s *PlatformAdminService) ResetPlatformAdminPassword(context.Context, *plat
 	return nil, unimplemented()
 }
 
-func (s *PlatformAdminService) DisablePlatformAdmin(context.Context, *platformsettingsv1.DisablePlatformAdminRequest) (*commonv1.IdempotentResult, error) {
-	return nil, unimplemented()
+func (s *PlatformAdminService) DisablePlatformAdmin(ctx context.Context, req *platformsettingsv1.DisablePlatformAdminRequest) (*commonv1.IdempotentResult, error) {
+	const action = "platform_admin.disable"
+	var userIDRaw string
+	if req != nil {
+		userIDRaw = req.GetUserId()
+	}
+	userID, err := parsePlatformAdminUserID(req == nil, userIDRaw, action, s.auditStore, ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.coreClient == nil {
+		mapped := businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core client not configured")
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, mapped)
+		return nil, mapped
+	}
+	// 步骤 1：调 Core SetStatus(disabled)；最后管理员保护在 Core 事务内
+	if err := s.coreClient.SetStatus(ctx, userID, "disabled"); err != nil {
+		mapped := mapDomainError(err)
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, mapped)
+		return nil, mapped
+	}
+	// 步骤 2：成功审计
+	writeAuditSuccess(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()})
+	return &commonv1.IdempotentResult{
+		Id:      userID.String(),
+		Message: "platform admin disabled",
+	}, nil
 }
 
-func (s *PlatformAdminService) EnablePlatformAdmin(context.Context, *platformsettingsv1.EnablePlatformAdminRequest) (*commonv1.IdempotentResult, error) {
-	return nil, unimplemented()
+func (s *PlatformAdminService) EnablePlatformAdmin(ctx context.Context, req *platformsettingsv1.EnablePlatformAdminRequest) (*commonv1.IdempotentResult, error) {
+	const action = "platform_admin.enable"
+	var userIDRaw string
+	if req != nil {
+		userIDRaw = req.GetUserId()
+	}
+	userID, err := parsePlatformAdminUserID(req == nil, userIDRaw, action, s.auditStore, ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.coreClient == nil {
+		mapped := businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core client not configured")
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, mapped)
+		return nil, mapped
+	}
+	// 步骤 1：调 Core SetStatus(active)；启用无最后管理员保护
+	if err := s.coreClient.SetStatus(ctx, userID, "active"); err != nil {
+		mapped := mapDomainError(err)
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, mapped)
+		return nil, mapped
+	}
+	// 步骤 2：成功审计
+	writeAuditSuccess(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()})
+	return &commonv1.IdempotentResult{
+		Id:      userID.String(),
+		Message: "platform admin enabled",
+	}, nil
 }
 
-func (s *PlatformAdminService) DeletePlatformAdmin(context.Context, *platformsettingsv1.DeletePlatformAdminRequest) (*commonv1.IdempotentResult, error) {
-	return nil, unimplemented()
+func (s *PlatformAdminService) DeletePlatformAdmin(ctx context.Context, req *platformsettingsv1.DeletePlatformAdminRequest) (*commonv1.IdempotentResult, error) {
+	const action = "platform_admin.delete"
+	var userIDRaw string
+	if req != nil {
+		userIDRaw = req.GetUserId()
+	}
+	userID, err := parsePlatformAdminUserID(req == nil, userIDRaw, action, s.auditStore, ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.coreClient == nil {
+		mapped := businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core client not configured")
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, mapped)
+		return nil, mapped
+	}
+	// 步骤 1：调 Core SoftDelete；最后管理员保护在 Core 事务内
+	if err := s.coreClient.SoftDelete(ctx, userID); err != nil {
+		mapped := mapDomainError(err)
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, mapped)
+		return nil, mapped
+	}
+	// 步骤 2：成功审计
+	writeAuditSuccess(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()})
+	return &commonv1.IdempotentResult{
+		Id:      userID.String(),
+		Message: "platform admin deleted",
+	}, nil
 }
 
 func (s *PlatformAdminService) ListPlatformAdminAuditLogs(context.Context, *platformsettingsv1.ListPlatformAdminAuditLogsRequest) (*platformsettingsv1.ListPlatformAdminAuditLogsResponse, error) {
 	return nil, unimplemented()
+}
+
+// parsePlatformAdminUserID 校验 path/body 中的 user_id；失败写审计并返回业务错误。
+func parsePlatformAdminUserID(reqNil bool, userIDRaw, action string, audit ports.PlatformAdminAuditStore, ctx context.Context) (uuid.UUID, error) {
+	if reqNil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, audit, action, nil, err)
+		return uuid.Nil, err
+	}
+	userIDRaw = strings.TrimSpace(userIDRaw)
+	if userIDRaw == "" {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "user_id required")
+		writeAuditFailure(ctx, audit, action, nil, err)
+		return uuid.Nil, err
+	}
+	userID, err := uuid.Parse(userIDRaw)
+	if err != nil {
+		mapped := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "user_id must be a uuid")
+		writeAuditFailure(ctx, audit, action, map[string]any{"target_id": userIDRaw}, mapped)
+		return uuid.Nil, mapped
+	}
+	return userID, nil
 }
 
 func toPlatformAdminListItem(it ports.PlatformUserDTO) *platformsettingsv1.PlatformAdminListItem {

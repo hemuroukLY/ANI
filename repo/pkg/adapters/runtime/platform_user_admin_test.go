@@ -205,13 +205,89 @@ func TestPostgresPlatformUserAdminStore_SetStatus_LastAdmin(t *testing.T) {
 	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	tx := &quotaFakeTx{}
 	tx.enqueueRows(
-		quotaFakeRow{values: []any{"platform-admin"}}, // current role
-		quotaFakeRow{values: []any{int64(0)}},         // other active admins
+		quotaFakeRow{values: []any{"active", "platform-admin"}}, // current status+role
+		quotaFakeRow{values: []any{int64(0)}},                   // other active admins
 	)
 	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
 	err := store.SetStatus(context.Background(), userID, "disabled")
 	if !errors.Is(err, ports.ErrLastPlatformAdmin) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_SetStatus_AlreadyDisabled(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{"disabled", "platform-ops"}})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	err := store.SetStatus(context.Background(), userID, "disabled")
+	if !errors.Is(err, ports.ErrStatusUnchanged) {
+		t.Fatalf("err=%v", err)
+	}
+	if hasExec(tx, "UPDATE users") {
+		t.Fatalf("unchanged status must not update: %v", tx.execSQLs)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_SetStatus_AlreadyActive(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{"active", "platform-ops"}})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	err := store.SetStatus(context.Background(), userID, "active")
+	if !errors.Is(err, ports.ErrStatusUnchanged) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_SetStatus_DisableSuccess(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{"active", "platform-ops"}})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	if err := store.SetStatus(context.Background(), userID, "disabled"); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+	if !hasExec(tx, "UPDATE users") {
+		t.Fatalf("want UPDATE users, exec=%v", tx.execSQLs)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_SoftDelete_LastAdmin(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{"active", "platform-admin"}}, // current status+role
+		quotaFakeRow{values: []any{int64(0)}},                   // other active admins
+	)
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	err := store.SoftDelete(context.Background(), userID)
+	if !errors.Is(err, ports.ErrLastPlatformAdmin) {
+		t.Fatalf("err=%v", err)
+	}
+	if hasExec(tx, "UPDATE users") {
+		t.Fatalf("last-admin must not soft-delete: %v", tx.execSQLs)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_SoftDelete_Success(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{"active", "platform-admin"}}, // current status+role
+		quotaFakeRow{values: []any{int64(1)}},                   // other active admins
+	)
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	if err := store.SoftDelete(context.Background(), userID); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+	if !hasExec(tx, "is_deleted = TRUE") {
+		t.Fatalf("want soft-delete UPDATE, exec=%v", tx.execSQLs)
 	}
 }
 
@@ -381,7 +457,7 @@ func TestPostgresPlatformUserAdminStore_ChangeRole_UpdateExisting(t *testing.T) 
 		quotaFakeRow{values: []any{true}},           // ensurePlatformUserExists
 		quotaFakeRow{values: []any{"platform-ops"}}, // lookup new role name
 		quotaFakeRow{values: []any{true}},           // binding exists
-		quotaFakeRow{values: []any{"platform-ops"}}, // current role（同角色升级路径不触发 last-admin）
+		quotaFakeRow{values: []any{"active", "platform-ops"}}, // current status+role（同角色升级路径不触发 last-admin）
 	)
 	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
 	if err := store.ChangeRole(context.Background(), userID, roleID); err != nil {
@@ -426,8 +502,8 @@ func TestPostgresPlatformUserAdminStore_ChangeRole_LastPlatformAdmin(t *testing.
 		quotaFakeRow{values: []any{true}},              // ensurePlatformUserExists
 		quotaFakeRow{values: []any{"platform-ops"}},    // lookup new role
 		quotaFakeRow{values: []any{true}},              // binding exists
-		quotaFakeRow{values: []any{"platform-admin"}},  // current role
-		quotaFakeRow{values: []any{int64(0)}},          // other active admins
+		quotaFakeRow{values: []any{"active", "platform-admin"}}, // current status+role
+		quotaFakeRow{values: []any{int64(0)}},                   // other active admins
 	)
 	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
 	err := store.ChangeRole(context.Background(), userID, roleID)
@@ -445,11 +521,11 @@ func TestPostgresPlatformUserAdminStore_ChangeRole_DemoteWhenOtherAdminsExist(t 
 	roleID := uuid.MustParse("00000000-0000-0000-0000-000000000007")
 	tx := &quotaFakeTx{}
 	tx.enqueueRows(
-		quotaFakeRow{values: []any{true}},              // ensurePlatformUserExists
-		quotaFakeRow{values: []any{"platform-ops"}},    // lookup new role
-		quotaFakeRow{values: []any{true}},              // binding exists
-		quotaFakeRow{values: []any{"platform-admin"}},  // current role
-		quotaFakeRow{values: []any{int64(1)}},          // other active admins
+		quotaFakeRow{values: []any{true}},                       // ensurePlatformUserExists
+		quotaFakeRow{values: []any{"platform-ops"}},             // lookup new role
+		quotaFakeRow{values: []any{true}},                       // binding exists
+		quotaFakeRow{values: []any{"active", "platform-admin"}}, // current status+role
+		quotaFakeRow{values: []any{int64(1)}},                   // other active admins
 	)
 	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
 	if err := store.ChangeRole(context.Background(), userID, roleID); err != nil {

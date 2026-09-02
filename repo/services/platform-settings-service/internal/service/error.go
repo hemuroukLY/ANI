@@ -31,6 +31,8 @@ func mapDomainError(err error) error {
 		return businessError(codes.FailedPrecondition, ports.ErrLastPlatformAdmin, detail)
 	case errors.Is(err, ports.ErrPasswordSameAsOld):
 		return businessError(codes.FailedPrecondition, ports.ErrPasswordSameAsOld, detail)
+	case errors.Is(err, ports.ErrStatusUnchanged):
+		return businessError(codes.FailedPrecondition, ports.ErrStatusUnchanged, detail)
 	case errors.Is(err, ports.ErrRoleChangeInvalid):
 		return businessError(codes.FailedPrecondition, ports.ErrRoleChangeInvalid, detail)
 	case errors.Is(err, ports.ErrValidationFailed):

@@ -39,6 +39,7 @@ var (
 	ErrRoleNotFound          = errors.New("role not found")
 	ErrUsernameAlreadyExists = errors.New("username already exists")
 	ErrLastPlatformAdmin     = errors.New("last platform admin")
+	ErrStatusUnchanged       = errors.New("status unchanged")
 	ErrValidationFailed      = errors.New("validation failed")
 
 	// Metadata transaction sentinel errors.

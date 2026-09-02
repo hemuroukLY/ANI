@@ -33,9 +33,16 @@ type fakeCoreClient struct {
 	permsRes ports.PlatformUserPermissionsDTO
 	permsErr error
 
-	changeRoleID    uuid.UUID
-	changeRoleVal   uuid.UUID
-	changeRoleErr   error
+	changeRoleID  uuid.UUID
+	changeRoleVal uuid.UUID
+	changeRoleErr error
+
+	setStatusID  uuid.UUID
+	setStatusVal string
+	setStatusErr error
+
+	softDeleteID  uuid.UUID
+	softDeleteErr error
 }
 
 func (f *fakeCoreClient) Create(_ context.Context, in ports.PlatformUserCreateInput) (string, error) {
@@ -73,10 +80,21 @@ func (f *fakeCoreClient) ChangeRole(_ context.Context, id uuid.UUID, roleID uuid
 func (f *fakeCoreClient) ResetPassword(context.Context, uuid.UUID, string) error {
 	return ports.ErrNotImplemented
 }
-func (f *fakeCoreClient) SetStatus(context.Context, uuid.UUID, string) error {
-	return ports.ErrNotImplemented
+func (f *fakeCoreClient) SetStatus(_ context.Context, id uuid.UUID, status string) error {
+	f.setStatusID = id
+	f.setStatusVal = status
+	if f.setStatusErr != nil {
+		return f.setStatusErr
+	}
+	return nil
 }
-func (f *fakeCoreClient) SoftDelete(context.Context, uuid.UUID) error { return ports.ErrNotImplemented }
+func (f *fakeCoreClient) SoftDelete(_ context.Context, id uuid.UUID) error {
+	f.softDeleteID = id
+	if f.softDeleteErr != nil {
+		return f.softDeleteErr
+	}
+	return nil
+}
 func (f *fakeCoreClient) ListPlatformRoles(context.Context) ([]ports.PlatformRoleDTO, error) {
 	if f.rolesErr != nil {
 		return nil, f.rolesErr
@@ -415,6 +433,7 @@ func TestMapDomainError_Table(t *testing.T) {
 		{ports.ErrUsernameAlreadyExists, codes.AlreadyExists, "USERNAME_ALREADY_EXISTS"},
 		{ports.ErrLastPlatformAdmin, codes.FailedPrecondition, "LAST_PLATFORM_ADMIN"},
 		{ports.ErrPasswordSameAsOld, codes.FailedPrecondition, "PASSWORD_SAME_AS_OLD"},
+		{ports.ErrStatusUnchanged, codes.FailedPrecondition, "STATUS_UNCHANGED"},
 		{ports.ErrRoleChangeInvalid, codes.FailedPrecondition, "ROLE_CHANGE_INVALID"},
 		{ports.ErrValidationFailed, codes.InvalidArgument, "VALIDATION_FAILED"},
 		{ports.ErrCoreUnavailable, codes.Unavailable, "CORE_UNAVAILABLE"},
@@ -436,9 +455,6 @@ func TestUnimplementedRPCs(t *testing.T) {
 	svc := NewPlatformAdminService(&fakeCoreClient{}, fakeAuditStore{})
 	checks := []error{
 		func() error { _, err := svc.ResetPlatformAdminPassword(context.Background(), nil); return err }(),
-		func() error { _, err := svc.DisablePlatformAdmin(context.Background(), nil); return err }(),
-		func() error { _, err := svc.EnablePlatformAdmin(context.Background(), nil); return err }(),
-		func() error { _, err := svc.DeletePlatformAdmin(context.Background(), nil); return err }(),
 		func() error { _, err := svc.ListPlatformAdminAuditLogs(context.Background(), nil); return err }(),
 	}
 	for i, err := range checks {
@@ -595,5 +611,90 @@ func TestValidatePasswordComplexity(t *testing.T) {
 	}
 	if validatePasswordComplexity("Ab1!") == "" {
 		t.Fatal("expected fail: too short")
+	}
+}
+
+func TestPlatformAdminService_Disable_Success(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	audit := &recordingAuditStore{}
+	core := &fakeCoreClient{}
+	svc := NewPlatformAdminService(core, audit)
+	res, err := svc.DisablePlatformAdmin(context.Background(), &platformsettingsv1.DisablePlatformAdminRequest{
+		UserId: id, IdempotencyKey: "44444444-4444-4444-4444-444444444444",
+	})
+	if err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	if res.GetId() != id || core.setStatusID.String() != id || core.setStatusVal != "disabled" {
+		t.Fatalf("res=%+v setStatus=%s/%s", res, core.setStatusID, core.setStatusVal)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Action != "platform_admin.disable" || audit.logs[0].Result != "success" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+	if audit.logs[0].Details["target_id"] != id {
+		t.Fatalf("details=%v", audit.logs[0].Details)
+	}
+}
+
+func TestPlatformAdminService_Disable_LastAdmin(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	audit := &recordingAuditStore{}
+	svc := NewPlatformAdminService(&fakeCoreClient{setStatusErr: ports.ErrLastPlatformAdmin}, audit)
+	_, err := svc.DisablePlatformAdmin(context.Background(), &platformsettingsv1.DisablePlatformAdminRequest{UserId: id})
+	st := status.Convert(err)
+	if st.Code() != codes.FailedPrecondition || !strings.HasPrefix(st.Message(), "LAST_PLATFORM_ADMIN") {
+		t.Fatalf("err=%v", err)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Action != "platform_admin.disable" || audit.logs[0].Result != "failed" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+}
+
+func TestPlatformAdminService_Enable_Success(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	audit := &recordingAuditStore{}
+	core := &fakeCoreClient{}
+	svc := NewPlatformAdminService(core, audit)
+	res, err := svc.EnablePlatformAdmin(context.Background(), &platformsettingsv1.EnablePlatformAdminRequest{UserId: id})
+	if err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	if res.GetId() != id || core.setStatusVal != "active" {
+		t.Fatalf("res=%+v status=%s", res, core.setStatusVal)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Action != "platform_admin.enable" || audit.logs[0].Result != "success" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+}
+
+func TestPlatformAdminService_Delete_Success(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	audit := &recordingAuditStore{}
+	core := &fakeCoreClient{}
+	svc := NewPlatformAdminService(core, audit)
+	res, err := svc.DeletePlatformAdmin(context.Background(), &platformsettingsv1.DeletePlatformAdminRequest{UserId: id})
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if res.GetId() != id || core.softDeleteID.String() != id {
+		t.Fatalf("res=%+v softDelete=%s", res, core.softDeleteID)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Action != "platform_admin.delete" || audit.logs[0].Result != "success" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+}
+
+func TestPlatformAdminService_Delete_LastAdmin(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	svc := NewPlatformAdminService(&fakeCoreClient{softDeleteErr: ports.ErrLastPlatformAdmin}, &recordingAuditStore{})
+	_, err := svc.DeletePlatformAdmin(context.Background(), &platformsettingsv1.DeletePlatformAdminRequest{UserId: id})
+	st := status.Convert(err)
+	if st.Code() != codes.FailedPrecondition || !strings.HasPrefix(st.Message(), "LAST_PLATFORM_ADMIN") {
+		t.Fatalf("err=%v", err)
 	}
 }

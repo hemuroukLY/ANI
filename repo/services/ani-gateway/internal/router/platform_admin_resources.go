@@ -445,6 +445,7 @@ var platformAdminBusinessCodeByHTTP = map[string]int{
 	"USERNAME_ALREADY_EXISTS": http.StatusConflict,
 	"LAST_PLATFORM_ADMIN":     http.StatusUnprocessableEntity,
 	"PASSWORD_SAME_AS_OLD":    http.StatusUnprocessableEntity,
+	"STATUS_UNCHANGED":        http.StatusUnprocessableEntity,
 	"ROLE_CHANGE_INVALID":     http.StatusUnprocessableEntity,
 	"CORE_UNAVAILABLE":        http.StatusBadGateway,
 	"NOT_IMPLEMENTED":         http.StatusNotImplemented,

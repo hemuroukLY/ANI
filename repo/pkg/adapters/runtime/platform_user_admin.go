@@ -362,7 +362,7 @@ func (s *PostgresPlatformUserAdminStore) ResetPassword(ctx context.Context, user
 	})
 }
 
-// SetStatus 更新 users.status（active/disabled），禁用含最后管理员保护。
+// SetStatus 更新 users.status（active/disabled）；同状态拒绝；禁用含最后管理员保护。
 func (s *PostgresPlatformUserAdminStore) SetStatus(ctx context.Context, userID uuid.UUID, status string) error {
 	// 步骤 1：校验 status 枚举
 	status = strings.TrimSpace(status)
@@ -370,11 +370,16 @@ func (s *PostgresPlatformUserAdminStore) SetStatus(ctx context.Context, userID u
 		return fmt.Errorf("%w: status must be active or disabled", ports.ErrValidationFailed)
 	}
 	return s.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
-		// 步骤 2：读当前角色；禁用最后一个 platform-admin 则拒绝
-		role, err := platformUserRole(ctx, tx, userID)
+		// 步骤 2：读当前 status + 平台角色；不存在 → NOT_FOUND
+		currentStatus, role, err := platformUserStatusAndRole(ctx, tx, userID)
 		if err != nil {
 			return err
 		}
+		// 步骤 3：禁止重复启用 / 停用
+		if currentStatus == status {
+			return fmt.Errorf("%w: already %s", ports.ErrStatusUnchanged, status)
+		}
+		// 步骤 4：禁用最后一个 platform-admin 则拒绝
 		if status == "disabled" && role == "platform-admin" {
 			n, countErr := countActivePlatformAdminsTx(ctx, tx, userID)
 			if countErr != nil {
@@ -384,7 +389,7 @@ func (s *PostgresPlatformUserAdminStore) SetStatus(ctx context.Context, userID u
 				return ports.ErrLastPlatformAdmin
 			}
 		}
-		// 步骤 3：更新 status
+		// 步骤 5：更新 status
 		tag, err := tx.Exec(ctx, `
 			UPDATE users SET status = $2, updated_at = now()
 			WHERE id = $1 AND tenant_id IS NULL AND is_deleted = FALSE
@@ -606,23 +611,27 @@ func ensurePlatformUserExists(ctx context.Context, tx ports.MetadataTx, userID u
 }
 
 func platformUserRole(ctx context.Context, tx ports.MetadataTx, userID uuid.UUID) (string, error) {
-	var role string
-	err := tx.QueryRow(ctx, `
-		SELECT r.name
+	_, role, err := platformUserStatusAndRole(ctx, tx, userID)
+	return role, err
+}
+
+func platformUserStatusAndRole(ctx context.Context, tx ports.MetadataTx, userID uuid.UUID) (status, role string, err error) {
+	qErr := tx.QueryRow(ctx, `
+		SELECT u.status, r.name
 		FROM users u
 		JOIN user_roles ur ON ur.user_id = u.id
 		JOIN roles r ON r.id = ur.role_id
 		  AND r.tenant_id IS NULL
 		  AND r.name LIKE 'platform-%'
 		WHERE u.id = $1 AND u.tenant_id IS NULL AND u.is_deleted = FALSE
-	`, userID).Scan(&role)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ports.ErrPlatformUserNotFound
+	`, userID).Scan(&status, &role)
+	if errors.Is(qErr, pgx.ErrNoRows) {
+		return "", "", ports.ErrPlatformUserNotFound
 	}
-	if err != nil {
-		return "", fmt.Errorf("load platform user role: %w", err)
+	if qErr != nil {
+		return "", "", fmt.Errorf("load platform user status/role: %w", qErr)
 	}
-	return role, nil
+	return status, role, nil
 }
 
 func countActivePlatformAdminsTx(ctx context.Context, tx ports.MetadataTx, excludeUserID uuid.UUID) (int, error) {

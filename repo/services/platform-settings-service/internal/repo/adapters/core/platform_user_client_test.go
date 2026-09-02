@@ -96,6 +96,7 @@ func TestMapSDKError_BusinessCodes(t *testing.T) {
 		{"USERNAME_ALREADY_EXISTS", ports.ErrUsernameAlreadyExists},
 		{"LAST_PLATFORM_ADMIN", ports.ErrLastPlatformAdmin},
 		{"PASSWORD_SAME_AS_OLD", ports.ErrPasswordSameAsOld},
+		{"STATUS_UNCHANGED", ports.ErrStatusUnchanged},
 		{"ROLE_CHANGE_INVALID", ports.ErrRoleChangeInvalid},
 		{"VALIDATION_FAILED", ports.ErrValidationFailed},
 		{"NOT_FOUND", ports.ErrCoreUnavailable},
@@ -221,5 +222,76 @@ func TestCorePlatformUserClient_GetPlatformUserPermissions_NotFound(t *testing.T
 	_, err := client.GetPlatformUserPermissions(context.Background(), uuid.MustParse("44444444-4444-4444-4444-444444444444"))
 	if err == nil || !errors.Is(err, ports.ErrPlatformUserNotFound) {
 		t.Fatalf("expected ErrPlatformUserNotFound, got %v", err)
+	}
+}
+
+func TestCorePlatformUserClient_SetStatus_DisableEnable(t *testing.T) {
+	t.Parallel()
+	id := "55555555-5555-5555-5555-555555555555"
+	var sawDisable, sawEnable bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/admin/platform-users/"+id+"/disable":
+			sawDisable = true
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "message": "disabled"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/admin/platform-users/"+id+"/enable":
+			sawEnable = true
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "message": "enabled"})
+		default:
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	client := &CorePlatformUserClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	uid := uuid.MustParse(id)
+	if err := client.SetStatus(context.Background(), uid, "disabled"); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if err := client.SetStatus(context.Background(), uid, "active"); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if !sawDisable || !sawEnable {
+		t.Fatalf("disable=%v enable=%v", sawDisable, sawEnable)
+	}
+}
+
+func TestCorePlatformUserClient_SoftDelete(t *testing.T) {
+	t.Parallel()
+	id := "66666666-6666-6666-6666-666666666666"
+	var sawDelete bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/api/v1/admin/platform-users/"+id {
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+		sawDelete = true
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "message": "deleted"})
+	}))
+	defer srv.Close()
+
+	client := &CorePlatformUserClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	if err := client.SoftDelete(context.Background(), uuid.MustParse(id)); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+	if !sawDelete {
+		t.Fatal("delete not called")
+	}
+}
+
+func TestCorePlatformUserClient_SetStatus_LastAdmin(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": "LAST_PLATFORM_ADMIN", "message": "last admin"})
+	}))
+	defer srv.Close()
+
+	client := &CorePlatformUserClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	err := client.SetStatus(context.Background(), uuid.MustParse("55555555-5555-5555-5555-555555555555"), "disabled")
+	if err == nil || !errors.Is(err, ports.ErrLastPlatformAdmin) {
+		t.Fatalf("expected ErrLastPlatformAdmin, got %v", err)
 	}
 }

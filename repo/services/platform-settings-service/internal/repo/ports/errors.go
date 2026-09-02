@@ -24,6 +24,9 @@ var (
 	// ErrPasswordSameAsOld 表示新密码与旧密码相同（HTTP 422）。
 	ErrPasswordSameAsOld = errors.New("PASSWORD_SAME_AS_OLD")
 
+	// ErrStatusUnchanged 表示目标状态与当前相同，不可重复启用/停用（HTTP 422）。
+	ErrStatusUnchanged = errors.New("STATUS_UNCHANGED")
+
 	// ErrRoleChangeInvalid 表示目标角色非法（HTTP 422）。
 	ErrRoleChangeInvalid = errors.New("ROLE_CHANGE_INVALID")
 

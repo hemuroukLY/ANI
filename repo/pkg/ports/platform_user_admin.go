@@ -48,6 +48,7 @@ type PlatformUserAdminStore interface {
 	ResetPassword(ctx context.Context, userID uuid.UUID, newPassword string) error
 
 	// SetStatus updates users.status (active/disabled) with last-admin protection.
+	// Same status as current → ErrStatusUnchanged.
 	// Disabling the last active platform-admin → ErrLastPlatformAdmin.
 	SetStatus(ctx context.Context, userID uuid.UUID, status string) error
 

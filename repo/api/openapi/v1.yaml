@@ -4387,6 +4387,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    StatusUnchanged:
+      description: 目标状态与当前状态相同，不可重复启用/停用（code=STATUS_UNCHANGED）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
     QuotaNotFound:
       description: 配额行不存在（code=QUOTA_NOT_FOUND）
       content:
@@ -9517,7 +9522,7 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/PlatformUserNotFound' }
         "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
-        "422": { $ref: '#/components/responses/LastPlatformAdmin' }
+        "422": { $ref: '#/components/responses/LastPlatformAdmin', description: "LAST_PLATFORM_ADMIN / STATUS_UNCHANGED" }
 
   /admin/platform-users/{userId}/enable:
     post:
@@ -9542,6 +9547,7 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/PlatformUserNotFound' }
         "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/StatusUnchanged', description: "STATUS_UNCHANGED" }
 
   # ===== Tenant Users (平台级租户用户/角色，供 Services UserSvcClient 调用) =====
 

@@ -3605,7 +3605,7 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
         "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
         "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
-        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "LAST_PLATFORM_ADMIN" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "LAST_PLATFORM_ADMIN / STATUS_UNCHANGED" }
 
   /platform-admins/{userId}/enable:
     post:
@@ -3629,6 +3629,7 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
         "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
         "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "STATUS_UNCHANGED" }
 
   /platform-admins/{userId}/audit-logs:
     get:

@@ -26,11 +26,19 @@ type fakePlatformAdminClient struct {
 	lastPermID string
 	lastUpdate *platformsettingsv1.UpdatePlatformAdminRoleRequest
 	lastCreate *platformsettingsv1.CreatePlatformAdminRequest
+	lastDisable *platformsettingsv1.DisablePlatformAdminRequest
+	lastEnable  *platformsettingsv1.EnablePlatformAdminRequest
+	lastDelete  *platformsettingsv1.DeletePlatformAdminRequest
 	listResp   *platformsettingsv1.ListPlatformAdminsResponse
 	rolesResp  *platformsettingsv1.ListPlatformAdminRolesResponse
 	getResp    *platformsettingsv1.PlatformAdminDetail
 	permsResp  *platformsettingsv1.PlatformAdminPermissions
 	err        error
+
+	// stateful flow helpers（DisableEnableFlow / DeleteFlow / LastAdminProtection）
+	status       string
+	deleted      bool
+	lastAdminErr bool
 }
 
 func (f *fakePlatformAdminClient) CreatePlatformAdmin(_ context.Context, in *platformsettingsv1.CreatePlatformAdminRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
@@ -61,10 +69,21 @@ func (f *fakePlatformAdminClient) GetPlatformAdmin(_ context.Context, in *platfo
 	if f.err != nil {
 		return nil, f.err
 	}
-	if f.getResp != nil {
-		return f.getResp, nil
+	if f.deleted {
+		return nil, status.Error(codes.NotFound, "PLATFORM_USER_NOT_FOUND")
 	}
-	return &platformsettingsv1.PlatformAdminDetail{Id: in.GetUserId(), Username: "local:ops"}, nil
+	if f.getResp != nil {
+		out := *f.getResp
+		if f.status != "" {
+			out.Status = f.status
+		}
+		return &out, nil
+	}
+	st := f.status
+	if st == "" {
+		st = "active"
+	}
+	return &platformsettingsv1.PlatformAdminDetail{Id: in.GetUserId(), Username: "ops", Status: st}, nil
 }
 func (f *fakePlatformAdminClient) GetPlatformAdminPermissions(_ context.Context, in *platformsettingsv1.GetPlatformAdminPermissionsRequest, _ ...grpc.CallOption) (*platformsettingsv1.PlatformAdminPermissions, error) {
 	f.lastPermID = in.GetUserId()
@@ -83,14 +102,35 @@ func (f *fakePlatformAdminClient) UpdatePlatformAdminRole(_ context.Context, in 
 func (f *fakePlatformAdminClient) ResetPlatformAdminPassword(context.Context, *platformsettingsv1.ResetPlatformAdminPasswordRequest, ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
 	return f.errOrOK()
 }
-func (f *fakePlatformAdminClient) DisablePlatformAdmin(context.Context, *platformsettingsv1.DisablePlatformAdminRequest, ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
-	return f.errOrOK()
+func (f *fakePlatformAdminClient) DisablePlatformAdmin(_ context.Context, in *platformsettingsv1.DisablePlatformAdminRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
+	f.lastDisable = in
+	if f.lastAdminErr {
+		return nil, status.Error(codes.FailedPrecondition, "LAST_PLATFORM_ADMIN")
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.status = "disabled"
+	return &commonv1.IdempotentResult{Id: in.GetUserId(), Message: "platform admin disabled"}, nil
 }
-func (f *fakePlatformAdminClient) EnablePlatformAdmin(context.Context, *platformsettingsv1.EnablePlatformAdminRequest, ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
-	return f.errOrOK()
+func (f *fakePlatformAdminClient) EnablePlatformAdmin(_ context.Context, in *platformsettingsv1.EnablePlatformAdminRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
+	f.lastEnable = in
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.status = "active"
+	return &commonv1.IdempotentResult{Id: in.GetUserId(), Message: "platform admin enabled"}, nil
 }
-func (f *fakePlatformAdminClient) DeletePlatformAdmin(context.Context, *platformsettingsv1.DeletePlatformAdminRequest, ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
-	return f.errOrOK()
+func (f *fakePlatformAdminClient) DeletePlatformAdmin(_ context.Context, in *platformsettingsv1.DeletePlatformAdminRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
+	f.lastDelete = in
+	if f.lastAdminErr {
+		return nil, status.Error(codes.FailedPrecondition, "LAST_PLATFORM_ADMIN")
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.deleted = true
+	return &commonv1.IdempotentResult{Id: in.GetUserId(), Message: "platform admin deleted"}, nil
 }
 func (f *fakePlatformAdminClient) ListPlatformAdminAuditLogs(context.Context, *platformsettingsv1.ListPlatformAdminAuditLogsRequest, ...grpc.CallOption) (*platformsettingsv1.ListPlatformAdminAuditLogsResponse, error) {
 	if f.err != nil {
@@ -411,5 +451,98 @@ func TestPlatformAdmins_UnimplementedMaps501(t *testing.T) {
 		`{"email":"a@x.com","username":"ops","display_name":"Ops","role_id":"00000000-0000-0000-0000-000000000006","password":"Abcd1234!","idempotency_key":"44444444-4444-4444-4444-444444444444"}`)
 	if resp.StatusCode() != http.StatusNotImplemented {
 		t.Fatalf("status=%d body=%s", resp.StatusCode(), resp.Body())
+	}
+}
+
+func TestHandler_DisableEnableFlow(t *testing.T) {
+	const id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	fake := &fakePlatformAdminClient{
+		status: "active",
+		getResp: &platformsettingsv1.PlatformAdminDetail{
+			Id: id, Username: "ops", Role: "platform-ops", Status: "active", Source: "local",
+		},
+	}
+	h := setupPlatformAdminTestServer(t, fake)
+	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444"}`
+
+	disable := performPlatformAdmin(h, http.MethodPost, "/api/v1/svc/platform-admins/"+id+"/disable", body)
+	if disable.StatusCode() != http.StatusOK {
+		t.Fatalf("disable status=%d body=%s", disable.StatusCode(), disable.Body())
+	}
+	if fake.lastDisable == nil || fake.lastDisable.GetUserId() != id || fake.lastDisable.GetIdempotencyKey() == "" {
+		t.Fatalf("lastDisable=%+v", fake.lastDisable)
+	}
+
+	detailDisabled := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins/"+id, "")
+	if detailDisabled.StatusCode() != http.StatusOK {
+		t.Fatalf("get after disable status=%d", detailDisabled.StatusCode())
+	}
+	var afterDisable map[string]any
+	_ = json.Unmarshal(detailDisabled.Body(), &afterDisable)
+	if afterDisable["status"] != "disabled" {
+		t.Fatalf("want disabled got %v", afterDisable)
+	}
+
+	enable := performPlatformAdmin(h, http.MethodPost, "/api/v1/svc/platform-admins/"+id+"/enable", body)
+	if enable.StatusCode() != http.StatusOK {
+		t.Fatalf("enable status=%d body=%s", enable.StatusCode(), enable.Body())
+	}
+	if fake.lastEnable == nil || fake.lastEnable.GetUserId() != id {
+		t.Fatalf("lastEnable=%+v", fake.lastEnable)
+	}
+
+	detailEnabled := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins/"+id, "")
+	var afterEnable map[string]any
+	_ = json.Unmarshal(detailEnabled.Body(), &afterEnable)
+	if afterEnable["status"] != "active" {
+		t.Fatalf("want active got %v", afterEnable)
+	}
+}
+
+func TestHandler_DeleteFlow(t *testing.T) {
+	const id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	fake := &fakePlatformAdminClient{
+		getResp: &platformsettingsv1.PlatformAdminDetail{Id: id, Username: "ops", Status: "active"},
+	}
+	h := setupPlatformAdminTestServer(t, fake)
+	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444"}`
+
+	del := performPlatformAdmin(h, http.MethodDelete, "/api/v1/svc/platform-admins/"+id, body)
+	if del.StatusCode() != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", del.StatusCode(), del.Body())
+	}
+	if fake.lastDelete == nil || fake.lastDelete.GetUserId() != id {
+		t.Fatalf("lastDelete=%+v", fake.lastDelete)
+	}
+
+	detail := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins/"+id, "")
+	if detail.StatusCode() != http.StatusNotFound {
+		t.Fatalf("get after delete status=%d body=%s", detail.StatusCode(), detail.Body())
+	}
+	if !strings.Contains(string(detail.Body()), "PLATFORM_USER_NOT_FOUND") {
+		t.Fatalf("body=%s", detail.Body())
+	}
+}
+
+func TestHandler_LastAdminProtection(t *testing.T) {
+	const id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	fake := &fakePlatformAdminClient{lastAdminErr: true}
+	h := setupPlatformAdminTestServer(t, fake)
+	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444"}`
+
+	disable := performPlatformAdmin(h, http.MethodPost, "/api/v1/svc/platform-admins/"+id+"/disable", body)
+	if disable.StatusCode() != http.StatusUnprocessableEntity {
+		t.Fatalf("disable status=%d body=%s", disable.StatusCode(), disable.Body())
+	}
+	if !strings.Contains(string(disable.Body()), "LAST_PLATFORM_ADMIN") {
+		t.Fatalf("disable body=%s", disable.Body())
+	}
+
+	del := performPlatformAdmin(h, http.MethodDelete, "/api/v1/svc/platform-admins/"+id, body)
+	if del.StatusCode() != http.StatusUnprocessableEntity {
+		t.Fatalf("delete status=%d body=%s", del.StatusCode(), del.Body())
+	}
+	if !strings.Contains(string(del.Body()), "LAST_PLATFORM_ADMIN") {
+		t.Fatalf("delete body=%s", del.Body())
 	}
 }

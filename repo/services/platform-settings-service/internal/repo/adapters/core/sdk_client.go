@@ -50,6 +50,8 @@ func mapSDKError(err error) error {
 			return fmt.Errorf("%w: %s", ports.ErrLastPlatformAdmin, detail)
 		case ports.ErrPasswordSameAsOld.Error():
 			return fmt.Errorf("%w: %s", ports.ErrPasswordSameAsOld, detail)
+		case ports.ErrStatusUnchanged.Error():
+			return fmt.Errorf("%w: %s", ports.ErrStatusUnchanged, detail)
 		case ports.ErrRoleChangeInvalid.Error():
 			return fmt.Errorf("%w: %s", ports.ErrRoleChangeInvalid, detail)
 		case ports.ErrValidationFailed.Error():

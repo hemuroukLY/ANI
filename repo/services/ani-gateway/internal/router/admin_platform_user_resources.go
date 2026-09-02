@@ -428,6 +428,8 @@ func writeAdminPlatformUserError(c *app.RequestContext, err error) {
 		writeDemoError(c, http.StatusUnprocessableEntity, "LAST_PLATFORM_ADMIN", err.Error())
 	case errors.Is(err, ports.ErrPasswordSameAsOld):
 		writeDemoError(c, http.StatusUnprocessableEntity, "PASSWORD_SAME_AS_OLD", err.Error())
+	case errors.Is(err, ports.ErrStatusUnchanged):
+		writeDemoError(c, http.StatusUnprocessableEntity, "STATUS_UNCHANGED", err.Error())
 	case errors.Is(err, ports.ErrRoleChangeInvalid):
 		writeDemoError(c, http.StatusUnprocessableEntity, "ROLE_CHANGE_INVALID", err.Error())
 	default:
