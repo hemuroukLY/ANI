@@ -29,16 +29,18 @@ type fakePlatformAdminClient struct {
 	lastDisable *platformsettingsv1.DisablePlatformAdminRequest
 	lastEnable  *platformsettingsv1.EnablePlatformAdminRequest
 	lastDelete  *platformsettingsv1.DeletePlatformAdminRequest
+	lastReset   *platformsettingsv1.ResetPlatformAdminPasswordRequest
 	listResp   *platformsettingsv1.ListPlatformAdminsResponse
 	rolesResp  *platformsettingsv1.ListPlatformAdminRolesResponse
 	getResp    *platformsettingsv1.PlatformAdminDetail
 	permsResp  *platformsettingsv1.PlatformAdminPermissions
 	err        error
 
-	// stateful flow helpers（DisableEnableFlow / DeleteFlow / LastAdminProtection）
-	status       string
-	deleted      bool
-	lastAdminErr bool
+	// stateful flow helpers（DisableEnableFlow / DeleteFlow / LastAdminProtection / ResetPasswordFlow）
+	status          string
+	deleted         bool
+	lastAdminErr    bool
+	currentPassword string
 }
 
 func (f *fakePlatformAdminClient) CreatePlatformAdmin(_ context.Context, in *platformsettingsv1.CreatePlatformAdminRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
@@ -99,8 +101,17 @@ func (f *fakePlatformAdminClient) UpdatePlatformAdminRole(_ context.Context, in 
 	f.lastUpdate = in
 	return f.errOrOK()
 }
-func (f *fakePlatformAdminClient) ResetPlatformAdminPassword(context.Context, *platformsettingsv1.ResetPlatformAdminPasswordRequest, ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
-	return f.errOrOK()
+func (f *fakePlatformAdminClient) ResetPlatformAdminPassword(_ context.Context, in *platformsettingsv1.ResetPlatformAdminPasswordRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
+	f.lastReset = in
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.currentPassword = in.GetNewPassword()
+	return &commonv1.IdempotentResult{Id: in.GetUserId(), Message: "platform admin password reset"}, nil
+}
+
+func (f *fakePlatformAdminClient) verifyPassword(password string) bool {
+	return f.currentPassword == password
 }
 func (f *fakePlatformAdminClient) DisablePlatformAdmin(_ context.Context, in *platformsettingsv1.DisablePlatformAdminRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
 	f.lastDisable = in
@@ -451,6 +462,44 @@ func TestPlatformAdmins_UnimplementedMaps501(t *testing.T) {
 		`{"email":"a@x.com","username":"ops","display_name":"Ops","role_id":"00000000-0000-0000-0000-000000000006","password":"Abcd1234!","idempotency_key":"44444444-4444-4444-4444-444444444444"}`)
 	if resp.StatusCode() != http.StatusNotImplemented {
 		t.Fatalf("status=%d body=%s", resp.StatusCode(), resp.Body())
+	}
+}
+
+func TestHandler_ResetPasswordFlow(t *testing.T) {
+	const id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	const oldPwd = "OldPass1!"
+	const newPwd = "NewPass2@"
+	fake := &fakePlatformAdminClient{currentPassword: oldPwd}
+	h := setupPlatformAdminTestServer(t, fake)
+
+	if !fake.verifyPassword(oldPwd) {
+		t.Fatal("precondition: old password must match before reset")
+	}
+
+	body := `{"new_password":"NewPass2@","idempotency_key":"44444444-4444-4444-4444-444444444444"}`
+	reset := performPlatformAdmin(h, http.MethodPost, "/api/v1/svc/platform-admins/"+id+"/reset-password", body)
+	if reset.StatusCode() != http.StatusOK {
+		t.Fatalf("reset status=%d body=%s", reset.StatusCode(), reset.Body())
+	}
+	if fake.lastReset == nil || fake.lastReset.GetUserId() != id || fake.lastReset.GetNewPassword() != newPwd || fake.lastReset.GetIdempotencyKey() == "" {
+		t.Fatalf("lastReset=%+v", fake.lastReset)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(reset.Body(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["id"] != id || payload["message"] != "platform admin password reset" {
+		t.Fatalf("payload=%v", payload)
+	}
+	if _, hasPwd := payload["new_password"]; hasPwd {
+		t.Fatalf("response must not echo password: %v", payload)
+	}
+
+	if fake.verifyPassword(oldPwd) {
+		t.Fatal("old password must fail after reset")
+	}
+	if !fake.verifyPassword(newPwd) {
+		t.Fatal("new password must succeed after reset")
 	}
 }
 

@@ -41,6 +41,10 @@ type fakeCoreClient struct {
 	setStatusVal string
 	setStatusErr error
 
+	resetPwdID  uuid.UUID
+	resetPwdVal string
+	resetPwdErr error
+
 	softDeleteID  uuid.UUID
 	softDeleteErr error
 }
@@ -77,8 +81,13 @@ func (f *fakeCoreClient) ChangeRole(_ context.Context, id uuid.UUID, roleID uuid
 	}
 	return nil
 }
-func (f *fakeCoreClient) ResetPassword(context.Context, uuid.UUID, string) error {
-	return ports.ErrNotImplemented
+func (f *fakeCoreClient) ResetPassword(_ context.Context, id uuid.UUID, pwd string) error {
+	f.resetPwdID = id
+	f.resetPwdVal = pwd
+	if f.resetPwdErr != nil {
+		return f.resetPwdErr
+	}
+	return nil
 }
 func (f *fakeCoreClient) SetStatus(_ context.Context, id uuid.UUID, status string) error {
 	f.setStatusID = id
@@ -453,14 +462,9 @@ func TestMapDomainError_Table(t *testing.T) {
 func TestUnimplementedRPCs(t *testing.T) {
 	t.Parallel()
 	svc := NewPlatformAdminService(&fakeCoreClient{}, fakeAuditStore{})
-	checks := []error{
-		func() error { _, err := svc.ResetPlatformAdminPassword(context.Background(), nil); return err }(),
-		func() error { _, err := svc.ListPlatformAdminAuditLogs(context.Background(), nil); return err }(),
-	}
-	for i, err := range checks {
-		if status.Code(err) != codes.Unimplemented {
-			t.Fatalf("case %d: %v", i, err)
-		}
+	_, err := svc.ListPlatformAdminAuditLogs(context.Background(), nil)
+	if status.Code(err) != codes.Unimplemented {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -611,6 +615,75 @@ func TestValidatePasswordComplexity(t *testing.T) {
 	}
 	if validatePasswordComplexity("Ab1!") == "" {
 		t.Fatal("expected fail: too short")
+	}
+}
+
+func TestPlatformAdminService_ResetPassword_Success(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	const newPwd = "NewPass2@"
+	audit := &recordingAuditStore{}
+	core := &fakeCoreClient{}
+	svc := NewPlatformAdminService(core, audit)
+	res, err := svc.ResetPlatformAdminPassword(context.Background(), &platformsettingsv1.ResetPlatformAdminPasswordRequest{
+		UserId: id, NewPassword: newPwd, IdempotencyKey: "44444444-4444-4444-4444-444444444444",
+	})
+	if err != nil {
+		t.Fatalf("ResetPassword: %v", err)
+	}
+	if res.GetId() != id || res.GetMessage() != "platform admin password reset" {
+		t.Fatalf("res=%+v", res)
+	}
+	if core.resetPwdID.String() != id || core.resetPwdVal != newPwd {
+		t.Fatalf("core reset=%s/%q", core.resetPwdID, core.resetPwdVal)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Action != "platform_admin.reset_password" || audit.logs[0].Result != "success" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+	if audit.logs[0].Details["target_id"] != id {
+		t.Fatalf("details=%v", audit.logs[0].Details)
+	}
+	if _, ok := audit.logs[0].Details["new_password"]; ok {
+		t.Fatal("password must not appear in audit details")
+	}
+	if _, ok := audit.logs[0].Details["password"]; ok {
+		t.Fatal("password must not appear in audit details")
+	}
+}
+
+func TestPlatformAdminService_ResetPassword_SameAsOld(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	audit := &recordingAuditStore{}
+	svc := NewPlatformAdminService(&fakeCoreClient{resetPwdErr: ports.ErrPasswordSameAsOld}, audit)
+	_, err := svc.ResetPlatformAdminPassword(context.Background(), &platformsettingsv1.ResetPlatformAdminPasswordRequest{
+		UserId: id, NewPassword: "Abcd1234!",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.FailedPrecondition || !strings.HasPrefix(st.Message(), "PASSWORD_SAME_AS_OLD") {
+		t.Fatalf("err=%v", err)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Action != "platform_admin.reset_password" || audit.logs[0].Result != "failed" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+}
+
+func TestPlatformAdminService_ResetPassword_Validation(t *testing.T) {
+	t.Parallel()
+	audit := &recordingAuditStore{}
+	svc := NewPlatformAdminService(&fakeCoreClient{}, audit)
+	_, err := svc.ResetPlatformAdminPassword(context.Background(), &platformsettingsv1.ResetPlatformAdminPasswordRequest{
+		UserId: "11111111-1111-1111-1111-111111111111", NewPassword: "short",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.InvalidArgument || !strings.HasPrefix(st.Message(), "VALIDATION_FAILED") {
+		t.Fatalf("err=%v", err)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Result != "failed" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+	if _, ok := audit.logs[0].Details["new_password"]; ok {
+		t.Fatal("password must not appear in audit details")
 	}
 }
 

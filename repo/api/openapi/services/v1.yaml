@@ -3559,6 +3559,8 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
         "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND / ROLE_NOT_FOUND" }
         "422": { $ref: '#/components/responses/UnprocessableEntity', description: "LAST_PLATFORM_ADMIN / ROLE_CHANGE_INVALID" }
+
+  /platform-admins/{userId}/reset-password:
     post:
       operationId: resetPlatformAdminPassword
       summary: 重置平台运营账号密码（需 platform-admin）

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/kubercloud/ani/pkg/ports"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestPostgresPlatformUserAdminStore_Create_Success(t *testing.T) {
@@ -288,6 +289,83 @@ func TestPostgresPlatformUserAdminStore_SoftDelete_Success(t *testing.T) {
 	}
 	if !hasExec(tx, "is_deleted = TRUE") {
 		t.Fatalf("want soft-delete UPDATE, exec=%v", tx.execSQLs)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_ResetPassword_ValidationFailed(t *testing.T) {
+	t.Parallel()
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: &quotaFakeTx{}})
+	err := store.ResetPassword(context.Background(), uuid.MustParse("11111111-1111-1111-1111-111111111111"), "short")
+	if !errors.Is(err, ports.ErrValidationFailed) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_ResetPassword_NotFound(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	err := store.ResetPassword(context.Background(), userID, "NewPass2@")
+	if !errors.Is(err, ports.ErrPlatformUserNotFound) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_ResetPassword_SameAsOld(t *testing.T) {
+	t.Parallel()
+	const oldPwd = "Abcd1234!"
+	hash, err := bcrypt.GenerateFromPassword([]byte(oldPwd), bcryptCost)
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	hashStr := string(hash)
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{&hashStr}})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	err = store.ResetPassword(context.Background(), userID, oldPwd)
+	if !errors.Is(err, ports.ErrPasswordSameAsOld) {
+		t.Fatalf("err=%v", err)
+	}
+	if hasExec(tx, "UPDATE users SET password_hash") {
+		t.Fatalf("same password must not update: %v", tx.execSQLs)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_ResetPassword_Success(t *testing.T) {
+	t.Parallel()
+	const oldPwd = "OldPass1!"
+	const newPwd = "NewPass2@"
+	oldHash, err := bcrypt.GenerateFromPassword([]byte(oldPwd), bcryptCost)
+	if err != nil {
+		t.Fatalf("hash old: %v", err)
+	}
+	oldHashStr := string(oldHash)
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{&oldHashStr}})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	if err := store.ResetPassword(context.Background(), userID, newPwd); err != nil {
+		t.Fatalf("ResetPassword: %v", err)
+	}
+	if !hasExec(tx, "UPDATE users SET password_hash") {
+		t.Fatalf("want password UPDATE, exec=%v", tx.execSQLs)
+	}
+}
+
+func TestPostgresPlatformUserAdminStore_ResetPassword_NoExistingHash(t *testing.T) {
+	t.Parallel()
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{(*string)(nil)}})
+	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
+	if err := store.ResetPassword(context.Background(), userID, "NewPass2@"); err != nil {
+		t.Fatalf("ResetPassword: %v", err)
+	}
+	if !hasExec(tx, "UPDATE users SET password_hash") {
+		t.Fatalf("want password UPDATE, exec=%v", tx.execSQLs)
 	}
 }
 

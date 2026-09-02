@@ -280,6 +280,47 @@ func TestCorePlatformUserClient_SoftDelete(t *testing.T) {
 	}
 }
 
+func TestCorePlatformUserClient_ResetPassword(t *testing.T) {
+	t.Parallel()
+	id := "77777777-7777-7777-7777-777777777777"
+	var sawBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/admin/platform-users/"+id+"/reset-password" {
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&sawBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "message": "ok"})
+	}))
+	defer srv.Close()
+
+	client := &CorePlatformUserClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	if err := client.ResetPassword(context.Background(), uuid.MustParse(id), "NewPass2@"); err != nil {
+		t.Fatalf("ResetPassword: %v", err)
+	}
+	if sawBody["new_password"] != "NewPass2@" {
+		t.Fatalf("body=%v", sawBody)
+	}
+}
+
+func TestCorePlatformUserClient_ResetPassword_SameAsOld(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": "PASSWORD_SAME_AS_OLD", "message": "same as old"})
+	}))
+	defer srv.Close()
+
+	client := &CorePlatformUserClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	err := client.ResetPassword(context.Background(), uuid.MustParse("77777777-7777-7777-7777-777777777777"), "Abcd1234!")
+	if err == nil || !errors.Is(err, ports.ErrPasswordSameAsOld) {
+		t.Fatalf("expected ErrPasswordSameAsOld, got %v", err)
+	}
+}
+
 func TestCorePlatformUserClient_SetStatus_LastAdmin(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -279,8 +279,39 @@ func (s *PlatformAdminService) UpdatePlatformAdminRole(ctx context.Context, req 
 	}, nil
 }
 
-func (s *PlatformAdminService) ResetPlatformAdminPassword(context.Context, *platformsettingsv1.ResetPlatformAdminPasswordRequest) (*commonv1.IdempotentResult, error) {
-	return nil, unimplemented()
+func (s *PlatformAdminService) ResetPlatformAdminPassword(ctx context.Context, req *platformsettingsv1.ResetPlatformAdminPasswordRequest) (*commonv1.IdempotentResult, error) {
+	const action = "platform_admin.reset_password"
+	var userIDRaw string
+	if req != nil {
+		userIDRaw = req.GetUserId()
+	}
+	userID, err := parsePlatformAdminUserID(req == nil, userIDRaw, action, s.auditStore, ctx)
+	if err != nil {
+		return nil, err
+	}
+	// 步骤 1：Services 预校验 new_password 复杂度（Core 强校验）；幂等仅外层网关，本服务不消费 idempotency_key
+	if detail := validatePasswordComplexity(req.GetNewPassword()); detail != "" {
+		mapped := businessError(codes.InvalidArgument, ports.ErrValidationFailed, detail)
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, mapped)
+		return nil, mapped
+	}
+	if s.coreClient == nil {
+		mapped := businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core client not configured")
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, mapped)
+		return nil, mapped
+	}
+	// 步骤 2：调 Core ResetPassword（bcrypt 与旧不同校验在 Core Store）
+	if err := s.coreClient.ResetPassword(ctx, userID, req.GetNewPassword()); err != nil {
+		mapped := mapDomainError(err)
+		writeAuditFailure(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()}, mapped)
+		return nil, mapped
+	}
+	// 步骤 3：成功审计（不含密码明文）
+	writeAuditSuccess(ctx, s.auditStore, action, map[string]any{"target_id": userID.String()})
+	return &commonv1.IdempotentResult{
+		Id:      userID.String(),
+		Message: "platform admin password reset",
+	}, nil
 }
 
 func (s *PlatformAdminService) DisablePlatformAdmin(ctx context.Context, req *platformsettingsv1.DisablePlatformAdminRequest) (*commonv1.IdempotentResult, error) {
