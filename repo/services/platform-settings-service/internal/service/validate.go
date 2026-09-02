@@ -85,6 +85,17 @@ func validatePasswordComplexity(password string) string {
 	return ""
 }
 
+// validateListAuditLogFilters 校验 audit-logs query 的 result 枚举；action 透传 store。
+func validateListAuditLogFilters(action, result string) string {
+	_ = action
+	switch strings.TrimSpace(result) {
+	case "", "success", "failure":
+		return ""
+	default:
+		return "result must be success or failure"
+	}
+}
+
 // validateListPlatformAdminFilters 校验列表 query 枚举；role_id/search 透传 Core。
 func validateListPlatformAdminFilters(status, source string) string {
 	switch strings.TrimSpace(status) {

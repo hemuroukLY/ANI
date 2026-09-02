@@ -38,7 +38,7 @@ func writeAuditSuccess(ctx context.Context, audit ports.PlatformAdminAuditStore,
 	}
 }
 
-// writeAuditFailure 写入 result=failed 的审计（best-effort：写失败只 Warn，不掩盖业务错误）。
+// writeAuditFailure 写入 result=failure 的审计（best-effort：写失败只 Warn，不掩盖业务错误）。
 func writeAuditFailure(ctx context.Context, audit ports.PlatformAdminAuditStore, action string, details map[string]any, cause error) {
 	// 步骤 1：复制 details 并附加 reason
 	out := map[string]any{}
@@ -53,7 +53,7 @@ func writeAuditFailure(ctx context.Context, audit ports.PlatformAdminAuditStore,
 		RequestID: requestIDFromCtx(ctx),
 		Action:    action,
 		Resource:  auditResourcePlatformUser,
-		Result:    "failed",
+		Result:    "failure",
 		Details:   out,
 	})
 	if err != nil {

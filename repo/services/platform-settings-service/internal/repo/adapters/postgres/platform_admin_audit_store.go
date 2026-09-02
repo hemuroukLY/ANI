@@ -111,13 +111,7 @@ func (s *PostgresPlatformAdminAuditStore) ListUserAuditLogs(ctx context.Context,
 	}
 	whereSQL := strings.Join(where, " AND ")
 
-	// 步骤 3：总数不含游标
-	var total int
-	if err := s.db.QueryRow(ctx, `SELECT COUNT(*) FROM audit_logs WHERE `+whereSQL, args...).Scan(&total); err != nil {
-		return ports.AuditLogListResult{}, fmt.Errorf("count platform admin audit logs: %w", err)
-	}
-
-	// 步骤 4：游标（created_at DESC, id DESC）；非法 cursor → VALIDATION_FAILED
+	// 步骤 3：游标（created_at DESC, id DESC）；非法 cursor → VALIDATION_FAILED
 	listArgs := append([]any{}, args...)
 	listWhere := whereSQL
 	if cursor := strings.TrimSpace(filter.Cursor); cursor != "" {
@@ -129,10 +123,10 @@ func (s *PostgresPlatformAdminAuditStore) ListUserAuditLogs(ctx context.Context,
 		listWhere += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d)", len(listArgs)-1, len(listArgs))
 	}
 
-	// 步骤 5：多取 1 条判断是否还有下一页
+	// 步骤 4：多取 1 条判断是否还有下一页
 	listArgs = append(listArgs, limit+1)
 	rows, err := s.db.Query(ctx, `
-		SELECT id, action, resource, result, details, created_at
+		SELECT id, user_id, action, resource, result, details, created_at
 		FROM audit_logs
 		WHERE `+listWhere+`
 		ORDER BY created_at DESC, id DESC
@@ -142,7 +136,7 @@ func (s *PostgresPlatformAdminAuditStore) ListUserAuditLogs(ctx context.Context,
 	}
 	defer rows.Close()
 
-	// 步骤 6a：扫描本页行
+	// 步骤 5：扫描本页行
 	items := make([]ports.AuditLog, 0, limit)
 	for rows.Next() {
 		var (
@@ -150,7 +144,7 @@ func (s *PostgresPlatformAdminAuditStore) ListUserAuditLogs(ctx context.Context,
 			detailsRaw []byte
 		)
 		if err := rows.Scan(
-			&item.ID, &item.Action, &item.Resource, &item.Result, &detailsRaw, &item.CreatedAt,
+			&item.ID, &item.UserID, &item.Action, &item.Resource, &item.Result, &detailsRaw, &item.CreatedAt,
 		); err != nil {
 			return ports.AuditLogListResult{}, fmt.Errorf("scan platform admin audit log: %w", err)
 		}
@@ -169,7 +163,7 @@ func (s *PostgresPlatformAdminAuditStore) ListUserAuditLogs(ctx context.Context,
 		return ports.AuditLogListResult{}, fmt.Errorf("iterate platform admin audit logs: %w", err)
 	}
 
-	// 步骤 6b：有多余一行则截断并编码 next_cursor
+	// 步骤 6：有多余一行则截断并编码 next_cursor
 	nextCursor := ""
 	if len(items) > limit {
 		last := items[limit-1]
@@ -179,7 +173,6 @@ func (s *PostgresPlatformAdminAuditStore) ListUserAuditLogs(ctx context.Context,
 
 	return ports.AuditLogListResult{
 		Items:      items,
-		Total:      total,
 		NextCursor: nextCursor,
 	}, nil
 }

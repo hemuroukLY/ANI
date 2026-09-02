@@ -1282,7 +1282,8 @@ components:
         id:         { type: string, format: uuid }
         action:     { type: string, description: "如 platform_admin.create / change_role / reset_password / disable / enable / delete" }
         resource:   { type: string }
-        result:     { type: string, enum: [success, failed] }
+        result:     { type: string, enum: [success, failure] }
+        user_id:    { type: string, format: uuid, nullable: true, description: "操作者（audit_logs.user_id）；未记录时为 null" }
         details:    { type: object, additionalProperties: true, nullable: true }
         created_at: { type: string, format: date-time }
 
@@ -3643,7 +3644,7 @@ paths:
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
         - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
         - { name: action, in: query, schema: { type: string }, description: "过滤操作类型" }
-        - { name: result, in: query, schema: { type: string, enum: [success, failed] } }
+        - { name: result, in: query, schema: { type: string, enum: [success, failure] } }
       responses:
         "200":
           description: 平台运营账号操作历史

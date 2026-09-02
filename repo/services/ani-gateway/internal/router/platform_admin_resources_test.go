@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
@@ -18,6 +21,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 type fakePlatformAdminClient struct {
@@ -29,18 +34,39 @@ type fakePlatformAdminClient struct {
 	lastDisable *platformsettingsv1.DisablePlatformAdminRequest
 	lastEnable  *platformsettingsv1.EnablePlatformAdminRequest
 	lastDelete  *platformsettingsv1.DeletePlatformAdminRequest
-	lastReset   *platformsettingsv1.ResetPlatformAdminPasswordRequest
+	lastReset     *platformsettingsv1.ResetPlatformAdminPasswordRequest
+	lastListAudit *platformsettingsv1.ListPlatformAdminAuditLogsRequest
 	listResp   *platformsettingsv1.ListPlatformAdminsResponse
 	rolesResp  *platformsettingsv1.ListPlatformAdminRolesResponse
 	getResp    *platformsettingsv1.PlatformAdminDetail
 	permsResp  *platformsettingsv1.PlatformAdminPermissions
 	err        error
 
-	// stateful flow helpers（DisableEnableFlow / DeleteFlow / LastAdminProtection / ResetPasswordFlow）
+	// stateful flow helpers（DisableEnableFlow / DeleteFlow / LastAdminProtection / ResetPasswordFlow / AuditLogsFlow）
 	status          string
 	deleted         bool
 	lastAdminErr    bool
 	currentPassword string
+	auditLogs       []*platformsettingsv1.PlatformAdminAuditLog
+	auditSeq        int
+	auditOperatorID string
+}
+
+func (f *fakePlatformAdminClient) appendAudit(userID, action, result string) {
+	f.auditSeq++
+	details, _ := structpb.NewStruct(map[string]any{"target_id": userID})
+	log := &platformsettingsv1.PlatformAdminAuditLog{
+		Id:        uuid.New().String(),
+		Action:    action,
+		Resource:  "platform_user",
+		Result:    result,
+		Details:   details,
+		CreatedAt: timestamppb.New(time.Date(2026, 9, 2, 12, 0, f.auditSeq, 0, time.UTC)),
+	}
+	if op := strings.TrimSpace(f.auditOperatorID); op != "" {
+		log.UserId = wrapperspb.String(op)
+	}
+	f.auditLogs = append(f.auditLogs, log)
 }
 
 func (f *fakePlatformAdminClient) CreatePlatformAdmin(_ context.Context, in *platformsettingsv1.CreatePlatformAdminRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
@@ -48,7 +74,9 @@ func (f *fakePlatformAdminClient) CreatePlatformAdmin(_ context.Context, in *pla
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &commonv1.IdempotentResult{Id: "11111111-1111-1111-1111-111111111111", Message: "platform admin created"}, nil
+	id := "11111111-1111-1111-1111-111111111111"
+	f.appendAudit(id, "platform_admin.create", "success")
+	return &commonv1.IdempotentResult{Id: id, Message: "platform admin created"}, nil
 }
 func (f *fakePlatformAdminClient) ListPlatformAdmins(_ context.Context, in *platformsettingsv1.ListPlatformAdminsRequest, _ ...grpc.CallOption) (*platformsettingsv1.ListPlatformAdminsResponse, error) {
 	f.lastList = in
@@ -99,7 +127,11 @@ func (f *fakePlatformAdminClient) GetPlatformAdminPermissions(_ context.Context,
 }
 func (f *fakePlatformAdminClient) UpdatePlatformAdminRole(_ context.Context, in *platformsettingsv1.UpdatePlatformAdminRoleRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
 	f.lastUpdate = in
-	return f.errOrOK()
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.appendAudit(in.GetUserId(), "platform_admin.change_role", "success")
+	return &commonv1.IdempotentResult{Id: in.GetUserId(), Message: "platform admin role updated"}, nil
 }
 func (f *fakePlatformAdminClient) ResetPlatformAdminPassword(_ context.Context, in *platformsettingsv1.ResetPlatformAdminPasswordRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
 	f.lastReset = in
@@ -107,6 +139,7 @@ func (f *fakePlatformAdminClient) ResetPlatformAdminPassword(_ context.Context, 
 		return nil, f.err
 	}
 	f.currentPassword = in.GetNewPassword()
+	f.appendAudit(in.GetUserId(), "platform_admin.reset_password", "success")
 	return &commonv1.IdempotentResult{Id: in.GetUserId(), Message: "platform admin password reset"}, nil
 }
 
@@ -122,6 +155,7 @@ func (f *fakePlatformAdminClient) DisablePlatformAdmin(_ context.Context, in *pl
 		return nil, f.err
 	}
 	f.status = "disabled"
+	f.appendAudit(in.GetUserId(), "platform_admin.disable", "success")
 	return &commonv1.IdempotentResult{Id: in.GetUserId(), Message: "platform admin disabled"}, nil
 }
 func (f *fakePlatformAdminClient) EnablePlatformAdmin(_ context.Context, in *platformsettingsv1.EnablePlatformAdminRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
@@ -130,6 +164,7 @@ func (f *fakePlatformAdminClient) EnablePlatformAdmin(_ context.Context, in *pla
 		return nil, f.err
 	}
 	f.status = "active"
+	f.appendAudit(in.GetUserId(), "platform_admin.enable", "success")
 	return &commonv1.IdempotentResult{Id: in.GetUserId(), Message: "platform admin enabled"}, nil
 }
 func (f *fakePlatformAdminClient) DeletePlatformAdmin(_ context.Context, in *platformsettingsv1.DeletePlatformAdminRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
@@ -141,13 +176,46 @@ func (f *fakePlatformAdminClient) DeletePlatformAdmin(_ context.Context, in *pla
 		return nil, f.err
 	}
 	f.deleted = true
+	f.appendAudit(in.GetUserId(), "platform_admin.delete", "success")
 	return &commonv1.IdempotentResult{Id: in.GetUserId(), Message: "platform admin deleted"}, nil
 }
-func (f *fakePlatformAdminClient) ListPlatformAdminAuditLogs(context.Context, *platformsettingsv1.ListPlatformAdminAuditLogsRequest, ...grpc.CallOption) (*platformsettingsv1.ListPlatformAdminAuditLogsResponse, error) {
+func (f *fakePlatformAdminClient) ListPlatformAdminAuditLogs(_ context.Context, in *platformsettingsv1.ListPlatformAdminAuditLogsRequest, _ ...grpc.CallOption) (*platformsettingsv1.ListPlatformAdminAuditLogsResponse, error) {
+	f.lastListAudit = in
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &platformsettingsv1.ListPlatformAdminAuditLogsResponse{}, nil
+	limit := 20
+	if page := in.GetPage(); page != nil && page.GetLimit() > 0 {
+		limit = int(page.GetLimit())
+		if limit > 100 {
+			limit = 100
+		}
+	}
+	var matched []*platformsettingsv1.PlatformAdminAuditLog
+	for _, log := range f.auditLogs {
+		if log.GetDetails() == nil || log.GetDetails().GetFields()["target_id"].GetStringValue() != in.GetUserId() {
+			continue
+		}
+		if action := strings.TrimSpace(in.GetAction()); action != "" && log.GetAction() != action {
+			continue
+		}
+		if result := strings.TrimSpace(in.GetResult()); result != "" && log.GetResult() != result {
+			continue
+		}
+		matched = append(matched, log)
+	}
+	sort.Slice(matched, func(i, j int) bool {
+		return matched[i].GetCreatedAt().AsTime().After(matched[j].GetCreatedAt().AsTime())
+	})
+	nextCursor := ""
+	if len(matched) > limit {
+		nextCursor = matched[limit-1].GetId()
+		matched = matched[:limit]
+	}
+	return &platformsettingsv1.ListPlatformAdminAuditLogsResponse{
+		Items:      matched,
+		NextCursor: nextCursor,
+	}, nil
 }
 func (f *fakePlatformAdminClient) errOrOK() (*commonv1.IdempotentResult, error) {
 	if f.err != nil {
@@ -593,5 +661,80 @@ func TestHandler_LastAdminProtection(t *testing.T) {
 	}
 	if !strings.Contains(string(del.Body()), "LAST_PLATFORM_ADMIN") {
 		t.Fatalf("delete body=%s", del.Body())
+	}
+}
+
+func TestHandler_AuditLogsFlow(t *testing.T) {
+	const id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	const operatorID = "99999999-9999-9999-9999-999999999999"
+	fake := &fakePlatformAdminClient{status: "active", auditOperatorID: operatorID}
+	h := setupPlatformAdminTestServer(t, fake)
+	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444"}`
+
+	disable := performPlatformAdmin(h, http.MethodPost, "/api/v1/svc/platform-admins/"+id+"/disable", body)
+	if disable.StatusCode() != http.StatusOK {
+		t.Fatalf("disable status=%d body=%s", disable.StatusCode(), disable.Body())
+	}
+	enable := performPlatformAdmin(h, http.MethodPost, "/api/v1/svc/platform-admins/"+id+"/enable", body)
+	if enable.StatusCode() != http.StatusOK {
+		t.Fatalf("enable status=%d body=%s", enable.StatusCode(), enable.Body())
+	}
+
+	logs := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins/"+id+"/audit-logs?limit=20", "")
+	if logs.StatusCode() != http.StatusOK {
+		t.Fatalf("audit-logs status=%d body=%s", logs.StatusCode(), logs.Body())
+	}
+	if fake.lastListAudit == nil || fake.lastListAudit.GetUserId() != id || fake.lastListAudit.GetPage().GetLimit() != 20 {
+		t.Fatalf("lastListAudit=%+v", fake.lastListAudit)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(logs.Body(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := payload["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("items=%v", payload)
+	}
+	first, _ := items[0].(map[string]any)
+	second, _ := items[1].(map[string]any)
+	if first["action"] != "platform_admin.enable" || second["action"] != "platform_admin.disable" {
+		t.Fatalf("order=%v / %v", first, second)
+	}
+	for _, key := range []string{"id", "action", "resource", "result", "created_at", "user_id"} {
+		if first[key] == nil || first[key] == "" {
+			t.Fatalf("missing %s in %v", key, first)
+		}
+	}
+	if first["user_id"] != operatorID {
+		t.Fatalf("operator=%v want %s", first["user_id"], operatorID)
+	}
+	if _, hasPwd := first["password"]; hasPwd {
+		t.Fatalf("audit item must not include password: %v", first)
+	}
+
+	filtered := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins/"+id+"/audit-logs?action=platform_admin.disable", "")
+	if filtered.StatusCode() != http.StatusOK {
+		t.Fatalf("filtered status=%d body=%s", filtered.StatusCode(), filtered.Body())
+	}
+	var filteredPayload map[string]any
+	_ = json.Unmarshal(filtered.Body(), &filteredPayload)
+	filteredItems, _ := filteredPayload["items"].([]any)
+	if len(filteredItems) != 1 {
+		t.Fatalf("filtered=%v", filteredPayload)
+	}
+	row, _ := filteredItems[0].(map[string]any)
+	if row["action"] != "platform_admin.disable" || row["result"] != "success" {
+		t.Fatalf("row=%v", row)
+	}
+
+	empty := performPlatformAdmin(h, http.MethodGet, "/api/v1/svc/platform-admins/"+id+"/audit-logs?action=platform_admin.create", "")
+	var emptyPayload map[string]any
+	_ = json.Unmarshal(empty.Body(), &emptyPayload)
+	emptyItems, _ := emptyPayload["items"].([]any)
+	if len(emptyItems) != 0 {
+		t.Fatalf("empty filter=%v", emptyPayload)
+	}
+	if emptyPayload["next_cursor"] != nil {
+		t.Fatalf("next_cursor=%v", emptyPayload["next_cursor"])
 	}
 }

@@ -324,11 +324,16 @@ func (api *platformAdminsAPI) listPlatformAdminAuditLogs(ctx context.Context, c 
 	}
 	callCtx, cancel := platformAdminCallCtx(ctx, c)
 	defer cancel()
+	limit, err := parseCursorLimitQuery(c)
+	if err != nil {
+		writePlatformAdminError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
 	res, err := api.client.ListPlatformAdminAuditLogs(callCtx, &platformsettingsv1.ListPlatformAdminAuditLogsRequest{
 		UserId: c.Param("userId"),
 		Action: c.Query("action"),
 		Result: c.Query("result"),
-		Page:   &commonv1.CursorPageRequest{Limit: cursorLimit(c), Cursor: c.Query("cursor")},
+		Page:   &commonv1.CursorPageRequest{Limit: limit, Cursor: c.Query("cursor")},
 	})
 	if err != nil {
 		mapPlatformAdminError(c, err)
@@ -420,7 +425,7 @@ func platformAdminAuditLogJSON(item *platformsettingsv1.PlatformAdminAuditLog) m
 	if item.GetDetails() != nil {
 		details = item.GetDetails().AsMap()
 	}
-	return map[string]any{
+	out := map[string]any{
 		"id":         item.GetId(),
 		"action":     item.GetAction(),
 		"resource":   item.GetResource(),
@@ -428,6 +433,12 @@ func platformAdminAuditLogJSON(item *platformsettingsv1.PlatformAdminAuditLog) m
 		"details":    details,
 		"created_at": platformAdminTimestampJSON(item.GetCreatedAt()),
 	}
+	if item.GetUserId() != nil {
+		out["user_id"] = item.GetUserId().GetValue()
+	} else {
+		out["user_id"] = nil
+	}
+	return out
 }
 
 func platformAdminTimestampJSON(ts *timestamppb.Timestamp) any {

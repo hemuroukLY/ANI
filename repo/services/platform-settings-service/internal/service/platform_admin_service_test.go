@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -146,7 +147,75 @@ func (fakeAuditStore) Create(context.Context, ports.AuditLog) (uuid.UUID, error)
 	return uuid.Nil, nil
 }
 func (fakeAuditStore) ListUserAuditLogs(context.Context, uuid.UUID, ports.AuditLogFilter) (ports.AuditLogListResult, error) {
-	return ports.AuditLogListResult{}, ports.ErrNotImplemented
+	return ports.AuditLogListResult{}, nil
+}
+
+// listingAuditStore 内存审计库，支持 ListUserAuditLogs 过滤与游标分页（单测用）。
+type listingAuditStore struct {
+	logs []ports.AuditLog
+}
+
+func (s *listingAuditStore) Create(_ context.Context, log ports.AuditLog) (uuid.UUID, error) {
+	if log.ID == uuid.Nil {
+		log.ID = uuid.New()
+	}
+	if log.CreatedAt.IsZero() {
+		log.CreatedAt = time.Now().UTC()
+	}
+	if log.Resource == "" {
+		log.Resource = "platform_user"
+	}
+	s.logs = append(s.logs, log)
+	return log.ID, nil
+}
+
+func (s *listingAuditStore) ListUserAuditLogs(_ context.Context, userID uuid.UUID, filter ports.AuditLogFilter) (ports.AuditLogListResult, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	var matched []ports.AuditLog
+	for _, log := range s.logs {
+		targetID, _ := log.Details["target_id"].(string)
+		if targetID != userID.String() {
+			continue
+		}
+		if filter.Action != "" && log.Action != filter.Action {
+			continue
+		}
+		if filter.Result != "" && log.Result != filter.Result {
+			continue
+		}
+		matched = append(matched, log)
+	}
+	sort.Slice(matched, func(i, j int) bool {
+		if matched[i].CreatedAt.Equal(matched[j].CreatedAt) {
+			return matched[i].ID.String() > matched[j].ID.String()
+		}
+		return matched[i].CreatedAt.After(matched[j].CreatedAt)
+	})
+	total := len(matched)
+	if cursor := strings.TrimSpace(filter.Cursor); cursor != "" {
+		// 单测简化：不支持非法 cursor 路径（postgres 层另有测试）
+	}
+	start := 0
+	if len(matched) > limit {
+		matched = matched[:limit]
+	}
+	nextCursor := ""
+	if total > limit {
+		last := matched[len(matched)-1]
+		nextCursor = last.ID.String()
+	}
+	_ = start
+	return ports.AuditLogListResult{
+		Items:      matched,
+		Total:      total,
+		NextCursor: nextCursor,
+	}, nil
 }
 
 func TestPlatformAdminService_Create_Success(t *testing.T) {
@@ -208,7 +277,7 @@ func TestPlatformAdminService_Create_Validation(t *testing.T) {
 	if st.Code() != codes.InvalidArgument || !strings.HasPrefix(st.Message(), "VALIDATION_FAILED") {
 		t.Fatalf("err=%v", err)
 	}
-	if len(audit.logs) != 1 || audit.logs[0].Result != "failed" || audit.logs[0].Action != "platform_admin.create" {
+	if len(audit.logs) != 1 || audit.logs[0].Result != "failure" || audit.logs[0].Action != "platform_admin.create" {
 		t.Fatalf("validation must write failed audit: %+v", audit.logs)
 	}
 	if audit.logs[0].Details["role_id"] != "not-a-uuid" {
@@ -459,15 +528,6 @@ func TestMapDomainError_Table(t *testing.T) {
 	}
 }
 
-func TestUnimplementedRPCs(t *testing.T) {
-	t.Parallel()
-	svc := NewPlatformAdminService(&fakeCoreClient{}, fakeAuditStore{})
-	_, err := svc.ListPlatformAdminAuditLogs(context.Background(), nil)
-	if status.Code(err) != codes.Unimplemented {
-		t.Fatalf("err=%v", err)
-	}
-}
-
 func TestPlatformAdminService_ListPlatformAdminRoles(t *testing.T) {
 	t.Parallel()
 	core := &fakeCoreClient{
@@ -569,7 +629,7 @@ func TestPlatformAdminService_UpdatePlatformAdminRole_LastAdmin(t *testing.T) {
 	if st.Code() != codes.FailedPrecondition || !strings.HasPrefix(st.Message(), "LAST_PLATFORM_ADMIN") {
 		t.Fatalf("err=%v", err)
 	}
-	if len(audit.logs) != 1 || audit.logs[0].Result != "failed" {
+	if len(audit.logs) != 1 || audit.logs[0].Result != "failure" {
 		t.Fatalf("audit=%+v", audit.logs)
 	}
 	if audit.logs[0].Details["old_role"] != "platform-admin" || audit.logs[0].Details["new_role"] != "platform-ops" {
@@ -663,7 +723,7 @@ func TestPlatformAdminService_ResetPassword_SameAsOld(t *testing.T) {
 	if st.Code() != codes.FailedPrecondition || !strings.HasPrefix(st.Message(), "PASSWORD_SAME_AS_OLD") {
 		t.Fatalf("err=%v", err)
 	}
-	if len(audit.logs) != 1 || audit.logs[0].Action != "platform_admin.reset_password" || audit.logs[0].Result != "failed" {
+	if len(audit.logs) != 1 || audit.logs[0].Action != "platform_admin.reset_password" || audit.logs[0].Result != "failure" {
 		t.Fatalf("audit=%+v", audit.logs)
 	}
 }
@@ -679,7 +739,7 @@ func TestPlatformAdminService_ResetPassword_Validation(t *testing.T) {
 	if st.Code() != codes.InvalidArgument || !strings.HasPrefix(st.Message(), "VALIDATION_FAILED") {
 		t.Fatalf("err=%v", err)
 	}
-	if len(audit.logs) != 1 || audit.logs[0].Result != "failed" {
+	if len(audit.logs) != 1 || audit.logs[0].Result != "failure" {
 		t.Fatalf("audit=%+v", audit.logs)
 	}
 	if _, ok := audit.logs[0].Details["new_password"]; ok {
@@ -720,7 +780,7 @@ func TestPlatformAdminService_Disable_LastAdmin(t *testing.T) {
 	if st.Code() != codes.FailedPrecondition || !strings.HasPrefix(st.Message(), "LAST_PLATFORM_ADMIN") {
 		t.Fatalf("err=%v", err)
 	}
-	if len(audit.logs) != 1 || audit.logs[0].Action != "platform_admin.disable" || audit.logs[0].Result != "failed" {
+	if len(audit.logs) != 1 || audit.logs[0].Action != "platform_admin.disable" || audit.logs[0].Result != "failure" {
 		t.Fatalf("audit=%+v", audit.logs)
 	}
 }
@@ -769,5 +829,114 @@ func TestPlatformAdminService_Delete_LastAdmin(t *testing.T) {
 	st := status.Convert(err)
 	if st.Code() != codes.FailedPrecondition || !strings.HasPrefix(st.Message(), "LAST_PLATFORM_ADMIN") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPlatformAdminService_ListAuditLogs_Success(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	const otherID = "22222222-2222-2222-2222-222222222222"
+	const operatorID = "99999999-9999-9999-9999-999999999999"
+	operatorUUID := uuid.MustParse(operatorID)
+	audit := &listingAuditStore{}
+	svc := NewPlatformAdminService(&fakeCoreClient{}, audit)
+
+	disableLog := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	resetLog := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	_, _ = audit.Create(context.Background(), ports.AuditLog{
+		ID: disableLog, UserID: &operatorUUID, Action: "platform_admin.disable", Resource: "platform_user", Result: "success",
+		Details: map[string]any{"target_id": id}, CreatedAt: time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC),
+	})
+	_, _ = audit.Create(context.Background(), ports.AuditLog{
+		ID: resetLog, UserID: &operatorUUID, Action: "platform_admin.reset_password", Resource: "platform_user", Result: "success",
+		Details: map[string]any{"target_id": id}, CreatedAt: time.Date(2026, 9, 2, 11, 0, 0, 0, time.UTC),
+	})
+	_, _ = audit.Create(context.Background(), ports.AuditLog{
+		Action: "platform_admin.disable", Resource: "platform_user", Result: "success",
+		Details: map[string]any{"target_id": otherID}, CreatedAt: time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC),
+	})
+
+	res, err := svc.ListPlatformAdminAuditLogs(context.Background(), &platformsettingsv1.ListPlatformAdminAuditLogsRequest{
+		UserId: id,
+		Page:   &commonv1.CursorPageRequest{Limit: 20},
+	})
+	if err != nil {
+		t.Fatalf("ListPlatformAdminAuditLogs: %v", err)
+	}
+	if len(res.GetItems()) != 2 {
+		t.Fatalf("items=%d", len(res.GetItems()))
+	}
+	if res.GetItems()[0].GetId() != disableLog.String() || res.GetItems()[0].GetAction() != "platform_admin.disable" {
+		t.Fatalf("items[0]=%+v", res.GetItems()[0])
+	}
+	if res.GetItems()[0].GetUserId() == nil || res.GetItems()[0].GetUserId().GetValue() != operatorID {
+		t.Fatalf("items[0] operator=%v", res.GetItems()[0].GetUserId())
+	}
+	if res.GetItems()[1].GetId() != resetLog.String() || res.GetItems()[1].GetAction() != "platform_admin.reset_password" {
+		t.Fatalf("items[1]=%+v", res.GetItems()[1])
+	}
+	if res.GetNextCursor() != "" {
+		t.Fatalf("next_cursor=%q", res.GetNextCursor())
+	}
+}
+
+func TestPlatformAdminService_ListAuditLogs_OperatorNullable(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	audit := &listingAuditStore{}
+	svc := NewPlatformAdminService(&fakeCoreClient{}, audit)
+	_, _ = audit.Create(context.Background(), ports.AuditLog{
+		Action: "platform_admin.enable", Resource: "platform_user", Result: "success",
+		Details: map[string]any{"target_id": id}, CreatedAt: time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC),
+	})
+	res, err := svc.ListPlatformAdminAuditLogs(context.Background(), &platformsettingsv1.ListPlatformAdminAuditLogsRequest{UserId: id})
+	if err != nil {
+		t.Fatalf("ListPlatformAdminAuditLogs: %v", err)
+	}
+	if len(res.GetItems()) != 1 || res.GetItems()[0].GetUserId() != nil {
+		t.Fatalf("operator should be null, got %+v", res.GetItems()[0].GetUserId())
+	}
+}
+
+func TestPlatformAdminService_ListAuditLogs_FilterAndEmpty(t *testing.T) {
+	t.Parallel()
+	const id = "11111111-1111-1111-1111-111111111111"
+	audit := &listingAuditStore{}
+	svc := NewPlatformAdminService(&fakeCoreClient{}, audit)
+	_, _ = audit.Create(context.Background(), ports.AuditLog{
+		Action: "platform_admin.enable", Resource: "platform_user", Result: "success",
+		Details: map[string]any{"target_id": id}, CreatedAt: time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC),
+	})
+	_, _ = audit.Create(context.Background(), ports.AuditLog{
+		Action: "platform_admin.disable", Resource: "platform_user", Result: "failure",
+		Details: map[string]any{"target_id": id}, CreatedAt: time.Date(2026, 9, 2, 11, 0, 0, 0, time.UTC),
+	})
+
+	filtered, err := svc.ListPlatformAdminAuditLogs(context.Background(), &platformsettingsv1.ListPlatformAdminAuditLogsRequest{
+		UserId: id, Action: "platform_admin.disable", Result: "failure",
+	})
+	if err != nil {
+		t.Fatalf("filtered: %v", err)
+	}
+	if len(filtered.GetItems()) != 1 || filtered.GetItems()[0].GetAction() != "platform_admin.disable" || filtered.GetItems()[0].GetResult() != "failure" {
+		t.Fatalf("filtered=%+v", filtered.GetItems())
+	}
+
+	empty, err := svc.ListPlatformAdminAuditLogs(context.Background(), &platformsettingsv1.ListPlatformAdminAuditLogsRequest{
+		UserId: uuid.New().String(),
+	})
+	if err != nil {
+		t.Fatalf("empty: %v", err)
+	}
+	if len(empty.GetItems()) != 0 || empty.GetNextCursor() != "" {
+		t.Fatalf("empty=%+v", empty)
+	}
+
+	_, err = svc.ListPlatformAdminAuditLogs(context.Background(), &platformsettingsv1.ListPlatformAdminAuditLogsRequest{
+		UserId: id, Result: "failed",
+	})
+	st := status.Convert(err)
+	if st.Code() != codes.InvalidArgument || !strings.Contains(st.Message(), "VALIDATION_FAILED") {
+		t.Fatalf("invalid result err=%v", err)
 	}
 }

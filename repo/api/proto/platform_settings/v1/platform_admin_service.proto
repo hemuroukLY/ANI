@@ -5,6 +5,7 @@ package platform_settings.v1;
 import "common/v1/common.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
 
 option go_package = "github.com/kubercloud/ani/pkg/generated/pb/platform_settings/v1;platformsettingsv1";
 
@@ -147,4 +148,6 @@ message PlatformAdminAuditLog {
   string result = 4;
   google.protobuf.Struct details = 5;
   google.protobuf.Timestamp created_at = 6;
+  // 操作者（audit_logs.user_id）；系统触发或未记录时为 null。
+  google.protobuf.StringValue user_id = 7;
 }

@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // PlatformAdminService is the gRPC server for platform admin management.
@@ -401,8 +402,60 @@ func (s *PlatformAdminService) DeletePlatformAdmin(ctx context.Context, req *pla
 	}, nil
 }
 
-func (s *PlatformAdminService) ListPlatformAdminAuditLogs(context.Context, *platformsettingsv1.ListPlatformAdminAuditLogsRequest) (*platformsettingsv1.ListPlatformAdminAuditLogsResponse, error) {
-	return nil, unimplemented()
+func (s *PlatformAdminService) ListPlatformAdminAuditLogs(ctx context.Context, req *platformsettingsv1.ListPlatformAdminAuditLogsRequest) (*platformsettingsv1.ListPlatformAdminAuditLogsResponse, error) {
+	// 只读：不写审计、不调 Core。
+	if req == nil {
+		req = &platformsettingsv1.ListPlatformAdminAuditLogsRequest{}
+	}
+	userIDRaw := strings.TrimSpace(req.GetUserId())
+	if userIDRaw == "" {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "user_id required")
+	}
+	userID, err := uuid.Parse(userIDRaw)
+	if err != nil {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "user_id must be a uuid")
+	}
+	if detail := validateListAuditLogFilters(req.GetAction(), req.GetResult()); detail != "" {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, detail)
+	}
+	if s.auditStore == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "audit store not configured")
+	}
+	// 步骤 1：分页默认 limit=20，上限 100
+	limit := 20
+	cursor := ""
+	if page := req.GetPage(); page != nil {
+		if l := int(page.GetLimit()); l > 0 {
+			limit = l
+			if limit > 100 {
+				limit = 100
+			}
+		}
+		cursor = page.GetCursor()
+	}
+	// 步骤 2：直查 audit_logs（target_id = userId；tenant_id IS NULL）
+	listed, err := s.auditStore.ListUserAuditLogs(ctx, userID, ports.AuditLogFilter{
+		Limit:  limit,
+		Cursor: cursor,
+		Action: strings.TrimSpace(req.GetAction()),
+		Result: strings.TrimSpace(req.GetResult()),
+	})
+	if err != nil {
+		return nil, mapDomainError(err)
+	}
+	// 步骤 3：映射 items[] + next_cursor
+	items := make([]*platformsettingsv1.PlatformAdminAuditLog, 0, len(listed.Items))
+	for _, it := range listed.Items {
+		pb, mapErr := toPlatformAdminAuditLog(it)
+		if mapErr != nil {
+			return nil, businessError(codes.Internal, ports.ErrCoreUnavailable, mapErr.Error())
+		}
+		items = append(items, pb)
+	}
+	return &platformsettingsv1.ListPlatformAdminAuditLogsResponse{
+		Items:      items,
+		NextCursor: listed.NextCursor,
+	}, nil
 }
 
 // parsePlatformAdminUserID 校验 path/body 中的 user_id；失败写审计并返回业务错误。
@@ -425,6 +478,30 @@ func parsePlatformAdminUserID(reqNil bool, userIDRaw, action string, audit ports
 		return uuid.Nil, mapped
 	}
 	return userID, nil
+}
+
+func toPlatformAdminAuditLog(it ports.AuditLog) (*platformsettingsv1.PlatformAdminAuditLog, error) {
+	var detailsPB *structpb.Struct
+	if it.Details != nil {
+		st, err := structpb.NewStruct(it.Details)
+		if err != nil {
+			return nil, err
+		}
+		detailsPB = st
+	}
+	var operatorPB *wrapperspb.StringValue
+	if it.UserID != nil {
+		operatorPB = wrapperspb.String(it.UserID.String())
+	}
+	return &platformsettingsv1.PlatformAdminAuditLog{
+		Id:        it.ID.String(),
+		Action:    it.Action,
+		Resource:  it.Resource,
+		Result:    it.Result,
+		Details:   detailsPB,
+		CreatedAt: timestamppb.New(it.CreatedAt),
+		UserId:    operatorPB,
+	}, nil
 }
 
 func toPlatformAdminListItem(it ports.PlatformUserDTO) *platformsettingsv1.PlatformAdminListItem {

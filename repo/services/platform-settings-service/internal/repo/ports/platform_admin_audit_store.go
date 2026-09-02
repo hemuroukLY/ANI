@@ -11,7 +11,7 @@ import (
 // 复用现有 audit_logs 分区表；平台级操作 tenant_id 为 NULL。
 //
 // 字段约定与 tenant-service TenantPlanAuditStore 对齐：
-//   - result 枚举为 success / failed（OpenAPI/SPEC 用 failed，非 failure）
+//   - result 枚举为 success / failure
 //   - resource = 'platform_user'
 //   - action 形如 platform_admin.create / change_role / reset_password / disable / enable / delete
 //   - 目标账号以 details->>'target_id' 关联；user_id 为操作者（网关透传）
@@ -24,7 +24,7 @@ type AuditLog struct {
 	RequestID string         // 网关透传的请求 ID；空则 store 侧生成
 	Action    string         // 如 platform_admin.create
 	Resource  string         // 固定 platform_user
-	Result    string         // success | failed
+	Result    string         // success | failure
 	Details   map[string]any // 如 {target_id, role, old_role, new_role}
 	IPAddress string
 	UserAgent string
@@ -36,7 +36,7 @@ type AuditLogFilter struct {
 	Limit  int    // 每页数量，default 20，max 100
 	Cursor string // 上一页 next_cursor；空串 = 第一页
 	Action string // 可选：精确匹配 action
-	Result string // 可选：success | failed
+	Result string // 可选：success | failure
 }
 
 // AuditLogListResult 是审计日志查询返回（游标分页）。
