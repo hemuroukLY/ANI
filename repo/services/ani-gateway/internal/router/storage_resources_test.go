@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -13,6 +16,59 @@ import (
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
+
+// testObjectStore is a minimal ports.ObjectStore for router-level tests that
+// need presigned URLs and object verification without a live S3 backend.
+type testObjectStore struct{}
+
+func (testObjectStore) Health(context.Context) error { return nil }
+
+func (testObjectStore) EnsureBucket(context.Context, ports.BucketClass) error { return nil }
+
+func (testObjectStore) BucketUsage(context.Context, ports.BucketClass, string) (ports.BucketUsage, error) {
+	return ports.BucketUsage{}, nil
+}
+
+func (testObjectStore) PutObject(context.Context, ports.PutObjectInput) (ports.ObjectMetadata, error) {
+	return ports.ObjectMetadata{}, ports.ErrUnsupported
+}
+
+func (testObjectStore) GetObject(context.Context, ports.ObjectRef) (io.ReadCloser, ports.ObjectMetadata, error) {
+	return nil, ports.ObjectMetadata{}, ports.ErrUnsupported
+}
+
+func (testObjectStore) DeleteObject(context.Context, ports.ObjectRef) error { return nil }
+
+func (testObjectStore) StatObject(_ context.Context, ref ports.ObjectRef) (ports.ObjectMetadata, error) {
+	return ports.ObjectMetadata{
+		Ref:         ref,
+		ContentType: "application/octet-stream",
+		SizeBytes:   1024,
+		UpdatedAt:   time.Unix(3000, 0).UTC(),
+	}, nil
+}
+
+func (testObjectStore) SignedUploadURL(_ context.Context, _ ports.ObjectRef, _ time.Duration) (ports.SignedURL, error) {
+	return ports.SignedURL{URL: "https://objects.test/upload", ExpiresAt: time.Unix(3001, 0).UTC()}, nil
+}
+
+func (testObjectStore) SignedDownloadURL(_ context.Context, _ ports.ObjectRef, _ time.Duration) (ports.SignedURL, error) {
+	return ports.SignedURL{URL: "https://objects.test/download", ExpiresAt: time.Unix(3002, 0).UTC()}, nil
+}
+
+// newObjectStoreStorageService builds a storage service wired to the stub object
+// store, matching the deployed profile where presigning has a real backend.
+func newObjectStoreStorageService() ports.StorageService {
+	return runtimeadapter.NewLocalStorageService(runtimeadapter.WithStorageObjectStore(testObjectStore{}))
+}
+
+// newStorageAPIWithObjectStore returns the storage API backed by the stub object
+// store instead of the object-store-less local profile.
+func newStorageAPIWithObjectStore() *storageAPI {
+	api := newStorageAPI()
+	api.service = newObjectStoreStorageService()
+	return api
+}
 
 func TestStorageAPIDevProfileVolumeFilesystemAndObject(t *testing.T) {
 	api := newStorageAPI()
@@ -156,14 +212,15 @@ func TestStorageAPIDevProfileSnapshotAndMountTarget(t *testing.T) {
 }
 
 func TestStorageHTTPAsyncTasksKeepOperationTypeAndLocation(t *testing.T) {
+	tasks := runtimeadapter.NewLocalAsyncTaskStore()
 	h := server.New()
 	h.Use(func(ctx context.Context, c *app.RequestContext) {
 		c.Set("tenant_id", "tenant-a")
 		c.Next(ctx)
 	})
 	v1 := h.Group("/api/v1")
-	registerStorageResourcesWithService(v1, runtimeadapter.NewLocalStorageService())
-	registerTasks(v1)
+	registerStorageResourcesWithServiceAndTasks(v1, runtimeadapter.NewLocalStorageService(), tasks)
+	registerTasksWithStore(v1, tasks, nil)
 
 	created := performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes", `{"idempotency_key":"http-volume-async","name":"async-data","size_gib":10}`, http.StatusCreated)
 	volumeID := jsonStringField(t, created, "id")
@@ -210,6 +267,17 @@ func TestStorageHTTPAsyncTasksKeepOperationTypeAndLocation(t *testing.T) {
 		t.Fatalf("fetched task = %s, want completed volume.expand task %s", taskResp.Body(), taskID)
 	}
 
+	restarted := server.New()
+	restarted.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerTasksWithStore(restarted.Group("/api/v1"), tasks, nil)
+	restartedReq := ut.PerformRequest(restarted.Engine, http.MethodGet, "/api/v1/tasks/"+taskID, nil)
+	if got := restartedReq.Result().StatusCode(); got != http.StatusOK {
+		t.Fatalf("task status after router restart = %d body=%s, want 200", got, restartedReq.Result().Body())
+	}
+
 	unknownReq := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/tasks/00000000-0000-0000-0000-000000000000", nil)
 	if got := unknownReq.Result().StatusCode(); got != http.StatusNotFound {
 		t.Fatalf("unknown task status = %d, want 404", got)
@@ -220,15 +288,45 @@ func TestStorageHTTPAsyncTasksKeepOperationTypeAndLocation(t *testing.T) {
 		c.Set("tenant_id", "tenant-b")
 		c.Next(ctx)
 	})
-	registerTasks(otherTenant.Group("/api/v1"))
+	registerTasksWithStore(otherTenant.Group("/api/v1"), tasks, nil)
 	crossTenantReq := ut.PerformRequest(otherTenant.Engine, http.MethodGet, "/api/v1/tasks/"+taskID, nil)
 	if got := crossTenantReq.Result().StatusCode(); got != http.StatusNotFound {
 		t.Fatalf("cross-tenant task status = %d, want 404", got)
 	}
 }
 
+func TestStorageHTTPCompleteObjectConfirmsPresignedUpload(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), newObjectStoreStorageService())
+
+	bucket := performJSONRequest(t, h, http.MethodPost, "/api/v1/buckets", `{"idempotency_key":"http-complete-bucket","name":"uploads-a","region":"local","access_mode":"private"}`, http.StatusCreated)
+	bucketID := jsonStringField(t, bucket, "id")
+
+	upload := performJSONRequest(t, h, http.MethodPost, "/api/v1/buckets/"+bucketID+"/objects/upload", `{"idempotency_key":"http-complete-upload","key":"raw/report.csv","content_type":"text/csv"}`, http.StatusOK)
+	objectID := jsonStringField(t, upload, "object_id")
+	if objectID == "" {
+		t.Fatalf("upload response missing object_id: %s", upload)
+	}
+
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/objects/"+objectID+"/complete", `{}`, http.StatusBadRequest)
+
+	completed := performJSONRequest(t, h, http.MethodPost, "/api/v1/objects/"+objectID+"/complete", `{"idempotency_key":"http-complete-confirm"}`, http.StatusOK)
+	if got := jsonStringField(t, completed, "id"); got != objectID {
+		t.Fatalf("completed object id = %q, want %s", got, objectID)
+	}
+	if got := jsonStringField(t, completed, "state"); got != "available" {
+		t.Fatalf("completed object state = %q, want available", got)
+	}
+
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/objects/00000000-0000-0000-0000-000000000000/complete", `{"idempotency_key":"http-complete-missing"}`, http.StatusNotFound)
+}
+
 func TestStorageAPIBucketAndSignedURLResponsesMatchCoreSchema(t *testing.T) {
-	api := newStorageAPI()
+	api := newStorageAPIWithObjectStore()
 	bucket, err := api.service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
 		TenantID:       "tenant-a",
 		IdempotencyKey: "api-bucket-a",
@@ -279,7 +377,7 @@ func TestStorageAPIBucketAndSignedURLResponsesMatchCoreSchema(t *testing.T) {
 }
 
 func TestStorageAPIBucketConsoleResponsesMatchCoreSchema(t *testing.T) {
-	api := newStorageAPI()
+	api := newStorageAPIWithObjectStore()
 	bucket, err := api.service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
 		TenantID:       "tenant-a",
 		IdempotencyKey: "api-bucket-console",
@@ -561,6 +659,28 @@ func TestStorageHTTPVolumeFilesystemOperationsEndToEnd(t *testing.T) {
 	performJSONRequest(t, h, http.MethodPost, "/api/v1/filesystems/"+filesystemID+"/unmount", `{"idempotency_key":"http-fs-unmount","instance_id":"vm-001"}`, http.StatusAccepted)
 }
 
+func TestStorageHTTPFilesystemExpandAcceptsCapacityAlias(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), runtimeadapter.NewLocalStorageService())
+
+	filesystemResp := performJSONRequest(t, h, http.MethodPost, "/api/v1/filesystems", `{"idempotency_key":"http-fs-alias","name":"shared-alias","protocol":"nfs","size_gib":100}`, http.StatusCreated)
+	filesystemID := jsonStringField(t, filesystemResp, "id")
+	// Console still posts the legacy capacity field; it is read as size_gib.
+	expanded := performJSONRequest(t, h, http.MethodPost, "/api/v1/filesystems/"+filesystemID+"/expand", `{"idempotency_key":"http-fs-alias-expand","capacity":101}`, http.StatusAccepted)
+	if got := jsonNestedNumberField(t, expanded, "result", "filesystem", "size_gib"); got != 101 {
+		t.Fatalf("expanded body = %s, want size_gib 101", expanded)
+	}
+	// size_gib stays canonical and wins whenever it is provided.
+	canonical := performJSONRequest(t, h, http.MethodPost, "/api/v1/filesystems/"+filesystemID+"/expand", `{"idempotency_key":"http-fs-canonical-expand","size_gib":200,"capacity":999}`, http.StatusAccepted)
+	if got := jsonNestedNumberField(t, canonical, "result", "filesystem", "size_gib"); got != 200 {
+		t.Fatalf("canonical body = %s, want size_gib 200", canonical)
+	}
+}
+
 func performJSONRequest(t *testing.T, h *server.Hertz, method string, path string, body string, wantStatus int) []byte {
 	t.Helper()
 	var reqBody *ut.Body
@@ -622,4 +742,314 @@ func jsonNestedNumberField(t *testing.T, body []byte, first string, second strin
 	secondMap, _ := firstMap[second].(map[string]any)
 	value, _ := secondMap[third].(float64)
 	return value
+}
+
+func TestStorageHTTPVolumeListFiltersByKeywordAndStatus(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), runtimeadapter.NewLocalStorageService())
+
+	// 创建两个不同名称的卷。
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes", `{"idempotency_key":"list-filter-vol-a","name":"data-prometheus","size_gib":100,"storage_class":"standard","zone":"az-a","volume_type":"ssd"}`, http.StatusCreated)
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes", `{"idempotency_key":"list-filter-vol-b","name":"data-backup","size_gib":200,"storage_class":"standard","zone":"az-a","volume_type":"ssd"}`, http.StatusCreated)
+
+	countItems := func(query string) int {
+		t.Helper()
+		body := performJSONRequest(t, h, http.MethodGet, "/api/v1/volumes"+query, "", http.StatusOK)
+		var decoded struct {
+			Items []map[string]any `json:"items"`
+		}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("decode %s: %v", body, err)
+		}
+		return len(decoded.Items)
+	}
+
+	if got := countItems(""); got != 2 {
+		t.Fatalf("volumes count = %d, want 2", got)
+	}
+	if got := countItems("?keyword=prometheus"); got != 1 {
+		t.Fatalf("keyword=prometheus count = %d, want 1", got)
+	}
+	if got := countItems("?keyword=data-"); got != 2 {
+		t.Fatalf("keyword=data- count = %d, want 2", got)
+	}
+	if got := countItems("?state=available"); got != 2 {
+		t.Fatalf("state=available count = %d, want 2", got)
+	}
+	if got := countItems("?state=failed"); got != 0 {
+		t.Fatalf("state=failed count = %d, want 0", got)
+	}
+	// state 支持逗号分隔多值（any-of）：available,failed 任一命中即返回。
+	if got := countItems("?state=available,failed"); got != 2 {
+		t.Fatalf("state=available,failed count = %d, want 2", got)
+	}
+	if got := countItems("?state=failed,deleting"); got != 0 {
+		t.Fatalf("state=failed,deleting count = %d, want 0", got)
+	}
+	if got := countItems("?keyword=no_such"); got != 0 {
+		t.Fatalf("keyword=no_such count = %d, want 0", got)
+	}
+
+	// search_field 统一约定：search_field=name 按名称模糊（同缺省 keyword），
+	// search_field=id 按资源 ID 过滤。
+	if got := countItems("?search_field=name&keyword=prometheus"); got != 1 {
+		t.Fatalf("search_field=name&keyword=prometheus count = %d, want 1", got)
+	}
+	listBody := performJSONRequest(t, h, http.MethodGet, "/api/v1/volumes?search_field=name&keyword=data-", "", http.StatusOK)
+	var listRes struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(listBody, &listRes); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	firstID, _ := listRes.Items[0]["id"].(string)
+	if got := countItems("?search_field=id&keyword=" + firstID); got != 1 {
+		t.Fatalf("search_field=id&keyword=%s count = %d, want 1", firstID, got)
+	}
+	if got := countItems("?search_field=id&keyword=no-such-id"); got != 0 {
+		t.Fatalf("search_field=id&keyword=no-such-id count = %d, want 0", got)
+	}
+}
+
+func TestStorageHTTPVolumeListFiltersByVolumeMode(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), runtimeadapter.NewLocalStorageService())
+
+	// 默认卷为 filesystem，显式创建 block 卷。
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes", `{"idempotency_key":"mode-filter-fs","name":"mode-fs","size_gib":10,"volume_mode":"filesystem"}`, http.StatusCreated)
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes", `{"idempotency_key":"mode-filter-blk","name":"mode-blk","size_gib":10,"volume_mode":"block"}`, http.StatusCreated)
+
+	countItems := func(query string) int {
+		t.Helper()
+		body := performJSONRequest(t, h, http.MethodGet, "/api/v1/volumes"+query, "", http.StatusOK)
+		var decoded struct {
+			Items []map[string]any `json:"items"`
+		}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("decode %s: %v", body, err)
+		}
+		return len(decoded.Items)
+	}
+
+	if got := countItems(""); got != 2 {
+		t.Fatalf("volumes count = %d, want 2", got)
+	}
+	if got := countItems("?volume_mode=block"); got != 1 {
+		t.Fatalf("volume_mode=block count = %d, want 1", got)
+	}
+	if got := countItems("?volume_mode=filesystem"); got != 1 {
+		t.Fatalf("volume_mode=filesystem count = %d, want 1", got)
+	}
+	// 大小写不敏感归一。
+	if got := countItems("?volume_mode=BLOCK"); got != 1 {
+		t.Fatalf("volume_mode=BLOCK count = %d, want 1", got)
+	}
+	// 未知取值不命中任何卷。
+	if got := countItems("?volume_mode=raw"); got != 0 {
+		t.Fatalf("volume_mode=raw count = %d, want 0", got)
+	}
+}
+
+func TestStorageHTTPVolumeListAvailableForInstance(t *testing.T) {
+	service := runtimeadapter.NewLocalStorageService()
+	created := map[string]string{}
+	for i, spec := range []struct {
+		name string
+		mode string
+	}{
+		{"avail-blk-free", "block"},
+		{"avail-blk-busy", "block"},
+		{"avail-fs", "filesystem"},
+	} {
+		volume, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+			TenantID:       "tenant-a",
+			IdempotencyKey: fmt.Sprintf("avail-for-instance-%d", i),
+			Name:           spec.name,
+			SizeGiB:        10,
+			VolumeMode:     spec.mode,
+		})
+		if err != nil {
+			t.Fatalf("CreateVolume(%s) error = %v", spec.name, err)
+		}
+		created[spec.name] = volume.VolumeID
+	}
+
+	store := newMemoryInstanceStore()
+	mustUpsert := func(record ports.WorkloadInstanceRecord) {
+		t.Helper()
+		if err := store.UpsertStatus(context.Background(), record); err != nil {
+			t.Fatalf("UpsertStatus(%s) error = %v", record.InstanceID, err)
+		}
+	}
+	// VM 挂载目标：空闲 VM（应看到 blk-free）、占用了 blk-busy 的 VM。
+	mustUpsert(ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "inst-vm-free", Name: "vm-free",
+		Kind: ports.WorkloadKindVM, Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+	})
+	mustUpsert(ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "inst-vm-busy", Name: "vm-busy",
+		Kind: ports.WorkloadKindVM, Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		StorageAttachments: []ports.WorkloadStorageAttachment{storageVolumeAttach(created["avail-blk-busy"], "")},
+	})
+	// 容器挂载目标：只能看到 filesystem 卷。
+	mustUpsert(ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "inst-cont", Name: "cont-1",
+		Kind: ports.WorkloadKindContainer, Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+	})
+
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithServiceAndTasksAndStore(h.Group("/api/v1"), service, defaultTaskStore, store)
+
+	listIDs := func(query string) []string {
+		t.Helper()
+		body := performJSONRequest(t, h, http.MethodGet, "/api/v1/volumes"+query, "", http.StatusOK)
+		var decoded struct {
+			Items []map[string]any `json:"items"`
+		}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("decode %s: %v", body, err)
+		}
+		ids := make([]string, 0, len(decoded.Items))
+		for _, item := range decoded.Items {
+			id, _ := item["id"].(string)
+			ids = append(ids, id)
+		}
+		return ids
+	}
+
+	// VM 只能看到空闲的 block 卷；占用中的 block 卷不返回。
+	if got := listIDs("?available_for_instance_id=inst-vm-free"); len(got) != 1 || got[0] != created["avail-blk-free"] {
+		t.Fatalf("available_for_instance_id=inst-vm-free ids = %v, want [%s]", got, created["avail-blk-free"])
+	}
+	// 与前端一致的多值 state 组合仍命中。
+	if got := listIDs("?limit=100&state=pending,available&available_for_instance_id=inst-vm-free"); len(got) != 1 || got[0] != created["avail-blk-free"] {
+		t.Fatalf("state=pending,available + available_for_instance_id ids = %v, want [%s]", got, created["avail-blk-free"])
+	}
+	// 容器只能看到 filesystem 卷。
+	if got := listIDs("?available_for_instance_id=inst-cont"); len(got) != 1 || got[0] != created["avail-fs"] {
+		t.Fatalf("available_for_instance_id=inst-cont ids = %v, want [%s]", got, created["avail-fs"])
+	}
+	// 已占用 blk-busy 的 VM：能看到其他空闲 block 卷，但看不到占用中的 blk-busy。
+	gotBusy := listIDs("?available_for_instance_id=inst-vm-busy")
+	if len(gotBusy) != 1 || gotBusy[0] != created["avail-blk-free"] {
+		t.Fatalf("available_for_instance_id=inst-vm-busy ids = %v, want [%s] (occupied volumes excluded)", gotBusy, created["avail-blk-free"])
+	}
+	// 未知实例（含跨租户）返回 400 而不是静默空列表。
+	performJSONRequest(t, h, http.MethodGet, "/api/v1/volumes?available_for_instance_id=inst-nope", "", http.StatusBadRequest)
+}
+
+func TestStorageHTTPBucketListFiltersBySearchField(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), runtimeadapter.NewLocalStorageService())
+
+	// 创建两个不同名称的桶。
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/buckets", `{"idempotency_key":"list-filter-bucket-a","name":"data-prometheus","region":"cn-east-1","access_mode":"private"}`, http.StatusCreated)
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/buckets", `{"idempotency_key":"list-filter-bucket-b","name":"data-backup","region":"cn-east-1","access_mode":"private"}`, http.StatusCreated)
+
+	countItems := func(query string) int {
+		t.Helper()
+		body := performJSONRequest(t, h, http.MethodGet, "/api/v1/buckets"+query, "", http.StatusOK)
+		var decoded struct {
+			Items []map[string]any `json:"items"`
+		}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("decode %s: %v", body, err)
+		}
+		return len(decoded.Items)
+	}
+
+	if got := countItems(""); got != 2 {
+		t.Fatalf("buckets count = %d, want 2", got)
+	}
+	if got := countItems("?keyword=prometheus"); got != 1 {
+		t.Fatalf("keyword=prometheus count = %d, want 1", got)
+	}
+	// search_field 统一约定：name 按名称模糊、id 按资源 ID 过滤。
+	if got := countItems("?search_field=name&keyword=prometheus"); got != 1 {
+		t.Fatalf("search_field=name&keyword=prometheus count = %d, want 1", got)
+	}
+	listBody := performJSONRequest(t, h, http.MethodGet, "/api/v1/buckets?search_field=name&keyword=data-", "", http.StatusOK)
+	var listRes struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(listBody, &listRes); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	firstID, _ := listRes.Items[0]["id"].(string)
+	if got := countItems("?search_field=id&keyword=" + firstID); got != 1 {
+		t.Fatalf("search_field=id&keyword=%s count = %d, want 1", firstID, got)
+	}
+	if got := countItems("?search_field=id&keyword=no-such-id"); got != 0 {
+		t.Fatalf("search_field=id&keyword=no-such-id count = %d, want 0", got)
+	}
+}
+
+func TestStorageHTTPDeleteBucketLifecycle(t *testing.T) {
+	api := newStorageAPI()
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), api.service)
+
+	created := performJSONRequest(t, h, http.MethodPost, "/api/v1/buckets", `{"idempotency_key":"http-delete-bucket","name":"http-delete","region":"cn-east-1","access_mode":"private"}`, http.StatusCreated)
+	var createdBucket map[string]any
+	if err := json.Unmarshal(created, &createdBucket); err != nil {
+		t.Fatalf("decode create bucket: %v", err)
+	}
+	bucketID, _ := createdBucket["id"].(string)
+	if bucketID == "" {
+		t.Fatalf("created bucket = %s, want id", created)
+	}
+
+	// 桶内仍有对象时必须 409。
+	if _, err := api.service.CreateObject(context.Background(), ports.StorageObjectCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "http-delete-object",
+		Bucket:         "http-delete",
+		Key:            "raw/report.csv",
+		SizeBytes:      1024,
+	}); err != nil {
+		t.Fatalf("CreateObject error = %v", err)
+	}
+	performJSONRequest(t, h, http.MethodDelete, "/api/v1/buckets/"+bucketID, "", http.StatusConflict)
+
+	// 清空对象后删除成功，并返回被删桶。
+	if _, err := api.service.DeleteBucketObject(context.Background(), ports.StorageBucketObjectDeleteRequest{
+		TenantID: "tenant-a",
+		BucketID: bucketID,
+		Key:      "raw/report.csv",
+	}); err != nil {
+		t.Fatalf("DeleteBucketObject error = %v", err)
+	}
+	deleted := performJSONRequest(t, h, http.MethodDelete, "/api/v1/buckets/"+bucketID, "", http.StatusOK)
+	var deletedBucket map[string]any
+	if err := json.Unmarshal(deleted, &deletedBucket); err != nil {
+		t.Fatalf("decode delete bucket: %v", err)
+	}
+	if deletedBucket["id"] != bucketID {
+		t.Fatalf("deleted bucket id = %v, want %s", deletedBucket["id"], bucketID)
+	}
+
+	// 删除后桶级子操作为 404，重复删除与不存在的桶同为 404。
+	performJSONRequest(t, h, http.MethodGet, "/api/v1/buckets/"+bucketID+"/objects", "", http.StatusNotFound)
+	performJSONRequest(t, h, http.MethodDelete, "/api/v1/buckets/"+bucketID, "", http.StatusNotFound)
+	performJSONRequest(t, h, http.MethodDelete, "/api/v1/buckets/no-such-bucket", "", http.StatusNotFound)
 }

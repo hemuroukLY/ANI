@@ -10,6 +10,8 @@ import (
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
+const sandboxWorkspaceStorageClassName = "ani-block"
+
 type KubernetesDryRunRenderer struct {
 	planner *PlanningRuntime
 }
@@ -34,7 +36,14 @@ func (r *KubernetesDryRunRenderer) Render(ctx context.Context, spec ports.Worklo
 	case ports.WorkloadKindBatchJob:
 		manifests = []ports.WorkloadManifest{renderJob(planned)}
 	default:
-		manifests = []ports.WorkloadManifest{renderDeployment(planned)}
+		if planned.Kind == ports.WorkloadKindSandbox {
+			manifests = []ports.WorkloadManifest{renderSandboxWorkspacePVC(planned), renderDeployment(planned)}
+		} else {
+			manifests = []ports.WorkloadManifest{renderDeployment(planned)}
+		}
+		if planned.Container != nil && len(containerPortSpecs(planned)) > 0 {
+			manifests = append(manifests, renderService(planned))
+		}
 	}
 	// When a workload identity binding exists, render the K8s Secret that
 	// backs the ANI_WORKLOAD_TOKEN env var so the Deployment can reference it.
@@ -45,6 +54,7 @@ func (r *KubernetesDryRunRenderer) Render(ctx context.Context, spec ports.Worklo
 }
 
 func renderVM(spec ports.WorkloadSpec) ports.WorkloadManifest {
+	networks, interfaces := vmNetworksAndInterfaces(spec)
 	content := manifest(map[string]any{
 		"apiVersion": "kubevirt.io/v1",
 		"kind":       "VirtualMachine",
@@ -54,20 +64,24 @@ func renderVM(spec ports.WorkloadSpec) ports.WorkloadManifest {
 			"template": map[string]any{
 				"metadata": map[string]any{
 					"labels":      labels(spec),
-					"annotations": annotationsWithInstancePlan(spec),
+					"annotations": podTemplateAnnotations(spec),
 				},
 				"spec": map[string]any{
 					"domain": map[string]any{
 						"machine": map[string]any{"type": firstNonEmpty(spec.VM.MachineType, "q35")},
 						"devices": map[string]any{
-							"disks": vmDisks(spec),
+							// K8s 1.28 without SidecarContainers treats guest-console-log
+							// (virt-tail) as a blocking init container; disable for lab/live.
+							"logSerialConsole": false,
+							"disks":            vmDisks(spec),
+							"interfaces":       interfaces,
 						},
 						"resources": map[string]any{
 							"requests": resourceRequests(spec),
 						},
 					},
 					"volumes":  vmVolumes(spec),
-					"networks": networkRefs(spec),
+					"networks": networks,
 				},
 			},
 		},
@@ -81,12 +95,40 @@ func renderDeployment(spec ports.WorkloadSpec) ports.WorkloadManifest {
 		"kind":       "Deployment",
 		"metadata":   metadata(spec, "workload"),
 		"spec": map[string]any{
-			"replicas": 1,
+			"replicas": containerReplicas(spec),
 			"selector": map[string]any{"matchLabels": selectorLabels(spec)},
 			"template": podTemplate(spec),
 		},
 	})
 	return ports.WorkloadManifest{Name: spec.Name, Kind: "Deployment", Provider: "kubernetes", Content: content}
+}
+
+func renderService(spec ports.WorkloadSpec) ports.WorkloadManifest {
+	portsSpec := containerPortSpecs(spec)
+	servicePorts := make([]any, 0, len(portsSpec))
+	for index, port := range portsSpec {
+		name := strings.TrimSpace(port.Name)
+		if name == "" {
+			name = "port-" + strconv.Itoa(index+1)
+		}
+		servicePorts = append(servicePorts, map[string]any{
+			"name":       name,
+			"port":       port.ContainerPort,
+			"targetPort": port.ContainerPort,
+			"protocol":   strings.ToUpper(firstNonEmpty(port.Protocol, "TCP")),
+		})
+	}
+	content := manifest(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   metadata(spec, "service"),
+		"spec": map[string]any{
+			"type":     "ClusterIP",
+			"selector": selectorLabels(spec),
+			"ports":    servicePorts,
+		},
+	})
+	return ports.WorkloadManifest{Name: spec.Name, Kind: "Service", Provider: "kubernetes", Content: content}
 }
 
 func renderJob(spec ports.WorkloadSpec) ports.WorkloadManifest {
@@ -103,6 +145,20 @@ func renderJob(spec ports.WorkloadSpec) ports.WorkloadManifest {
 }
 
 func podTemplate(spec ports.WorkloadSpec) map[string]any {
+	storage := renderStorageAttachments(spec)
+	envFrom := secretEnvFromIDs(spec)
+	envFrom = append(envFrom, secretEnvFrom(spec.SecretBindings)...)
+	resources := containerResources(spec)
+	// Merge Volcano resource-request annotations (e.g. volcano.sh/vgpu-memory,
+	// volcano.sh/vgpu-number, nvidia.com/gpu) into the container resources.
+	if existing, ok := resources["limits"].(map[string]string); ok {
+		merged := resourceRequestsFromAnnotations(spec, existing)
+		resources["limits"] = merged
+	}
+	if existing, ok := resources["requests"].(map[string]string); ok {
+		merged := resourceRequestsFromAnnotations(spec, existing)
+		resources["requests"] = merged
+	}
 	podSpec := map[string]any{
 		"restartPolicy": "Always",
 		"containers": []any{
@@ -111,14 +167,28 @@ func podTemplate(spec ports.WorkloadSpec) map[string]any {
 				"image":        spec.Image,
 				"command":      omitEmptySlice(spec.Command),
 				"args":         omitEmptySlice(spec.Args),
-				"env":          workloadIdentityEnv(spec),
-				"envFrom":      secretEnvFrom(spec.SecretBindings),
-				"resources":    containerResources(spec),
+				"env":          containerEnv(spec),
+				"envFrom":      envFrom,
+				"resources":    resources,
 				"ports":        containerPorts(spec),
-				"volumeMounts": append(volumeMounts(spec.Storage), secretVolumeMounts(spec.SecretBindings)...),
+				"volumeMounts": append(volumeMounts(storage), secretVolumeMounts(spec.SecretBindings)...),
 			},
 		},
-		"volumes": append(volumes(spec.Storage), secretVolumes(spec.SecretBindings)...),
+		"volumes": append(volumes(storage), secretVolumes(spec.SecretBindings)...),
+	}
+	if spec.Kind == ports.WorkloadKindSandbox {
+		containers := podSpec["containers"].([]any)
+		container := containers[0].(map[string]any)
+		container["volumeMounts"] = append(container["volumeMounts"].([]any), map[string]any{
+			"name":      "sandbox-workspace",
+			"mountPath": sandboxWorkspaceRoot,
+		})
+		podSpec["volumes"] = append(podSpec["volumes"].([]any), map[string]any{
+			"name": "sandbox-workspace",
+			"persistentVolumeClaim": map[string]any{
+				"claimName": sandboxWorkspacePVCName(spec.Name),
+			},
+		})
 	}
 	if spec.Kind == ports.WorkloadKindBatchJob {
 		podSpec["restartPolicy"] = "Never"
@@ -132,14 +202,84 @@ func podTemplate(spec ports.WorkloadSpec) map[string]any {
 	if spec.ServiceAccountName != "" {
 		podSpec["serviceAccountName"] = spec.ServiceAccountName
 	}
+	// Apply Volcano nodeSelector from annotations (ani.kubercloud.io/node-selector/*).
+	if nodeSelector := nodeSelectorFromAnnotations(spec); nodeSelector != nil {
+		podSpec["nodeSelector"] = nodeSelector
+	}
 
 	return map[string]any{
 		"metadata": map[string]any{
 			"labels":      selectorLabels(spec),
-			"annotations": annotationsWithInstancePlan(spec),
+			"annotations": podTemplateAnnotations(spec),
 		},
 		"spec": podSpec,
 	}
+}
+
+func renderSandboxWorkspacePVC(spec ports.WorkloadSpec) ports.WorkloadManifest {
+	name := sandboxWorkspacePVCName(spec.Name)
+	meta := metadata(spec, "sandbox-workspace")
+	meta["name"] = name
+	pvcSpec := map[string]any{
+		"accessModes":      []any{"ReadWriteOnce"},
+		"storageClassName": sandboxWorkspaceStorageClassName,
+		"resources": map[string]any{
+			"requests": map[string]any{"storage": "5Gi"},
+		},
+	}
+	if snapshotName := sandboxCheckpointSnapshotName(spec.SandboxCheckpointSourceRef); snapshotName != "" {
+		pvcSpec["dataSource"] = map[string]any{
+			"apiGroup": "snapshot.storage.k8s.io",
+			"kind":     "VolumeSnapshot",
+			"name":     snapshotName,
+		}
+	}
+	return ports.WorkloadManifest{
+		Name: name, Kind: "PersistentVolumeClaim", Provider: "kubernetes",
+		Content: manifest(map[string]any{
+			"apiVersion": "v1",
+			"kind":       "PersistentVolumeClaim",
+			"metadata":   meta,
+			"spec":       pvcSpec,
+		}),
+	}
+}
+
+func sandboxWorkspacePVCName(instanceName string) string {
+	return instanceName + "-workspace"
+}
+
+func sandboxCheckpointSnapshotName(ref string) string {
+	parts := strings.Split(strings.TrimSpace(ref), "/")
+	if len(parts) == 3 && parts[0] == "kubernetes" && parts[1] == "VolumeSnapshot" {
+		return parts[2]
+	}
+	return ""
+}
+
+// volcanoPodTemplateAnnotationPrefixes are annotation key prefixes that must
+// land on the PodTemplate metadata (spec.template.metadata.annotations), not
+// the top-level object metadata. metadata() filters these out so they do not
+// leak onto the Deployment/Job/Service top-level annotations.
+var volcanoPodTemplateAnnotationPrefixes = []string{
+	"scheduling.volcano.sh/",
+	"ani.kubercloud.io/scheduler-name",
+	volcanoNodeSelectorAnnotation,
+	volcanoResourceRequestAnnotation,
+}
+
+// isPodTemplateOnlyAnnotation reports whether the annotation key should only
+// appear on the PodTemplate metadata and be filtered out of the top-level
+// object metadata.
+func isPodTemplateOnlyAnnotation(key string) bool {
+	for _, prefix := range volcanoPodTemplateAnnotationPrefixes {
+		// "scheduling.volcano.sh/" is a prefix with trailing slash, so
+		// HasPrefix matches keys under that domain (e.g. .../queue-name).
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func metadata(spec ports.WorkloadSpec, component string) map[string]any {
@@ -149,7 +289,7 @@ func metadata(spec ports.WorkloadSpec, component string) map[string]any {
 		"labels": mergeStringMap(labels(spec), map[string]string{
 			"app.kubernetes.io/component": component,
 		}),
-		"annotations": annotationsWithInstancePlan(spec),
+		"annotations": objectAnnotations(spec),
 	}
 }
 
@@ -172,10 +312,23 @@ func selectorLabels(spec ports.WorkloadSpec) map[string]string {
 func annotationsWithInstancePlan(spec ports.WorkloadSpec) map[string]string {
 	annotations := mergeStringMap(map[string]string{
 		"ani.kubercloud.io/network-planes":  networkPlanes(spec.Network.Attachments),
-		"ani.kubercloud.io/storage-kinds":   storageKinds(spec.Storage),
+		"ani.kubercloud.io/storage-kinds":   storageKinds(renderStorageAttachments(spec)),
 		"ani.kubercloud.io/render-mode":     "dry-run",
 		"ani.kubercloud.io/runtime-adapter": "planning",
 	}, spec.Annotations)
+	if vpcID := strings.TrimSpace(spec.Network.VPCID); vpcID != "" {
+		annotations["ani.kubercloud.io/vpc-id"] = vpcID
+	}
+	if subnetID := strings.TrimSpace(spec.Network.SubnetID); subnetID != "" {
+		annotations["ani.kubercloud.io/subnet-id"] = subnetID
+		annotations["ovn.kubernetes.io/logical_switch"] = networkProviderName("subnet", subnetID)
+	}
+	if privateIP := strings.TrimSpace(spec.Network.PrivateIP); privateIP != "" {
+		annotations["ovn.kubernetes.io/ip_address"] = privateIP
+	}
+	if securityGroups := joinSecurityGroupIDs(spec.Network.SecurityGroupIDs); securityGroups != "" {
+		annotations["ani.kubercloud.io/security-groups"] = securityGroups
+	}
 	if spec.Identity != nil {
 		annotations["ani.kubercloud.io/workload-identity-key-id"] = spec.Identity.KeyID
 		annotations["ani.kubercloud.io/workload-identity-secret"] = workloadIdentitySecretName(spec)
@@ -186,6 +339,80 @@ func annotationsWithInstancePlan(spec ports.WorkloadSpec) map[string]string {
 		}
 	}
 	return annotations
+}
+
+// objectAnnotations returns the platform annotations for top-level object
+// metadata (Deployment/Job/Service). It calls annotationsWithInstancePlan and
+// then strips Volcano PodTemplate-only keys so they do not leak onto the
+// top-level metadata where Volcano would ignore them.
+func objectAnnotations(spec ports.WorkloadSpec) map[string]string {
+	annotations := annotationsWithInstancePlan(spec)
+	for key := range annotations {
+		if isPodTemplateOnlyAnnotation(key) {
+			delete(annotations, key)
+		}
+	}
+	return annotations
+}
+
+// podTemplateAnnotations returns the annotations that should appear on the
+// PodTemplate metadata (spec.template.metadata.annotations). This includes
+// all platform annotations plus Volcano PodTemplate-only keys.
+func podTemplateAnnotations(spec ports.WorkloadSpec) map[string]string {
+	return annotationsWithInstancePlan(spec)
+}
+
+// nodeSelectorFromAnnotations extracts the JSON-encoded nodeSelector injected
+// by the Volcano translator/planner (ani.kubercloud.io/volcano-node-selector)
+// into a K8s Pod spec nodeSelector map.
+func nodeSelectorFromAnnotations(spec ports.WorkloadSpec) map[string]string {
+	raw, ok := spec.Annotations[volcanoNodeSelectorAnnotation]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	result := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		return nil
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// resourceRequestsFromAnnotations extracts the JSON-encoded Volcano resource
+// requests (ani.kubercloud.io/volcano-resource-requests) and merges them into
+// the container resources map. Values from annotations override existing
+// entries for the same key.
+func resourceRequestsFromAnnotations(spec ports.WorkloadSpec, existing map[string]string) map[string]string {
+	result := map[string]string{}
+	for k, v := range existing {
+		result[k] = v
+	}
+	raw, ok := spec.Annotations[volcanoResourceRequestAnnotation]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return result
+	}
+	decoded := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return result
+	}
+	for k, v := range decoded {
+		result[k] = v
+	}
+	return result
+}
+
+func joinSecurityGroupIDs(ids []string) string {
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		parts = append(parts, id)
+	}
+	return strings.Join(parts, ",")
 }
 
 func workloadIdentityEnv(spec ports.WorkloadSpec) []any {
@@ -208,6 +435,23 @@ func workloadIdentityEnv(spec ports.WorkloadSpec) []any {
 			"value": spec.Identity.InstanceID,
 		},
 	}
+}
+
+func containerEnv(spec ports.WorkloadSpec) []any {
+	items := workloadIdentityEnv(spec)
+	if spec.Container == nil {
+		return items
+	}
+	for _, env := range spec.Container.Env {
+		entry := map[string]any{"name": env.Name}
+		if env.SecretRef != "" {
+			entry["valueFrom"] = map[string]any{"secretKeyRef": map[string]any{"name": env.SecretRef, "key": env.Name}}
+		} else if env.Value != nil {
+			entry["value"] = *env.Value
+		}
+		items = append(items, entry)
+	}
+	return items
 }
 
 func workloadIdentitySecretName(spec ports.WorkloadSpec) string {
@@ -235,7 +479,7 @@ func renderWorkloadIdentitySecret(spec ports.WorkloadSpec) ports.WorkloadManifes
 			"labels": mergeStringMap(labels(spec), map[string]string{
 				"app.kubernetes.io/component": "workload-identity",
 			}),
-			"annotations": annotationsWithInstancePlan(spec),
+			"annotations": objectAnnotations(spec),
 		},
 		"type": "Opaque",
 		"data": map[string]string{
@@ -256,10 +500,14 @@ func containerResources(spec ports.WorkloadSpec) map[string]any {
 		requests["memory"] = spec.Resources.Memory
 		limits["memory"] = spec.Resources.Memory
 	}
-	if requiresGPU(spec.Kind) {
-		resourceName := firstNonEmpty(spec.Annotations["ani.kubercloud.io/gpu-resource-name"], "nvidia.com/gpu")
-		quantity := firstNonEmpty(spec.Annotations["ani.kubercloud.io/gpu-resource-quantity"], strconv.Itoa(spec.Resources.GPU.RequiredCount))
-		limits[resourceName] = quantity
+	if requiresGPU(spec.Kind, spec.Resources) {
+		// When Volcano resource requests are present (vGPU/wholecard spec),
+		// they fully define the GPU resources — skip the legacy default.
+		if _, hasVolcanoRequests := spec.Annotations[volcanoResourceRequestAnnotation]; !hasVolcanoRequests {
+			resourceName := firstNonEmpty(spec.Annotations["ani.kubercloud.io/gpu-resource-name"], "nvidia.com/gpu")
+			quantity := firstNonEmpty(spec.Annotations["ani.kubercloud.io/gpu-resource-quantity"], strconv.Itoa(spec.Resources.GPU.RequiredCount))
+			limits[resourceName] = quantity
+		}
 	}
 	return map[string]any{
 		"requests": requests,
@@ -282,11 +530,121 @@ func containerPorts(spec ports.WorkloadSpec) []any {
 	if spec.Container == nil {
 		return nil
 	}
+	if len(spec.Container.PortSpecs) > 0 {
+		items := make([]any, 0, len(spec.Container.PortSpecs))
+		for _, port := range spec.Container.PortSpecs {
+			entry := map[string]any{"containerPort": port.ContainerPort, "protocol": strings.ToUpper(firstNonEmpty(port.Protocol, "TCP"))}
+			if port.Name != "" {
+				entry["name"] = port.Name
+			}
+			items = append(items, entry)
+		}
+		return items
+	}
 	ports := make([]any, 0, len(spec.Container.Ports))
 	for _, port := range spec.Container.Ports {
-		ports = append(ports, map[string]any{"containerPort": port})
+		ports = append(ports, map[string]any{"containerPort": port, "protocol": "TCP"})
 	}
 	return ports
+}
+
+func containerPortSpecs(spec ports.WorkloadSpec) []ports.InstancePortSpec {
+	if spec.Container == nil {
+		return nil
+	}
+	if len(spec.Container.PortSpecs) > 0 {
+		return append([]ports.InstancePortSpec(nil), spec.Container.PortSpecs...)
+	}
+	items := make([]ports.InstancePortSpec, 0, len(spec.Container.Ports))
+	for _, port := range spec.Container.Ports {
+		items = append(items, ports.InstancePortSpec{ContainerPort: port, Protocol: "TCP"})
+	}
+	return items
+}
+
+func containerReplicas(spec ports.WorkloadSpec) int32 {
+	if spec.Container == nil || spec.Container.Replicas < 1 {
+		return 1
+	}
+	return spec.Container.Replicas
+}
+
+func renderStorageAttachments(spec ports.WorkloadSpec) []ports.WorkloadStorageAttachment {
+	items := make([]ports.WorkloadStorageAttachment, 0, len(spec.Storage))
+	seen := map[string]struct{}{}
+	for _, item := range spec.Storage {
+		item = normalizeContainerStorageAttachment(item)
+		item.Name = firstNonEmpty(item.Name, storageMountName(item.ResourceType, item.ResourceID))
+		key := item.ResourceType + ":" + item.ResourceID + ":" + item.MountPath
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		items = append(items, item)
+	}
+	if spec.Container == nil {
+		return items
+	}
+	for _, mount := range spec.Container.VolumeMounts {
+		item := normalizeContainerStorageAttachment(ports.WorkloadStorageAttachment{
+			Name:         storageMountName("volume", mount.VolumeID),
+			ResourceType: "volume",
+			ResourceID:   mount.VolumeID,
+			MountPath:    mount.MountPath,
+			ReadOnly:     mount.ReadOnly,
+		})
+		key := item.ResourceType + ":" + item.ResourceID + ":" + item.MountPath
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			items = append(items, item)
+		}
+	}
+	for _, mount := range spec.Container.FilesystemMounts {
+		item := normalizeContainerStorageAttachment(ports.WorkloadStorageAttachment{
+			Name:         storageMountName("filesystem", mount.FilesystemID),
+			ResourceType: "filesystem",
+			ResourceID:   mount.FilesystemID,
+			MountPath:    mount.MountPath,
+			ReadOnly:     mount.ReadOnly,
+		})
+		key := item.ResourceType + ":" + item.ResourceID + ":" + item.MountPath
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+// normalizeContainerStorageAttachment maps resolved volume/filesystem refs onto
+// shared PVC claims so container pods mount existing Storage provider PVCs
+// instead of emptyDir placeholders.
+func normalizeContainerStorageAttachment(item ports.WorkloadStorageAttachment) ports.WorkloadStorageAttachment {
+	resourceID := strings.TrimSpace(item.ResourceID)
+	if resourceID == "" {
+		return item
+	}
+	switch strings.TrimSpace(item.ResourceType) {
+	case "filesystem":
+		item.Kind = ports.StorageAttachmentSharedPVC
+		item.SourceRef = firstNonEmpty(item.SourceRef, storageProviderName("fs", resourceID))
+	case "volume", "":
+		item.ResourceType = "volume"
+		if item.Kind == "" || item.Kind == ports.StorageAttachmentDataDisk || item.Kind == ports.StorageAttachmentSharedPVC {
+			item.Kind = ports.StorageAttachmentSharedPVC
+			item.SourceRef = firstNonEmpty(item.SourceRef, storageProviderName("vol", resourceID))
+		}
+	}
+	return item
+}
+
+func storageMountName(kind, resourceID string) string {
+	name := strings.TrimSpace(resourceID)
+	if name == "" {
+		name = kind
+	}
+	name = strings.NewReplacer("/", "-", "_", "-", ".", "-").Replace(name)
+	return kind + "-" + name
 }
 
 func volumeMounts(storage []ports.WorkloadStorageAttachment) []any {
@@ -314,6 +672,33 @@ func secretEnvFrom(bindings []ports.WorkloadSecretBinding) []any {
 			"prefix": binding.EnvPrefix,
 			"secretRef": map[string]any{
 				"name": binding.SecretID,
+			},
+		})
+	}
+	if len(envFrom) == 0 {
+		return nil
+	}
+	return envFrom
+}
+
+func secretEnvFromIDs(spec ports.WorkloadSpec) []any {
+	if spec.Container == nil {
+		return nil
+	}
+	envFrom := make([]any, 0, len(spec.Container.SecretIDs))
+	seen := map[string]struct{}{}
+	for _, secretID := range spec.Container.SecretIDs {
+		secretID = strings.TrimSpace(secretID)
+		if secretID == "" {
+			continue
+		}
+		if _, ok := seen[secretID]; ok {
+			continue
+		}
+		seen[secretID] = struct{}{}
+		envFrom = append(envFrom, map[string]any{
+			"secretRef": map[string]any{
+				"name": secretID,
 			},
 		})
 	}
@@ -399,6 +784,21 @@ func secretVolumeName(binding ports.WorkloadSecretBinding, index int) string {
 	return name
 }
 
+// vmVolumeClaimName resolves the provider PVC a VM volume attaches to. Storage
+// attachments reference ANI volume IDs, which map to provider PVC claims
+// through storageProviderName; a SourceRef that is already a concrete claim
+// passes through, and only source-less placeholders fall back to the
+// spec-derived name.
+func vmVolumeClaimName(spec ports.WorkloadSpec, attachment ports.WorkloadStorageAttachment) string {
+	if claim := strings.TrimSpace(attachment.SourceRef); claim != "" {
+		return claim
+	}
+	if resourceID := strings.TrimSpace(attachment.ResourceID); resourceID != "" {
+		return storageProviderName("vol", resourceID)
+	}
+	return spec.Name + "-" + attachment.Name
+}
+
 func vmVolumes(spec ports.WorkloadSpec) []any {
 	volumes := []any{
 		map[string]any{
@@ -409,12 +809,18 @@ func vmVolumes(spec ports.WorkloadSpec) []any {
 		},
 	}
 	for _, attachment := range spec.Storage {
+		if isContainerDiskPlaceholderRoot(spec, attachment) {
+			continue
+		}
 		volumes = append(volumes, map[string]any{
 			"name": attachment.Name,
 			"persistentVolumeClaim": map[string]any{
-				"claimName": firstNonEmpty(attachment.SourceRef, spec.Name+"-"+attachment.Name),
+				"claimName": vmVolumeClaimName(spec, attachment),
 			},
 		})
+	}
+	if cloudInit := vmCloudInitVolume(spec); cloudInit != nil {
+		volumes = append(volumes, cloudInit)
 	}
 	volumes = append(volumes, secretVolumes(spec.SecretBindings)...)
 	return volumes
@@ -428,8 +834,17 @@ func vmDisks(spec ports.WorkloadSpec) []any {
 		},
 	}
 	for _, attachment := range spec.Storage {
+		if isContainerDiskPlaceholderRoot(spec, attachment) {
+			continue
+		}
 		disks = append(disks, map[string]any{
 			"name": attachment.Name,
+			"disk": map[string]any{"bus": "virtio"},
+		})
+	}
+	if vmCloudInitEnabled(spec) {
+		disks = append(disks, map[string]any{
+			"name": "cloudinitdisk",
 			"disk": map[string]any{"bus": "virtio"},
 		})
 	}
@@ -438,12 +853,44 @@ func vmDisks(spec ports.WorkloadSpec) []any {
 			continue
 		}
 		disks = append(disks, map[string]any{
-			"name":     secretVolumeName(binding, i),
-			"disk":     map[string]any{"bus": "virtio"},
-			"readOnly": true,
+			"name": secretVolumeName(binding, i),
+			"disk": map[string]any{"bus": "virtio"},
 		})
 	}
 	return disks
+}
+
+func vmCloudInitEnabled(spec ports.WorkloadSpec) bool {
+	if spec.VM == nil {
+		return false
+	}
+	return strings.TrimSpace(spec.VM.CloudInitSecret) != "" ||
+		strings.TrimSpace(spec.VM.PasswordSecret) != "" ||
+		strings.TrimSpace(spec.VM.UserData) != ""
+}
+
+func vmCloudInitVolume(spec ports.WorkloadSpec) map[string]any {
+	if spec.VM == nil {
+		return nil
+	}
+	cloudInit := map[string]any{}
+	if secretID := strings.TrimSpace(spec.VM.CloudInitSecret); secretID != "" {
+		cloudInit["secretRef"] = map[string]any{"name": secretID}
+	} else if passSecret := strings.TrimSpace(spec.VM.PasswordSecret); passSecret != "" {
+		// password_secret_ref 与 cloud_init_secret 互斥（Gateway 校验），
+		// 二者都指向含 userdata 键的 cloud-init Secret。
+		cloudInit["secretRef"] = map[string]any{"name": passSecret}
+	}
+	if userData := strings.TrimSpace(spec.VM.UserData); userData != "" {
+		cloudInit["userData"] = userData
+	}
+	if len(cloudInit) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"name":             "cloudinitdisk",
+		"cloudInitNoCloud": cloudInit,
+	}
 }
 
 func vmSecretMountAnnotation(bindings []ports.WorkloadSecretBinding) string {
@@ -457,17 +904,100 @@ func vmSecretMountAnnotation(bindings []ports.WorkloadSecretBinding) string {
 	return strings.Join(mounts, ",")
 }
 
-func networkRefs(spec ports.WorkloadSpec) []any {
-	networks := make([]any, 0, len(spec.Network.Attachments))
-	for _, attachment := range spec.Network.Attachments {
+func isContainerDiskPlaceholderRoot(spec ports.WorkloadSpec, attachment ports.WorkloadStorageAttachment) bool {
+	if attachment.Kind != ports.StorageAttachmentRootDisk {
+		return false
+	}
+	if strings.TrimSpace(attachment.ResourceID) != "" {
+		return false
+	}
+	source := strings.TrimSpace(attachment.SourceRef)
+	if source == "" {
+		return true
+	}
+	if spec.VM != nil && source == strings.TrimSpace(spec.VM.BootImage) {
+		return true
+	}
+	// Gateway defaults SourceRef to an image path when no concrete PVC/volume is chosen.
+	return looksLikeImageReference(source)
+}
+
+func looksLikeImageReference(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	if strings.Contains(value, ":") {
+		return true
+	}
+	return strings.Contains(value, "/") && strings.Contains(value, ".")
+}
+
+func isPlaceholderNetworkAttachment(attachment ports.WorkloadNetworkAttachment) bool {
+	networkID := strings.TrimSpace(attachment.NetworkID)
+	plane := strings.TrimSpace(string(attachment.Plane))
+	if networkID == "" || networkID == plane {
+		return true
+	}
+	if strings.ReplaceAll(networkID, "-", "_") == plane {
+		return true
+	}
+	switch networkID {
+	case "tenant-vpc", "foundation-mesh", "management", "storage":
+		return true
+	default:
+		return false
+	}
+}
+
+// vmNetworksAndInterfaces renders KubeVirt networks/interfaces as a matched pair.
+// ANI VPC/Subnet IDs are product resources, not Multus NAD names. An explicitly
+// resolved Kube-OVN subnet therefore uses the pod network with bridge binding;
+// Multus is reserved for non-primary, non-placeholder internal attachments.
+func vmNetworksAndInterfaces(spec ports.WorkloadSpec) (networks []any, interfaces []any) {
+	if strings.TrimSpace(spec.Network.SubnetID) != "" {
 		networks = append(networks, map[string]any{
-			"name": string(attachment.Plane),
-			"multus": map[string]any{
-				"networkName": attachment.NetworkID,
-			},
+			"name": "default",
+			"pod":  map[string]any{},
+		})
+		interfaces = append(interfaces, map[string]any{
+			"name":   "default",
+			"bridge": map[string]any{},
 		})
 	}
-	return networks
+	for _, attachment := range spec.Network.Attachments {
+		if attachment.Primary || attachment.Plane == ports.NetworkPlaneTenantVPC || isPlaceholderNetworkAttachment(attachment) {
+			continue
+		}
+		networkID := strings.TrimSpace(attachment.NetworkID)
+		plane := strings.TrimSpace(string(attachment.Plane))
+		name := firstNonEmpty(plane, networkID)
+		networks = append(networks, map[string]any{
+			"name": name,
+			"multus": map[string]any{
+				"networkName": networkID,
+			},
+		})
+		interfaces = append(interfaces, map[string]any{
+			"name":   name,
+			"bridge": map[string]any{},
+		})
+	}
+	if len(networks) == 0 {
+		networks = []any{
+			map[string]any{
+				"name": "default",
+				"pod":  map[string]any{},
+			},
+		}
+		interfaces = []any{
+			map[string]any{
+				"name":       "default",
+				"masquerade": map[string]any{},
+			},
+		}
+	}
+	return networks, interfaces
 }
 
 func manifest(value map[string]any) string {

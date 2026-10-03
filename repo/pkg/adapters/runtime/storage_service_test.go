@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -460,19 +461,173 @@ func TestLocalStorageServiceBucketsAndSignedObjectURLsUseObjectStorePort(t *test
 	}
 }
 
+func TestLocalStorageServiceBucketStatsReflectObjectStoreUsage(t *testing.T) {
+	objectStore := &fakeObjectStore{
+		uploadURL: "https://objects.local/upload/report.csv",
+		expiresAt: time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC),
+	}
+	service := NewLocalStorageService(WithStorageObjectStore(objectStore))
+
+	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bucket-usage",
+		Name:           "datasets-usage",
+		Region:         "local",
+		AccessMode:     "private",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+
+	// Object store reports live usage; bucket stats must reflect the S3
+	// authority instead of control-plane records alone.
+	objectStore.statOK = true
+	objectStore.usage = ports.BucketUsage{ObjectCount: 3, SizeBytes: 52719}
+
+	listed, err := service.ListStorageBuckets(context.Background(), ports.StorageResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListStorageBuckets() error = %v", err)
+	}
+	if len(listed) != 1 || listed[0].ObjectCount != 3 || listed[0].SizeBytes != 52719 {
+		t.Fatalf("listed buckets = %#v, want object_count=3 size_bytes=52719 from object store", listed)
+	}
+	if objectStore.usageClass != ports.BucketClass("datasets-usage") || objectStore.usageTenantID != "tenant-a" {
+		t.Fatalf("usage lookup args = class=%q tenant=%q, want datasets-usage/tenant-a", objectStore.usageClass, objectStore.usageTenantID)
+	}
+
+	got, err := service.GetStorageBucket(context.Background(), ports.StorageResourceGetRequest{
+		TenantID:   "tenant-a",
+		ResourceID: bucket.BucketID,
+	})
+	if err != nil {
+		t.Fatalf("GetStorageBucket() error = %v", err)
+	}
+	if got.ObjectCount != 3 || got.SizeBytes != 52719 {
+		t.Fatalf("GetStorageBucket() stats = count=%d size=%d, want object store usage", got.ObjectCount, got.SizeBytes)
+	}
+
+	// Usage lookup failures fall back to control-plane stats without error.
+	objectStore.usageErr = ports.ErrUnsupported
+	fallback, err := service.ListStorageBuckets(context.Background(), ports.StorageResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListStorageBuckets() fallback error = %v", err)
+	}
+	if len(fallback) != 1 || fallback[0].ObjectCount != 0 || fallback[0].SizeBytes != 0 {
+		t.Fatalf("fallback buckets = %#v, want control-plane stats kept on usage lookup failure", fallback)
+	}
+}
+
+func TestLocalStorageServiceCompleteStorageObject(t *testing.T) {
+	objectStore := &fakeObjectStore{
+		uploadURL: "https://objects.local/upload/report.csv",
+		expiresAt: time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC),
+	}
+	service := NewLocalStorageService(WithStorageObjectStore(objectStore))
+
+	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bucket-complete",
+		Name:           "datasets-a",
+		Region:         "local",
+		AccessMode:     "private",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+
+	upload, err := service.CreateStorageObjectUpload(context.Background(), ports.StorageObjectUploadRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "upload-complete",
+		BucketID:       bucket.BucketID,
+		Key:            "raw/report.csv",
+		ContentType:    "text/csv",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageObjectUpload() error = %v", err)
+	}
+
+	// Content not uploaded yet: complete must fail with a precondition error.
+	objectStore.statOK = true
+	objectStore.statErr = ports.ErrNotFound
+	if _, err := service.CompleteStorageObject(context.Background(), ports.StorageObjectCompleteRequest{
+		TenantID:       "tenant-a",
+		ObjectID:       upload.ObjectID,
+		IdempotencyKey: "complete-a",
+	}); !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("CompleteStorageObject() before upload error = %v, want ErrFailedPrecondition", err)
+	}
+
+	// Content present: complete succeeds and backfills actual size and content type.
+	objectStore.statErr = nil
+	objectStore.statMetadata = ports.ObjectMetadata{SizeBytes: 2048, ContentType: "text/csv; charset=utf-8"}
+	record, err := service.CompleteStorageObject(context.Background(), ports.StorageObjectCompleteRequest{
+		TenantID:       "tenant-a",
+		ObjectID:       upload.ObjectID,
+		IdempotencyKey: "complete-a",
+	})
+	if err != nil {
+		t.Fatalf("CompleteStorageObject() error = %v", err)
+	}
+	if record.State != ports.StorageResourceAvailable || record.SizeBytes != 2048 || record.ContentType != "text/csv; charset=utf-8" {
+		t.Fatalf("completed record = %#v, want available state with backfilled size and content type", record)
+	}
+	if objectStore.statRef.BucketClass != ports.BucketClass("datasets-a") || objectStore.statRef.ObjectKey != "raw/report.csv" {
+		t.Fatalf("stat ref = %#v, want bucket datasets-a key raw/report.csv", objectStore.statRef)
+	}
+
+	if _, err := service.CompleteStorageObject(context.Background(), ports.StorageObjectCompleteRequest{
+		TenantID:       "tenant-a",
+		ObjectID:       "missing-object",
+		IdempotencyKey: "complete-b",
+	}); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("CompleteStorageObject() unknown object error = %v, want ErrNotFound", err)
+	}
+}
+
 type fakeObjectStore struct {
-	ensureBucket ports.BucketClass
-	uploadRef    ports.ObjectRef
-	downloadRef  ports.ObjectRef
-	deleteRef    ports.ObjectRef
-	uploadURL    string
-	downloadURL  string
-	expiresAt    time.Time
+	ensureBucket  ports.BucketClass
+	uploadRef     ports.ObjectRef
+	downloadRef   ports.ObjectRef
+	deleteRef     ports.ObjectRef
+	statRef       ports.ObjectRef
+	uploadURL     string
+	downloadURL   string
+	expiresAt     time.Time
+	statOK        bool
+	statErr       error
+	statMetadata  ports.ObjectMetadata
+	usage         ports.BucketUsage
+	usageErr      error
+	usageClass    ports.BucketClass
+	usageTenantID string
+	policyCalls   int
+	policyClass   ports.BucketClass
+	policyTenant  string
+	policyValue   ports.BucketACLPolicy
+}
+
+// ApplyBucketPolicy records the last policy apply so tests can assert that a
+// console ACL change reached the object store authority.
+func (s *fakeObjectStore) ApplyBucketPolicy(_ context.Context, class ports.BucketClass, tenantID string, policy ports.BucketACLPolicy) error {
+	s.policyCalls++
+	s.policyClass = class
+	s.policyTenant = tenantID
+	s.policyValue = policy
+	return nil
 }
 
 func (s *fakeObjectStore) EnsureBucket(_ context.Context, class ports.BucketClass) error {
 	s.ensureBucket = class
 	return nil
+}
+
+func (s *fakeObjectStore) BucketUsage(_ context.Context, class ports.BucketClass, tenantID string) (ports.BucketUsage, error) {
+	if !s.statOK {
+		return ports.BucketUsage{}, ports.ErrUnsupported
+	}
+	s.usageClass = class
+	s.usageTenantID = tenantID
+	return s.usage, s.usageErr
 }
 
 func (s *fakeObjectStore) Health(context.Context) error {
@@ -492,8 +647,12 @@ func (s *fakeObjectStore) DeleteObject(_ context.Context, ref ports.ObjectRef) e
 	return nil
 }
 
-func (s *fakeObjectStore) StatObject(context.Context, ports.ObjectRef) (ports.ObjectMetadata, error) {
-	return ports.ObjectMetadata{}, ports.ErrUnsupported
+func (s *fakeObjectStore) StatObject(_ context.Context, ref ports.ObjectRef) (ports.ObjectMetadata, error) {
+	s.statRef = ref
+	if !s.statOK {
+		return ports.ObjectMetadata{}, ports.ErrUnsupported
+	}
+	return s.statMetadata, s.statErr
 }
 
 func (s *fakeObjectStore) SignedUploadURL(_ context.Context, ref ports.ObjectRef, _ time.Duration) (ports.SignedURL, error) {
@@ -580,6 +739,9 @@ func TestLocalStorageServiceBucketConsoleAPIs(t *testing.T) {
 	if bucket.Endpoint == "" || bucket.ACL != "private" || bucket.StorageClass != "standard" || bucket.Versioning != "disabled" {
 		t.Fatalf("bucket defaults = %#v, want endpoint/acl/storage_class/versioning defaults", bucket)
 	}
+	if objectStore.policyCalls != 1 || objectStore.policyValue != ports.BucketACLPolicyPrivate {
+		t.Fatalf("create bucket policy apply = %d/%q, want 1/private", objectStore.policyCalls, objectStore.policyValue)
+	}
 
 	prefix, err := service.CreateBucketPrefix(context.Background(), ports.StorageBucketPrefixCreateRequest{
 		TenantID:       "tenant-a",
@@ -660,6 +822,9 @@ func TestLocalStorageServiceBucketConsoleAPIs(t *testing.T) {
 	}
 	if aclBucket.ACL != "tenant_read" || aclBucket.AccessMode != "public_read" || aclBucket.ACLLabel == "" {
 		t.Fatalf("acl bucket = %#v, want tenant_read/public_read", aclBucket)
+	}
+	if objectStore.policyValue != ports.BucketACLPolicyTenantRead || objectStore.policyTenant != "tenant-a" {
+		t.Fatalf("acl policy apply = %q/%q, want tenant_read/tenant-a", objectStore.policyValue, objectStore.policyTenant)
 	}
 
 	classBucket, err := service.SetStorageBucketClass(context.Background(), ports.StorageBucketClassUpdateRequest{
@@ -746,6 +911,154 @@ func TestLocalStorageServiceBucketConsoleAPIs(t *testing.T) {
 	_ = upload
 }
 
+func TestLocalStorageServiceBucketCreateHonorsAccessModeAndStorageClass(t *testing.T) {
+	objectStore := &fakeObjectStore{}
+	service := NewLocalStorageService(WithStorageObjectStore(objectStore))
+
+	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bucket-public-cold",
+		Name:           "public-cold",
+		AccessMode:     "public_read",
+		StorageClass:   "infrequent_access",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+	if bucket.AccessMode != "public_read" || bucket.ACL != "tenant_read" || bucket.ACLLabel == "" {
+		t.Fatalf("bucket = %#v, want public_read access mode with tenant_read acl", bucket)
+	}
+	if bucket.StorageClass != "infrequent_access" {
+		t.Fatalf("bucket storage class = %q, want infrequent_access", bucket.StorageClass)
+	}
+	if objectStore.policyValue != ports.BucketACLPolicyTenantRead {
+		t.Fatalf("bucket policy = %q, want tenant_read", objectStore.policyValue)
+	}
+
+	if _, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bucket-bad-class",
+		Name:           "bad-class",
+		StorageClass:   "glacier",
+	}); !errors.Is(err, ports.ErrUnsupported) {
+		t.Fatalf("CreateStorageBucket() unsupported storage class error = %v, want ErrUnsupported", err)
+	}
+}
+
+func TestLocalStorageServiceBucketACLAcceptsPublicReadAlias(t *testing.T) {
+	objectStore := &fakeObjectStore{}
+	service := NewLocalStorageService(WithStorageObjectStore(objectStore))
+
+	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bucket-alias",
+		Name:           "alias-bucket",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+
+	// The console sends the create-side vocabulary (public_read) when switching
+	// the ACL, so the update path must accept it as a tenant_read alias.
+	updated, err := service.SetStorageBucketACL(context.Background(), ports.StorageBucketACLUpdateRequest{
+		TenantID:       "tenant-a",
+		BucketID:       bucket.BucketID,
+		IdempotencyKey: "bucket-alias-acl",
+		ACL:            "public_read",
+	})
+	if err != nil {
+		t.Fatalf("SetStorageBucketACL(public_read) error = %v", err)
+	}
+	if updated.ACL != "tenant_read" || updated.AccessMode != "public_read" {
+		t.Fatalf("updated = %#v, want tenant_read/public_read", updated)
+	}
+
+	if _, err := service.SetStorageBucketACL(context.Background(), ports.StorageBucketACLUpdateRequest{
+		TenantID:       "tenant-a",
+		BucketID:       bucket.BucketID,
+		IdempotencyKey: "bucket-alias-bad-acl",
+		ACL:            "world_writable",
+	}); !errors.Is(err, ports.ErrUnsupported) {
+		t.Fatalf("SetStorageBucketACL() unsupported acl error = %v, want ErrUnsupported", err)
+	}
+}
+
+func TestLocalStorageServicePresignedURLRequiresObjectStore(t *testing.T) {
+	service := NewLocalStorageService()
+	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bucket-no-object-store",
+		Name:           "no-object-store",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+
+	// A GET for an unknown key must name the object so the console can tell
+	// "object missing" apart from "bucket missing".
+	_, err = service.GenerateBucketObjectPresignedURL(context.Background(), ports.StorageBucketPresignedURLRequest{
+		TenantID:     "tenant-a",
+		BucketID:     bucket.BucketID,
+		Key:          "missing.bin",
+		Method:       "GET",
+		ExpiresHours: 1,
+	})
+	if !errors.Is(err, ports.ErrNotFound) || !strings.Contains(err.Error(), "missing.bin") {
+		t.Fatalf("GenerateBucketObjectPresignedURL() missing key error = %v, want identifiable ErrNotFound", err)
+	}
+
+	// Without an object store the service must not hand out an unreachable mock
+	// link; callers get an explicit not-configured error instead.
+	_, err = service.GenerateBucketObjectPresignedURL(context.Background(), ports.StorageBucketPresignedURLRequest{
+		TenantID:     "tenant-a",
+		BucketID:     bucket.BucketID,
+		Key:          "pending.bin",
+		Method:       "PUT",
+		ExpiresHours: 1,
+	})
+	if !errors.Is(err, ports.ErrNotConfigured) {
+		t.Fatalf("GenerateBucketObjectPresignedURL() error = %v, want ErrNotConfigured", err)
+	}
+}
+
+func TestLocalStorageServiceVolumeModeDefaultsAndValidation(t *testing.T) {
+	service := NewLocalStorageService()
+	defaulted, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "volume-mode-default-a",
+		Name:           "data-mode-default",
+		SizeGiB:        10,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume(default) error = %v", err)
+	}
+	if defaulted.VolumeMode != ports.StorageVolumeModeFilesystem {
+		t.Fatalf("default volume_mode = %q, want %q", defaulted.VolumeMode, ports.StorageVolumeModeFilesystem)
+	}
+	block, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "volume-mode-block-a",
+		Name:           "data-mode-block",
+		SizeGiB:        10,
+		VolumeMode:     "BLOCK", // 归一大小写
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume(block) error = %v", err)
+	}
+	if block.VolumeMode != ports.StorageVolumeModeBlock {
+		t.Fatalf("block volume_mode = %q, want %q", block.VolumeMode, ports.StorageVolumeModeBlock)
+	}
+	if _, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "volume-mode-invalid-a",
+		Name:           "data-mode-invalid",
+		SizeGiB:        10,
+		VolumeMode:     "raw",
+	}); !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("CreateVolume(invalid mode) error = %v, want ErrInvalid", err)
+	}
+}
+
 func TestLocalStorageServiceVolumeOperations(t *testing.T) {
 	service := NewLocalStorageService()
 	volume, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
@@ -765,6 +1078,18 @@ func TestLocalStorageServiceVolumeOperations(t *testing.T) {
 	}
 	if volume.VolumeType != "high_performance_ssd" || volume.IOPS != 20000 || volume.OSInitStatus != "pending" || len(volume.MountHistory) != 1 {
 		t.Fatalf("volume defaults = %#v, want console fields", volume)
+	}
+	defaulted, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "volume-ops-default-sc",
+		Name:           "data-default-sc",
+		SizeGiB:        10,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume(default) error = %v", err)
+	}
+	if defaulted.StorageClass != defaultVolumeStorageClassName {
+		t.Fatalf("default storage class = %q, want %q", defaulted.StorageClass, defaultVolumeStorageClassName)
 	}
 	expanded, err := service.ExpandVolume(context.Background(), ports.StorageVolumeExpandRequest{
 		TenantID:       "tenant-a",

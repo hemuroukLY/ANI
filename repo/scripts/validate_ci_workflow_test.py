@@ -66,18 +66,36 @@ class CIWorkflowContractTest(unittest.TestCase):
         errors = validator.validate(self.workflow, self.makefile)
         self.assertTrue(any("static Go module list" in error for error in errors))
 
+    def test_go_toolchain_must_meet_security_floor(self) -> None:
+        self.workflow["env"]["GO_VERSION"] = "1.25.12"
+        errors = validator.validate(self.workflow, self.makefile)
+        self.assertTrue(any("Go security floor" in error for error in errors))
+
+    def test_go_builder_images_must_match_ci_toolchain(self) -> None:
+        dockerfiles = {
+            "services/ani-gateway/Dockerfile": "FROM golang:1.25.12-alpine AS build\n",
+        }
+        errors = validator.validate(self.workflow, self.makefile, dockerfiles)
+        self.assertTrue(any("must match CI GO_VERSION" in error for error in errors))
+
     def test_mutable_latest_tool_reference_is_blocked(self) -> None:
         self.workflow["jobs"]["go-ci"]["steps"][0]["uses"] = "example/tool@latest"
         errors = validator.validate(self.workflow, self.makefile)
         self.assertTrue(any("mutable @latest" in error for error in errors))
 
-    def test_frontend_high_severity_audit_is_required(self) -> None:
-        frontend = self.workflow["jobs"]["frontend-ci"]
-        frontend["steps"] = [
-            step for step in frontend["steps"] if step.get("name") != "Dependency audit"
-        ]
+    def test_runtime_observability_contract_runs_with_base_sha(self) -> None:
+        services_text = str(self.workflow["jobs"]["services-pr-gate"])
+        self.assertIn("make validate-service-runtime-observability", services_text)
+        self.assertIn("BASE_SHA", services_text)
+
+    def test_runtime_observability_base_sha_has_full_git_history(self) -> None:
+        checkout = next(
+            step for step in self.workflow["jobs"]["services-pr-gate"]["steps"]
+            if str(step.get("uses", "")).startswith("actions/checkout@")
+        )
+        checkout["with"] = {"fetch-depth": 1}
         errors = validator.validate(self.workflow, self.makefile)
-        self.assertTrue(any("high and critical npm audit" in error for error in errors))
+        self.assertTrue(any("full Git history" in error for error in errors), errors)
 
 
 if __name__ == "__main__":

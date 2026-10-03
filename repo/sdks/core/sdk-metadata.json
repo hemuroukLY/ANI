@@ -5,6 +5,270 @@
   "serverURL": "https://{host}/api/v1",
   "operations": [
     {
+      "operationId": "listPlanBoundTenantCounts",
+      "method": "GET",
+      "path": "/admin/plans/bound-tenant-counts",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "listPlanBindableTenants",
+      "method": "GET",
+      "path": "/admin/plans/{plan_id}/bindable-tenants",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "listPlanBoundTenants",
+      "method": "GET",
+      "path": "/admin/plans/{plan_id}/bound-tenants",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "listPlatformUsers",
+      "method": "GET",
+      "path": "/admin/platform-users",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "createPlatformUser",
+      "method": "POST",
+      "path": "/admin/platform-users",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "listPlatformUserRoles",
+      "method": "GET",
+      "path": "/admin/platform-users/roles",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "deletePlatformUser",
+      "method": "DELETE",
+      "path": "/admin/platform-users/{userId}",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "getPlatformUser",
+      "method": "GET",
+      "path": "/admin/platform-users/{userId}",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "disablePlatformUser",
+      "method": "POST",
+      "path": "/admin/platform-users/{userId}/disable",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "enablePlatformUser",
+      "method": "POST",
+      "path": "/admin/platform-users/{userId}/enable",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "getPlatformUserPermissions",
+      "method": "GET",
+      "path": "/admin/platform-users/{userId}/permissions",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "resetPlatformUserPassword",
+      "method": "POST",
+      "path": "/admin/platform-users/{userId}/reset-password",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "updatePlatformUserRole",
+      "method": "PUT",
+      "path": "/admin/platform-users/{userId}/role",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "listQuotaMeta",
+      "method": "GET",
+      "path": "/admin/quota-meta",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "listAvailableTenants",
+      "method": "GET",
+      "path": "/admin/tenant-admins/available-tenants",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "listTenantUsers",
+      "method": "GET",
+      "path": "/admin/tenant-users",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "listTenants",
+      "method": "GET",
+      "path": "/admin/tenants",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "createTenant",
+      "method": "POST",
+      "path": "/admin/tenants",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "getTenant",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "updateTenant",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "getTenantAuth",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/auth",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "updateTenantAuth",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/auth",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "disableTenant",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/disable",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "freezeTenant",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/freeze",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "listTenantLifecycle",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/lifecycle",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "updateTenantPlan",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/plan",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "provisionTenant",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/provision",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "deleteTenantQuota",
+      "method": "DELETE",
+      "path": "/admin/tenants/{tenant_id}/quota",
+      "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "getTenantQuota",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/quota",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "createTenantQuota",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/quota",
+      "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "updateTenantQuota",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/quota",
+      "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "upsertTenantQuota",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/quota/upsert",
+      "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "getTenantReservations",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/reservations",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "putTenantReservations",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/reservations",
+      "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "listAssignableTenantRoles",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/roles",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "unfreezeTenant",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/unfreeze",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "lookupTenantUser",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/user-lookup",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "batchGetTenantUsers",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/users/batch",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "deleteTenantUser",
+      "method": "DELETE",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "getTenantUser",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "resetTenantUserPassword",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/reset-password",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "getTenantUserRole",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/role",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "updateTenantUserRole",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/role",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "updateTenantUserStatus",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/status",
+      "scope": "scope:users:write"
+    },
+    {
       "operationId": "listAPIKeys",
       "method": "GET",
       "path": "/auth/api-keys",
@@ -75,6 +339,12 @@
       "method": "POST",
       "path": "/buckets",
       "scope": "scope:objects:create"
+    },
+    {
+      "operationId": "deleteStorageBucket",
+      "method": "DELETE",
+      "path": "/buckets/{bucket_id}",
+      "scope": "scope:objects:delete"
     },
     {
       "operationId": "setStorageBucketACL",
@@ -257,10 +527,28 @@
       "scope": "scope:gpu-inventory:read"
     },
     {
+      "operationId": "listGPUDeviceEvents",
+      "method": "GET",
+      "path": "/gpu-inventory/events",
+      "scope": "scope:gpu-inventory:read"
+    },
+    {
+      "operationId": "createGPUPartition",
+      "method": "POST",
+      "path": "/gpu-inventory/gpu-partitions",
+      "scope": "scope:gpu-inventory:write"
+    },
+    {
       "operationId": "getGPUOccupancy",
       "method": "GET",
       "path": "/gpu-inventory/occupancy",
       "scope": "scope:gpu-inventory:read"
+    },
+    {
+      "operationId": "updateGPUDeviceStatus",
+      "method": "PATCH",
+      "path": "/gpu-inventory/{device_id}",
+      "scope": "scope:gpu-inventory:write"
     },
     {
       "operationId": "listGPUSchedulingQueues",
@@ -297,6 +585,24 @@
       "method": "GET",
       "path": "/gpu-specs",
       "scope": "scope:gpu-inventory:read"
+    },
+    {
+      "operationId": "createGPUSpec",
+      "method": "POST",
+      "path": "/gpu-specs",
+      "scope": "scope:gpu-spec:write"
+    },
+    {
+      "operationId": "listGPUSpecAvailability",
+      "method": "GET",
+      "path": "/gpu-specs/availability",
+      "scope": "scope:gpu-spec:read"
+    },
+    {
+      "operationId": "deleteGPUSpec",
+      "method": "DELETE",
+      "path": "/gpu-specs/{spec_id}",
+      "scope": "scope:gpu-spec:write"
     },
     {
       "operationId": "getGPUSpec",
@@ -362,6 +668,12 @@
       "operationId": "listInstanceLogs",
       "method": "GET",
       "path": "/instances/{instance_id}/logs",
+      "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "streamInstanceLogs",
+      "method": "GET",
+      "path": "/instances/{instance_id}/logs/stream",
       "scope": "scope:instances:read"
     },
     {
@@ -725,60 +1037,6 @@
       "scope": "scope:networks:read"
     },
     {
-      "operationId": "listEmailRecipients",
-      "method": "GET",
-      "path": "/notifications/email/recipients",
-      "scope": "scope:notifications:read"
-    },
-    {
-      "operationId": "createEmailRecipient",
-      "method": "POST",
-      "path": "/notifications/email/recipients",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "deleteEmailRecipient",
-      "method": "DELETE",
-      "path": "/notifications/email/recipients/{recipient_id}",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "updateEmailRecipient",
-      "method": "PATCH",
-      "path": "/notifications/email/recipients/{recipient_id}",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "getEmailSmtpConfig",
-      "method": "GET",
-      "path": "/notifications/email/smtp",
-      "scope": "scope:notifications:read"
-    },
-    {
-      "operationId": "putEmailSmtpConfig",
-      "method": "PUT",
-      "path": "/notifications/email/smtp",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "listEmailSubscriptions",
-      "method": "GET",
-      "path": "/notifications/email/subscriptions",
-      "scope": "scope:notifications:read"
-    },
-    {
-      "operationId": "putEmailSubscriptions",
-      "method": "PUT",
-      "path": "/notifications/email/subscriptions",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "sendTestEmail",
-      "method": "POST",
-      "path": "/notifications/email/test",
-      "scope": "scope:notifications:write"
-    },
-    {
       "operationId": "listStorageObjects",
       "method": "GET",
       "path": "/objects",
@@ -807,6 +1065,12 @@
       "method": "GET",
       "path": "/objects/{object_id}",
       "scope": "scope:objects:read"
+    },
+    {
+      "operationId": "completeStorageObject",
+      "method": "POST",
+      "path": "/objects/{object_id}/complete",
+      "scope": "scope:objects:create"
     },
     {
       "operationId": "downloadStorageObject",
@@ -855,6 +1119,114 @@
       "method": "GET",
       "path": "/observability/query_range",
       "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "queryResourceTrendObservability",
+      "method": "GET",
+      "path": "/observability/resource_trend",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "getConsoleOverview",
+      "method": "GET",
+      "path": "/overview",
+      "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "getPlatformWorkloadCapabilities",
+      "method": "GET",
+      "path": "/platform-workload-capabilities",
+      "scope": "scope:platform-workloads:read"
+    },
+    {
+      "operationId": "createPlatformWorkload",
+      "method": "POST",
+      "path": "/platform-workloads",
+      "scope": "scope:platform-workloads:write"
+    },
+    {
+      "operationId": "deletePlatformWorkload",
+      "method": "DELETE",
+      "path": "/platform-workloads/{workload_id}",
+      "scope": "scope:platform-workloads:write"
+    },
+    {
+      "operationId": "getPlatformWorkload",
+      "method": "GET",
+      "path": "/platform-workloads/{workload_id}",
+      "scope": "scope:platform-workloads:read"
+    },
+    {
+      "operationId": "updatePlatformWorkload",
+      "method": "PATCH",
+      "path": "/platform-workloads/{workload_id}",
+      "scope": "scope:platform-workloads:write"
+    },
+    {
+      "operationId": "applyPlatformWorkloadLifecycle",
+      "method": "POST",
+      "path": "/platform-workloads/{workload_id}/lifecycle",
+      "scope": "scope:platform-workloads:write"
+    },
+    {
+      "operationId": "getPlatformWorkloadLogs",
+      "method": "GET",
+      "path": "/platform-workloads/{workload_id}/logs",
+      "scope": "scope:platform-workloads:read"
+    },
+    {
+      "operationId": "getPlatformAuditLogs",
+      "method": "GET",
+      "path": "/platform/audit-logs",
+      "scope": "scope:audit-log:read"
+    },
+    {
+      "operationId": "getPlatformCapacity",
+      "method": "GET",
+      "path": "/platform/capacity",
+      "scope": "scope:capacity:read"
+    },
+    {
+      "operationId": "getPlatformComponents",
+      "method": "GET",
+      "path": "/platform/components",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "listPlatformComponentLogs",
+      "method": "GET",
+      "path": "/platform/components/{component_name}/logs",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "streamPlatformComponentLogs",
+      "method": "GET",
+      "path": "/platform/components/{component_name}/logs/stream",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "getPlatformComponentMetrics",
+      "method": "GET",
+      "path": "/platform/components/{component_name}/metrics",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "getPlatformServiceHealth",
+      "method": "GET",
+      "path": "/platform/services/health",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "listQuotas",
+      "method": "GET",
+      "path": "/quotas",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "getMyQuota",
+      "method": "GET",
+      "path": "/quotas/me",
+      "scope": "scope:quota:read"
     },
     {
       "operationId": "readiness",
@@ -941,6 +1313,12 @@
       "scope": "scope:registry:read"
     },
     {
+      "operationId": "getMyReservations",
+      "method": "GET",
+      "path": "/reservations/me",
+      "scope": "scope:quota:read"
+    },
+    {
       "operationId": "listSandboxTemplates",
       "method": "GET",
       "path": "/sandbox-templates",
@@ -977,10 +1355,16 @@
       "scope": "scope:secrets:bind"
     },
     {
-      "operationId": "getTasksTaskId",
+      "operationId": "listAsyncTasks",
+      "method": "GET",
+      "path": "/tasks",
+      "scope": "scope:tasks:read"
+    },
+    {
+      "operationId": "getTask",
       "method": "GET",
       "path": "/tasks/{task_id}",
-      "scope": ""
+      "scope": "scope:tasks:read"
     },
     {
       "operationId": "listVectorStores",
@@ -1129,6 +1513,8 @@
   ],
   "schemas": [
     "APIKeyInfo",
+    "AssignableTenantRole",
+    "AssignableTenantRoleList",
     "AsyncTask",
     "BeginOIDCLoginRequest",
     "BeginOIDCLoginResponse",
@@ -1138,11 +1524,19 @@
     "BucketPrefixCreateRequest",
     "CloneSandboxCheckpointRequest",
     "CompleteOIDCLoginRequest",
+    "ConsoleInferenceServiceOverview",
+    "ConsoleInferenceServiceStatusDistribution",
+    "ConsoleInstanceOverview",
+    "ConsoleInstanceStateDistribution",
+    "ConsoleKnowledgeBaseOverview",
+    "ConsoleKnowledgeBaseStatusDistribution",
+    "ConsoleModelOverview",
+    "ConsoleModelStatusDistribution",
+    "ConsoleOverviewResponse",
     "CoreDevProfileInfo",
     "CreateAPIKeyRequest",
     "CreateAPIKeyResponse",
     "CreateContainerInstanceConfig",
-    "CreateEmailRecipientRequest",
     "CreateGPUContainerInstanceConfig",
     "CreateInstanceConsoleSessionRequest",
     "CreateInstanceExecSessionRequest",
@@ -1171,11 +1565,6 @@
     "CreateVectorStoreRequest",
     "CreateVolumeSnapshotRequest",
     "CursorPage",
-    "EmailRecipient",
-    "EmailRecipientListResponse",
-    "EmailSmtpConfigResponse",
-    "EmailSubscription",
-    "EmailSubscriptionListResponse",
     "EncryptionKey",
     "EncryptionKeyCreateRequest",
     "EncryptionKeyListResponse",
@@ -1192,15 +1581,26 @@
     "FilesystemMountTarget",
     "FilesystemMountTargetCreateRequest",
     "FilesystemMountTargetListResponse",
+    "GPUDeviceEvent",
+    "GPUDeviceEventListResponse",
+    "GPUDeviceStatusUpdateRequest",
     "GPUInventoryListResponse",
     "GPUInventoryRecord",
     "GPUOccupancyStats",
+    "GPUPartitionCreateRequest",
+    "GPUPartitionTaskAccepted",
     "GPUSchedulingQueue",
     "GPUSchedulingQueueCreateRequest",
     "GPUSchedulingQueueListResponse",
     "GPUSchedulingQueueUpdateRequest",
+    "GPUSpec",
+    "GPUSpecAvailability",
+    "GPUSpecAvailabilityListResponse",
+    "GPUSpecCreateRequest",
     "GPUSpecListResponse",
+    "GPUSpecNodeAffinity",
     "GPUSpecSummary",
+    "GPUSpecVolcanoResources",
     "HealthCheck",
     "InstanceAccessSummary",
     "InstanceComputeSummary",
@@ -1277,9 +1677,68 @@
     "ObservabilityQueryResponse",
     "ObservabilityRangeQueryResponse",
     "PasswordLoginRequest",
+    "PlanBoundTenantCount",
+    "PlanBoundTenantCountList",
+    "PlatformAuditLogDetail",
+    "PlatformAuditLogItem",
+    "PlatformAuditLogResponse",
+    "PlatformAuditResource",
+    "PlatformAuditUser",
+    "PlatformCapacityResponse",
+    "PlatformCapacitySummary",
+    "PlatformComponent",
+    "PlatformComponentGroup",
+    "PlatformComponentLogEntry",
+    "PlatformComponentLogListResponse",
+    "PlatformComponentMetrics",
+    "PlatformComponentRef",
+    "PlatformComponentStatusResponse",
     "PlatformPasswordLoginRequest",
-    "PutEmailSmtpConfigRequest",
-    "PutEmailSubscriptionsRequest",
+    "PlatformRegion",
+    "PlatformRegionCapacity",
+    "PlatformRole",
+    "PlatformRoleListResponse",
+    "PlatformServiceHealthComponent",
+    "PlatformServiceHealthResponse",
+    "PlatformUser",
+    "PlatformUserCreateRequest",
+    "PlatformUserIdempotentRequest",
+    "PlatformUserListResponse",
+    "PlatformUserPermissionsResponse",
+    "PlatformUserResetPasswordRequest",
+    "PlatformUserRoleUpdateRequest",
+    "PlatformWorkload",
+    "PlatformWorkloadAcceleratorCapability",
+    "PlatformWorkloadAcceleratorResources",
+    "PlatformWorkloadArtifact",
+    "PlatformWorkloadCapabilities",
+    "PlatformWorkloadCreateRequest",
+    "PlatformWorkloadHealthCheck",
+    "PlatformWorkloadLifecycleRequest",
+    "PlatformWorkloadLogEntry",
+    "PlatformWorkloadLogListResponse",
+    "PlatformWorkloadMetadata",
+    "PlatformWorkloadModelMaterialization",
+    "PlatformWorkloadNetwork",
+    "PlatformWorkloadPort",
+    "PlatformWorkloadResources",
+    "PlatformWorkloadRole",
+    "PlatformWorkloadScheduling",
+    "PlatformWorkloadSecretBinding",
+    "PlatformWorkloadTopology",
+    "PlatformWorkloadUpdateRequest",
+    "Quota",
+    "QuotaCreateItem",
+    "QuotaCreateRequest",
+    "QuotaDeleteResponse",
+    "QuotaItem",
+    "QuotaListResult",
+    "QuotaMeta",
+    "QuotaMetaListResponse",
+    "QuotaUpdateItem",
+    "QuotaUpdateRequest",
+    "QuotaUpsertItem",
+    "QuotaUpsertRequest",
     "RefreshAccessTokenRequest",
     "RefreshAccessTokenResponse",
     "RegistryArtifact",
@@ -1307,6 +1766,8 @@
     "RegistryRepositoryListResponse",
     "RegistryScanResult",
     "ReportTokenUsageRequest",
+    "ReservationPutRequest",
+    "ReservationView",
     "RevokeStatusResponse",
     "SandboxCheckpoint",
     "SandboxCheckpointActionRequest",
@@ -1326,7 +1787,6 @@
     "SecretBindingRequest",
     "SecretCreateRequest",
     "SecretListResponse",
-    "SendTestEmailResponse",
     "SetRegistryPermissionRequest",
     "StorageBucketACLUpdateRequest",
     "StorageBucketClassUpdateRequest",
@@ -1338,12 +1798,14 @@
     "StorageBucketObjectEntry",
     "StorageBucketObjectListResponse",
     "StorageBucketRecord",
+    "StorageConsumerInfo",
     "StorageFilesystem",
     "StorageFilesystemExpandRequest",
     "StorageFilesystemListResponse",
     "StorageFilesystemMountRequest",
     "StorageFilesystemUnmountRequest",
     "StorageObject",
+    "StorageObjectCompleteRequest",
     "StorageObjectDownloadInfo",
     "StorageObjectListResponse",
     "StorageObjectUploadRequest",
@@ -1357,11 +1819,33 @@
     "StorageVolumeMountHistoryEntry",
     "StorageVolumeMountRequest",
     "StorageVolumeUnmountRequest",
+    "TaskListResponse",
+    "Tenant",
+    "TenantAuthConfig",
+    "TenantAuthSummary",
+    "TenantAuthUpdateRequest",
+    "TenantCreateRequest",
+    "TenantInfraProvisionResponse",
+    "TenantLifecycleEntry",
+    "TenantLifecycleListResponse",
+    "TenantListItem",
+    "TenantListResponse",
+    "TenantPlanUpdateRequest",
+    "TenantSummary",
+    "TenantSummaryList",
+    "TenantUpdateRequest",
+    "TenantUser",
+    "TenantUserListResponse",
+    "TenantUserPermissions",
     "TokenPairResponse",
     "TokenUsageReport",
-    "UpdateEmailRecipientRequest",
     "UpdateNetworkSecurityGroupRuleRequest",
     "UpdateObservabilityAlertRuleRequest",
+    "UserMutationResult",
+    "UserResetPasswordRequest",
+    "UserRoleUpdateRequest",
+    "UserStatusUpdateRequest",
+    "UserTenantRef",
     "VectorStore",
     "VectorStoreDeletePrecheck",
     "VectorStoreDocumentDeleteResponse",
@@ -1383,6 +1867,13 @@
     "WriteSandboxFileRequest"
   ],
   "idempotencyOperations": [
+    "createPlatformUser",
+    "disablePlatformUser",
+    "enablePlatformUser",
+    "resetPlatformUserPassword",
+    "updatePlatformUserRole",
+    "resetTenantUserPassword",
+    "updateTenantUserStatus",
     "createStorageBucket",
     "setStorageBucketACL",
     "createStorageBucketLifecycleRule",
@@ -1424,8 +1915,12 @@
     "createNetworkVPC",
     "createStorageObject",
     "uploadStorageObject",
+    "completeStorageObject",
     "createObservabilityAlertRule",
     "updateObservabilityAlertRule",
+    "createPlatformWorkload",
+    "updatePlatformWorkload",
+    "applyPlatformWorkloadLifecycle",
     "createRegistryProject",
     "createRegistryProjectPullSecret",
     "setRegistryRepositoryPermission",
@@ -1443,12 +1938,17 @@
     "unmountStorageVolume"
   ],
   "cursorPaginationOperations": [
+    "listPlatformUsers",
+    "listTenantUsers",
+    "listTenants",
+    "listTenantLifecycle",
     "listStorageBuckets",
     "listBucketObjects",
     "listEncryptionKeys",
     "listStorageFilesystems",
     "listFilesystemMountTargets",
     "listGPUInventory",
+    "listGPUDeviceEvents",
     "listGPUSpecs",
     "listInstances",
     "listInstanceEvents",
@@ -1469,12 +1969,16 @@
     "listNetworkVPCs",
     "listStorageObjects",
     "listObservabilityAlertRules",
+    "getPlatformWorkloadLogs",
+    "listPlatformComponentLogs",
+    "listQuotas",
     "listRegistryImages",
     "listRegistryProjects",
     "listRegistryRepositories",
     "listRegistryArtifacts",
     "listSandboxTemplates",
     "listSecrets",
+    "listAsyncTasks",
     "listVectorStores",
     "listStorageVolumes",
     "listVolumeSnapshots"
@@ -1482,15 +1986,38 @@
   "errorCodes": [
     "BAD_REQUEST",
     "CONFLICT",
+    "DEVICE_NOT_FOUND",
     "FORBIDDEN",
+    "GPU_SPEC_CONFLICT",
+    "GPU_SPEC_IN_USE",
+    "GPU_SPEC_NOT_FOUND",
+    "GPU_TYPE_NOT_IN_NODES",
     "INTERNAL_ERROR",
     "INVALID_FILTER",
+    "LAST_PLATFORM_ADMIN",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
+    "NO_IDLE_WHOLECARD_GPUS",
+    "PASSWORD_SAME_AS_OLD",
+    "PLATFORM_USER_NOT_FOUND",
     "PRECONDITION_FAILED",
+    "QUOTA_ALREADY_EXISTS",
+    "QUOTA_EXCEEDED",
+    "QUOTA_NOT_FOUND",
+    "QUOTA_RESOURCE_NOT_REGISTERED",
+    "QUOTA_UPDATE_UNCERTAIN",
     "RATE_LIMIT_EXCEEDED",
+    "RESERVATION_EXCEEDS_QUOTA",
+    "RESERVED_INSUFFICIENT",
+    "ROLE_CHANGE_INVALID",
+    "STATUS_UNCHANGED",
+    "TENANT_NOT_FOUND",
+    "TENANT_PLAN_NOT_FOUND",
     "UNAUTHORIZED",
     "UNAVAILABLE",
+    "USER_ALREADY_TENANT_ADMIN",
+    "USER_NOT_FOUND",
+    "VALIDATION_FAILED",
     "VECTOR_STORE_NOT_FOUND"
   ]
 }

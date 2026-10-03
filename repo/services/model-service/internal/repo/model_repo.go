@@ -2,8 +2,11 @@ package repo
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,45 +18,95 @@ import (
 
 type ModelRepo interface {
 	Create(ctx context.Context, tx pgx.Tx, req CreateModelReq) (*Model, error)
-	GetByID(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (*Model, error)
+	GetByID(ctx context.Context, pool *pgxpool.Pool, tenantID, modelID uuid.UUID) (*Model, error)
+	GetVersionByID(ctx context.Context, pool *pgxpool.Pool, tenantID, versionID uuid.UUID) (*Model, *ModelVersion, error)
 	List(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) ([]*Model, int64, string, error)
-	SoftDelete(ctx context.Context, tx pgx.Tx, id uuid.UUID) error
+	SoftDelete(ctx context.Context, tx pgx.Tx, tenantID, modelID uuid.UUID) error
 	CreateVersion(ctx context.Context, tx pgx.Tx, req CreateVersionReq) (*ModelVersion, error)
-	ListVersions(ctx context.Context, pool *pgxpool.Pool, modelID uuid.UUID) ([]*ModelVersion, error)
+	CreateImport(ctx context.Context, tx pgx.Tx, req CreateImportRequest) (*ImportTask, bool, error)
+	ListVersions(ctx context.Context, pool *pgxpool.Pool, tenantID, modelID uuid.UUID) ([]*ModelVersion, error)
 }
 
 type PostgresModelRepo struct{}
+
+// ErrModelInUse is returned when an active inference service still references
+// a version belonging to the model being deleted.
+var ErrModelInUse = errors.New("model is referenced by an inference service")
 
 func NewPostgresModelRepo() *PostgresModelRepo {
 	return &PostgresModelRepo{}
 }
 
+// ReserveMutation persists an idempotency key before an external side effect
+// such as issuing a signed upload URL. The returned UUID is the stable
+// resource/document identifier for this request.
+func (r *PostgresModelRepo) ReserveMutation(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID, scope, key, requestHash string, resourceID uuid.UUID) (uuid.UUID, bool, error) {
+	tx, err := beginTenantTx(ctx, pool)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	defer rollback(ctx, tx)
+	existingID, replay, err := claimModelMutation(ctx, tx, tenantID, scope, key, requestHash)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	if replay {
+		if err := tx.Commit(ctx); err != nil {
+			return uuid.Nil, false, fmt.Errorf("model mutation replay commit: %w", err)
+		}
+		return existingID, true, nil
+	}
+	if resourceID == uuid.Nil {
+		return uuid.Nil, false, fmt.Errorf("model mutation resource id is required")
+	}
+	if err := recordModelMutation(ctx, tx, tenantID, scope, key, requestHash, resourceID); err != nil {
+		return uuid.Nil, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, false, fmt.Errorf("model mutation commit: %w", err)
+	}
+	return resourceID, false, nil
+}
+
 type CreateModelReq struct {
-	TenantID     uuid.UUID
-	Name         string
-	DisplayName  string
-	Description  string
-	Capabilities []string
-	Source       string
-	SourceRepoID string
+	TenantID       uuid.UUID
+	Name           string
+	DisplayName    string
+	Description    string
+	Capabilities   []string
+	Source         string
+	SourceRepoID   string
+	IdempotencyKey string
+	RequestHash    string
 }
 
 type CreateVersionReq struct {
+	TenantID       uuid.UUID
 	ModelID        uuid.UUID
 	Version        string
 	Format         string
 	StoragePath    string
 	ChecksumSHA256 string
 	SizeBytes      int64
-	IsEncrypted    bool
-	EncryptAlgo    string
-	EncryptHint    string
+	// ContentSizeBytes is the logical model content size when the stored
+	// version is a manifest or archive wrapper. Zero keeps the historical
+	// version-size behavior for ordinary uploaded versions.
+	ContentSizeBytes int64
+	IsEncrypted      bool
+	EncryptAlgo      string
+	EncryptHint      string
+	IdempotencyKey   string
+	RequestHash      string
 }
 
 type ListFilter struct {
-	Status string
-	Cursor string
-	Limit  int
+	TenantID   uuid.UUID
+	Status     string
+	Source     string
+	Capability string
+	Keyword    string
+	Cursor     string
+	Limit      int
 }
 
 type Model struct {
@@ -94,6 +147,19 @@ func (r *PostgresModelRepo) Create(ctx context.Context, tx pgx.Tx, req CreateMod
 	if req.Source == "" {
 		req.Source = "upload"
 	}
+	if req.IdempotencyKey != "" {
+		resourceID, replay, err := claimModelMutation(ctx, tx, req.TenantID, "model.create", req.IdempotencyKey, req.RequestHash)
+		if err != nil {
+			return nil, err
+		}
+		if replay {
+			model, err := getModelByQuery(ctx, tx, getModelByIDSQL, resourceID, req.TenantID)
+			if err != nil {
+				return nil, fmt.Errorf("modelRepo.Create replay: %w", err)
+			}
+			return model, nil
+		}
+	}
 
 	model := &Model{}
 	err := tx.QueryRow(ctx, `
@@ -110,21 +176,26 @@ func (r *PostgresModelRepo) Create(ctx context.Context, tx pgx.Tx, req CreateMod
 	if err != nil {
 		return nil, fmt.Errorf("modelRepo.Create insert: %w", err)
 	}
+	if req.IdempotencyKey != "" {
+		if err := recordModelMutation(ctx, tx, req.TenantID, "model.create", req.IdempotencyKey, req.RequestHash, model.ID); err != nil {
+			return nil, err
+		}
+	}
 	return model, nil
 }
 
-func (r *PostgresModelRepo) GetByID(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (*Model, error) {
+func (r *PostgresModelRepo) GetByID(ctx context.Context, pool *pgxpool.Pool, tenantID, modelID uuid.UUID) (*Model, error) {
 	tx, err := beginTenantTx(ctx, pool)
 	if err != nil {
 		return nil, err
 	}
 	defer rollback(ctx, tx)
 
-	model, err := getModelByQuery(ctx, tx, `WHERE id=$1 AND status <> 'deleted'`, id)
+	model, err := getModelByQuery(ctx, tx, getModelByIDSQL, modelID, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	versions, err := listVersionsByModel(ctx, tx, model.ID)
+	versions, err := listVersionsByModel(ctx, tx, tenantID, model.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -134,6 +205,43 @@ func (r *PostgresModelRepo) GetByID(ctx context.Context, pool *pgxpool.Pool, id 
 	}
 	return model, nil
 }
+
+func (r *PostgresModelRepo) GetVersionByID(ctx context.Context, pool *pgxpool.Pool, tenantID, versionID uuid.UUID) (*Model, *ModelVersion, error) {
+	tx, err := beginTenantTx(ctx, pool)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rollback(ctx, tx)
+
+	model := &Model{}
+	version := &ModelVersion{}
+	err = tx.QueryRow(ctx, getModelVersionByIDSQL, versionID, tenantID).
+		Scan(append(modelScanDest(model), versionScanDest(version)...)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, types.Wrapf(types.ErrNotFound, "modelRepo.GetVersionByID id=%s", versionID)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("modelRepo.GetVersionByID query: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, fmt.Errorf("modelRepo.GetVersionByID commit: %w", err)
+	}
+	return model, version, nil
+}
+
+const getModelVersionByIDSQL = `
+		SELECT
+			m.tenant_id, m.id, m.name, m.display_name, COALESCE(m.description, ''),
+			m.source, COALESCE(m.source_repo_id, ''), m.capabilities, m.status,
+			COALESCE(m.error_message, ''), COALESCE(m.total_size_bytes, 0),
+			m.created_at, m.updated_at,
+			v.id, v.model_id, v.version, v.format, v.is_encrypted, COALESCE(v.encrypt_algo, ''),
+			COALESCE(v.encrypt_hint, ''), COALESCE(v.size_bytes, 0), COALESCE(v.checksum_sha256, ''),
+			v.storage_path, v.created_at
+		FROM model_versions v
+		JOIN models m ON m.id = v.model_id
+		WHERE v.id=$1 AND m.tenant_id=$2 AND m.status <> 'deleted'
+	`
 
 func (r *PostgresModelRepo) List(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) ([]*Model, int64, string, error) {
 	req := types.ListRequest{Limit: filter.Limit, Cursor: filter.Cursor}
@@ -145,29 +253,19 @@ func (r *PostgresModelRepo) List(ctx context.Context, pool *pgxpool.Pool, filter
 	}
 	defer rollback(ctx, tx)
 
-	args := []any{}
-	where := "WHERE status <> 'deleted'"
-	if filter.Status != "" {
-		args = append(args, filter.Status)
-		where += fmt.Sprintf(" AND status=$%d", len(args))
-	}
-	if filter.Cursor != "" {
-		createdAt, id, err := types.DecodeCursor(filter.Cursor)
-		if err != nil {
-			return nil, 0, "", types.Wrapf(types.ErrBadRequest, "modelRepo.List cursor: %v", err)
-		}
-		args = append(args, createdAt, id)
-		where += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d)", len(args)-1, len(args))
+	where, args, err := buildListModelsFilter(filter)
+	if err != nil {
+		return nil, 0, "", err
 	}
 
 	var total int64
-	countSQL := "SELECT COUNT(*) FROM models " + where
+	countSQL := buildCountModelsSQL(where)
 	if err := tx.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
 		return nil, 0, "", fmt.Errorf("modelRepo.List count: %w", err)
 	}
 
 	args = append(args, req.Limit+1)
-	rows, err := tx.Query(ctx, modelSelectSQL+" "+where+fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d", len(args)), args...)
+	rows, err := tx.Query(ctx, buildListModelsSQL(where, len(args)), args...)
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("modelRepo.List query: %w", err)
 	}
@@ -197,20 +295,23 @@ func (r *PostgresModelRepo) List(ctx context.Context, pool *pgxpool.Pool, filter
 	return models, total, nextCursor, nil
 }
 
-func (r *PostgresModelRepo) SoftDelete(ctx context.Context, tx pgx.Tx, id uuid.UUID) error {
+func (r *PostgresModelRepo) SoftDelete(ctx context.Context, tx pgx.Tx, tenantID, modelID uuid.UUID) error {
 	if err := types.SetDBTenant(ctx, tx); err != nil {
 		return fmt.Errorf("modelRepo.SoftDelete set tenant: %w", err)
 	}
-	tag, err := tx.Exec(ctx, `
-		UPDATE models
-		SET status='deleted', updated_at=NOW()
-		WHERE id=$1 AND status <> 'deleted'
-	`, id)
+	var inUse bool
+	if err := tx.QueryRow(ctx, modelInUseSQL, modelID, tenantID).Scan(&inUse); err != nil {
+		return fmt.Errorf("modelRepo.SoftDelete reference check: %w", err)
+	}
+	if inUse {
+		return fmt.Errorf("%w: MODEL_IN_USE", ErrModelInUse)
+	}
+	tag, err := tx.Exec(ctx, softDeleteModelSQL, modelID, tenantID)
 	if err != nil {
 		return fmt.Errorf("modelRepo.SoftDelete update: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return types.Wrapf(types.ErrNotFound, "modelRepo.SoftDelete id=%s", id)
+	if err := requireRowsAffected(tag.RowsAffected(), "modelRepo.SoftDelete", modelID); err != nil {
+		return err
 	}
 	return nil
 }
@@ -219,39 +320,56 @@ func (r *PostgresModelRepo) CreateVersion(ctx context.Context, tx pgx.Tx, req Cr
 	if err := types.SetDBTenant(ctx, tx); err != nil {
 		return nil, fmt.Errorf("modelRepo.CreateVersion set tenant: %w", err)
 	}
+	if req.IdempotencyKey != "" {
+		resourceID, replay, err := claimModelMutation(ctx, tx, req.TenantID, "model.version:"+req.ModelID.String(), req.IdempotencyKey, req.RequestHash)
+		if err != nil {
+			return nil, err
+		}
+		if replay {
+			version := &ModelVersion{}
+			if err := tx.QueryRow(ctx, getModelVersionForReplaySQL, resourceID, req.TenantID).Scan(versionScanDest(version)...); err != nil {
+				return nil, fmt.Errorf("modelRepo.CreateVersion replay: %w", err)
+			}
+			return version, nil
+		}
+	}
 	version := &ModelVersion{}
-	err := tx.QueryRow(ctx, `
-		INSERT INTO model_versions (
-			model_id, version, format, is_encrypted, encrypt_algo, encrypt_hint,
-			size_bytes, checksum_sha256, storage_path
-		)
-		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, NULLIF($8, ''), $9)
-		RETURNING id, model_id, version, format, is_encrypted, COALESCE(encrypt_algo, ''),
-			COALESCE(encrypt_hint, ''), COALESCE(size_bytes, 0), COALESCE(checksum_sha256, ''),
-			storage_path, created_at
-	`, req.ModelID, req.Version, req.Format, req.IsEncrypted, req.EncryptAlgo, req.EncryptHint,
-		req.SizeBytes, req.ChecksumSHA256, req.StoragePath).Scan(versionScanDest(version)...)
+	err := tx.QueryRow(ctx, createModelVersionSQL, req.ModelID, req.TenantID, req.ModelID, req.Version,
+		req.Format, req.IsEncrypted, req.EncryptAlgo, req.EncryptHint, req.SizeBytes,
+		req.ChecksumSHA256, req.StoragePath).Scan(versionScanDest(version)...)
+	err = mapQueryNoRows(err, "modelRepo.CreateVersion", req.ModelID)
+	if errors.Is(err, types.ErrNotFound) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, fmt.Errorf("modelRepo.CreateVersion insert: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE models
-		SET status='ready', total_size_bytes=COALESCE(total_size_bytes, 0)+$2, updated_at=NOW()
-		WHERE id=$1
-	`, req.ModelID, req.SizeBytes); err != nil {
+	tag, err := tx.Exec(ctx, updateModelAfterVersionSQL, req.ModelID, req.TenantID, req.ContentSizeBytes, req.SizeBytes)
+	if err != nil {
 		return nil, fmt.Errorf("modelRepo.CreateVersion update model: %w", err)
+	}
+	if err := requireRowsAffected(tag.RowsAffected(), "modelRepo.CreateVersion", req.ModelID); err != nil {
+		return nil, err
+	}
+	if req.IdempotencyKey != "" {
+		if err := recordModelMutation(ctx, tx, req.TenantID, "model.version:"+req.ModelID.String(), req.IdempotencyKey, req.RequestHash, version.ID); err != nil {
+			return nil, err
+		}
 	}
 	return version, nil
 }
 
-func (r *PostgresModelRepo) ListVersions(ctx context.Context, pool *pgxpool.Pool, modelID uuid.UUID) ([]*ModelVersion, error) {
+func (r *PostgresModelRepo) ListVersions(ctx context.Context, pool *pgxpool.Pool, tenantID, modelID uuid.UUID) ([]*ModelVersion, error) {
 	tx, err := beginTenantTx(ctx, pool)
 	if err != nil {
 		return nil, err
 	}
 	defer rollback(ctx, tx)
 
-	versions, err := listVersionsByModel(ctx, tx, modelID)
+	if err := requireModelOwned(ctx, tx, tenantID, modelID); err != nil {
+		return nil, err
+	}
+	versions, err := listVersionsByModel(ctx, tx, tenantID, modelID)
 	if err != nil {
 		return nil, err
 	}
@@ -269,6 +387,162 @@ const modelSelectSQL = `
 	FROM models
 `
 
+const getModelByIDSQL = `WHERE id=$1 AND tenant_id=$2 AND status <> 'deleted'`
+
+const listModelsBaseWhere = `WHERE tenant_id=$1 AND status <> 'deleted'`
+
+const softDeleteModelSQL = `
+	UPDATE models
+	SET status='deleted', updated_at=NOW()
+	WHERE id=$1 AND tenant_id=$2 AND status <> 'deleted'
+	  AND NOT EXISTS (
+		SELECT 1
+		FROM inference_services AS inference
+		JOIN model_versions AS version ON version.id=inference.model_version_id
+		WHERE version.model_id=$1
+		  AND inference.tenant_id=$2
+		  AND inference.deleted_at IS NULL
+	  )
+`
+
+const modelInUseSQL = `
+	SELECT EXISTS (
+		SELECT 1
+		FROM inference_services AS inference
+		JOIN model_versions AS version ON version.id=inference.model_version_id
+		WHERE version.model_id=$1
+		  AND inference.tenant_id=$2
+		  AND inference.deleted_at IS NULL
+	)
+`
+
+const claimModelMutationSQL = `
+	SELECT resource_id, request_hash
+	FROM model_mutation_idempotency
+	WHERE tenant_id=$1 AND operation_scope=$2 AND idempotency_key=$3
+	FOR UPDATE
+`
+
+const recordModelMutationSQL = `
+	INSERT INTO model_mutation_idempotency
+		(tenant_id, operation_scope, idempotency_key, request_hash, resource_id)
+	VALUES ($1, $2, $3, $4, $5)
+`
+
+const getModelVersionForReplaySQL = `
+	SELECT v.id, v.model_id, v.version, v.format, v.is_encrypted, COALESCE(v.encrypt_algo, ''),
+		COALESCE(v.encrypt_hint, ''), COALESCE(v.size_bytes, 0), COALESCE(v.checksum_sha256, ''),
+		v.storage_path, v.created_at
+	FROM model_versions AS v
+	JOIN models AS m ON m.id=v.model_id
+	WHERE v.id=$1 AND m.tenant_id=$2 AND m.status <> 'deleted'
+`
+
+const createModelVersionSQL = `
+	INSERT INTO model_versions (
+		model_id, version, format, is_encrypted, encrypt_algo, encrypt_hint,
+		size_bytes, checksum_sha256, storage_path
+	)
+	SELECT $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''), $9,
+		NULLIF($10, ''), $11
+	FROM models
+	WHERE id=$1 AND tenant_id=$2 AND status <> 'deleted'
+	RETURNING id, model_id, version, format, is_encrypted, COALESCE(encrypt_algo, ''),
+		COALESCE(encrypt_hint, ''), COALESCE(size_bytes, 0), COALESCE(checksum_sha256, ''),
+		storage_path, created_at
+`
+
+const updateModelAfterVersionSQL = `
+	UPDATE models
+	SET status='ready', total_size_bytes=CASE WHEN $3::bigint > 0 THEN $3::bigint ELSE COALESCE(total_size_bytes, 0)+$4::bigint END, updated_at=NOW()
+	WHERE id=$1 AND tenant_id=$2 AND status <> 'deleted'
+`
+
+const listModelVersionsParentSQL = `
+	SELECT id
+	FROM models
+	WHERE id=$1 AND tenant_id=$2 AND status <> 'deleted'
+`
+
+const listModelVersionsSQL = `
+	SELECT v.id, v.model_id, v.version, v.format, v.is_encrypted, COALESCE(v.encrypt_algo, ''),
+		COALESCE(v.encrypt_hint, ''), COALESCE(v.size_bytes, 0), COALESCE(v.checksum_sha256, ''),
+		v.storage_path, v.created_at
+	FROM model_versions v
+	JOIN models m ON m.id=v.model_id
+	WHERE v.model_id=$1 AND m.tenant_id=$2 AND m.status <> 'deleted'
+	ORDER BY v.created_at DESC, v.id DESC
+`
+
+func buildListModelsFilter(filter ListFilter) (string, []any, error) {
+	args := []any{filter.TenantID}
+	where := listModelsBaseWhere
+	if filter.Status != "" {
+		args = append(args, filter.Status)
+		where += fmt.Sprintf(" AND status=$%d", len(args))
+	}
+	if filter.Source != "" {
+		args = append(args, filter.Source)
+		where += fmt.Sprintf(" AND source=$%d", len(args))
+	}
+	if filter.Capability != "" {
+		args = append(args, filter.Capability)
+		where += fmt.Sprintf(" AND $%d=ANY(capabilities)", len(args))
+	}
+	if filter.Keyword != "" {
+		args = append(args, "%"+strings.ReplaceAll(strings.ReplaceAll(filter.Keyword, "%", "\\%"), "_", "\\_")+"%")
+		where += fmt.Sprintf(" AND (name ILIKE $%d ESCAPE CHR(92) OR display_name ILIKE $%d ESCAPE CHR(92))", len(args), len(args))
+	}
+	if filter.Cursor != "" {
+		createdAt, id, err := types.DecodeCursor(filter.Cursor)
+		if err != nil {
+			return "", nil, types.Wrapf(types.ErrBadRequest, "modelRepo.List cursor: %v", err)
+		}
+		args = append(args, createdAt, id)
+		where += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d)", len(args)-1, len(args))
+	}
+	return where, args, nil
+}
+
+func buildCountModelsSQL(where string) string {
+	return "SELECT COUNT(*) FROM models " + where
+}
+
+func buildListModelsSQL(where string, limitArg int) string {
+	return modelSelectSQL + " " + where + fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d", limitArg)
+}
+
+type queryRower interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func requireModelOwned(ctx context.Context, queryer queryRower, tenantID, modelID uuid.UUID) error {
+	var ownedID uuid.UUID
+	err := queryer.QueryRow(ctx, listModelVersionsParentSQL, modelID, tenantID).Scan(&ownedID)
+	err = mapQueryNoRows(err, "modelRepo.ListVersions", modelID)
+	if errors.Is(err, types.ErrNotFound) {
+		return err
+	}
+	if err != nil {
+		return fmt.Errorf("modelRepo.ListVersions verify parent: %w", err)
+	}
+	return nil
+}
+
+func mapQueryNoRows(err error, operation string, resourceID uuid.UUID) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return types.Wrapf(types.ErrNotFound, "%s id=%s", operation, resourceID)
+	}
+	return err
+}
+
+func requireRowsAffected(rows int64, operation string, resourceID uuid.UUID) error {
+	if rows == 0 {
+		return types.Wrapf(types.ErrNotFound, "%s id=%s", operation, resourceID)
+	}
+	return nil
+}
+
 func getModelByQuery(ctx context.Context, tx pgx.Tx, where string, args ...any) (*Model, error) {
 	model := &Model{}
 	err := tx.QueryRow(ctx, modelSelectSQL+" "+where, args...).Scan(modelScanDest(model)...)
@@ -281,15 +555,8 @@ func getModelByQuery(ctx context.Context, tx pgx.Tx, where string, args ...any) 
 	return model, nil
 }
 
-func listVersionsByModel(ctx context.Context, tx pgx.Tx, modelID uuid.UUID) ([]*ModelVersion, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT id, model_id, version, format, is_encrypted, COALESCE(encrypt_algo, ''),
-			COALESCE(encrypt_hint, ''), COALESCE(size_bytes, 0), COALESCE(checksum_sha256, ''),
-			storage_path, created_at
-		FROM model_versions
-		WHERE model_id=$1
-		ORDER BY created_at DESC, id DESC
-	`, modelID)
+func listVersionsByModel(ctx context.Context, tx pgx.Tx, tenantID, modelID uuid.UUID) ([]*ModelVersion, error) {
+	rows, err := tx.Query(ctx, listModelVersionsSQL, modelID, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("modelRepo.ListVersions query: %w", err)
 	}
@@ -322,6 +589,56 @@ func versionScanDest(v *ModelVersion) []any {
 		&v.ID, &v.ModelID, &v.Version, &v.Format, &v.IsEncrypted, &v.EncryptAlgo,
 		&v.EncryptHint, &v.SizeBytes, &v.ChecksumSHA256, &v.StoragePath, &v.CreatedAt,
 	}
+}
+
+// ModelMutationHash creates the stable hash used to distinguish an idempotent
+// replay from accidental reuse of a key for a different request.
+func ModelMutationHash(tenantID uuid.UUID, parts ...string) string {
+	hash := sha256.New()
+	hash.Write([]byte(tenantID.String()))
+	for _, part := range parts {
+		hash.Write([]byte{0})
+		hash.Write([]byte(strings.TrimSpace(part)))
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func claimModelMutation(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, scope, key, requestHash string) (uuid.UUID, bool, error) {
+	if strings.TrimSpace(key) == "" || strings.TrimSpace(requestHash) == "" {
+		return uuid.Nil, false, fmt.Errorf("model mutation idempotency key and request hash are required")
+	}
+	lockKey := modelMutationLockKey(tenantID, scope, key)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+		return uuid.Nil, false, fmt.Errorf("model mutation idempotency lock: %w", err)
+	}
+	var resourceID uuid.UUID
+	var existingHash string
+	err := tx.QueryRow(ctx, claimModelMutationSQL, tenantID, scope, key).Scan(&resourceID, &existingHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, fmt.Errorf("model mutation idempotency lookup: %w", err)
+	}
+	if existingHash != requestHash {
+		return uuid.Nil, false, fmt.Errorf("%w: idempotency key reused with a different request", types.ErrConflict)
+	}
+	return resourceID, true, nil
+}
+
+// modelMutationLockKey is passed as PostgreSQL text to hashtextextended.
+// PostgreSQL text values cannot contain NUL bytes, so use a non-NUL unit
+// separator while retaining tenant/scope/key boundaries for deterministic
+// transaction-local advisory locking.
+func modelMutationLockKey(tenantID uuid.UUID, scope, key string) string {
+	return tenantID.String() + "\x1f" + scope + "\x1f" + key
+}
+
+func recordModelMutation(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, scope, key, requestHash string, resourceID uuid.UUID) error {
+	if _, err := tx.Exec(ctx, recordModelMutationSQL, tenantID, scope, key, requestHash, resourceID); err != nil {
+		return fmt.Errorf("model mutation idempotency record: %w", err)
+	}
+	return nil
 }
 
 func beginTenantTx(ctx context.Context, pool *pgxpool.Pool) (pgx.Tx, error) {

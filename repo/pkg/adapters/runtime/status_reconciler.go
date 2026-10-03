@@ -41,6 +41,20 @@ func (r *LocalStatusReconciler) Reconcile(_ context.Context, request ports.Workl
 		return ports.WorkloadReconcileResult{}, err
 	}
 
+	// Terminal-state guard: failed is terminal, but a pod that was in
+	// CrashLoopBackOff (mapped to failed) may self-heal and report phase
+	// "running". Allow failed→running so applyStateTransition can re-acquire
+	// quota via a fresh TryManyTx (retryQuota). Block other failed→* transitions
+	// (e.g. failed→provisioning) which have no meaningful TCC action.
+	if request.Current.State == ports.WorkloadStateFailed && nextState != ports.WorkloadStateFailed && nextState != ports.WorkloadStateRunning {
+		return ports.WorkloadReconcileResult{
+			Status:       request.Current,
+			Changed:      false,
+			Reason:       "terminal state failed: ignoring provider phase " + request.Observation.Phase,
+			ReconciledAt: r.now().UTC(),
+		}, nil
+	}
+
 	status := request.Current
 	status.State = nextState
 	status.Endpoint = firstNonEmpty(request.Observation.Endpoint, status.Endpoint)
@@ -104,19 +118,19 @@ func validateReconcileRequest(request ports.WorkloadReconcileRequest) error {
 
 func mapProviderPhase(phase string) (ports.WorkloadState, error) {
 	switch strings.ToLower(strings.TrimSpace(phase)) {
-	case "pending", "creating", "provisioning", "scheduled":
+	case "pending", "creating", "provisioning", "scheduled", "starting", "waitingforvolumebinding":
 		return ports.WorkloadStateProvisioning, nil
 	case "ready", "running", "started":
 		return ports.WorkloadStateRunning, nil
 	case "stopping", "terminating":
 		return ports.WorkloadStateStopping, nil
-	case "stopped", "succeeded", "completed":
+	case "stopped", "succeeded", "completed", "halted":
 		return ports.WorkloadStateStopped, nil
 	case "deleting":
 		return ports.WorkloadStateDeleting, nil
 	case "deleted":
 		return ports.WorkloadStateDeleted, nil
-	case "failed", "error", "crashloopbackoff":
+	case "failed", "error", "crashloopbackoff", "errimagepull", "imagepullbackoff", "pvcnotfound", "datavolumeerror":
 		return ports.WorkloadStateFailed, nil
 	default:
 		return "", fmt.Errorf("%w: unsupported provider phase %q", ports.ErrUnsupported, phase)

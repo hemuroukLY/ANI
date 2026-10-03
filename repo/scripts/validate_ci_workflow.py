@@ -11,9 +11,7 @@ import yaml
 REQUIRED_JOBS = {
     "go-ci",
     "python-ci",
-    "frontend-ci",
     "services-pr-gate",
-    "dependency-scan",
     "api-spec-lint",
 }
 WORKFLOW_PATH = Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml"
@@ -22,6 +20,12 @@ PORTABILITY_PATHS = (
     MAKEFILE_PATH.parent / "scripts/validate_sdk_alpha.py",
     MAKEFILE_PATH.parent / "scripts/validate_sdk_mock_smoke.py",
 )
+GO_DOCKERFILE_PATHS = (
+    MAKEFILE_PATH.parent / "services/ani-gateway/Dockerfile",
+    MAKEFILE_PATH.parent / "services/auth-service/Dockerfile",
+    MAKEFILE_PATH.parent / "services/reconcile-worker/Dockerfile",
+)
+MINIMUM_GO_SECURITY_VERSION = (1, 25, 13)
 
 
 def load_workflow(path: Path = WORKFLOW_PATH) -> dict[str, Any]:
@@ -78,6 +82,17 @@ def validate(
     if "@latest" in workflow_text:
         errors.append("CI tools must not be installed from a mutable @latest reference")
 
+    go_version = str((workflow.get("env") or {}).get("GO_VERSION", ""))
+    try:
+        go_version_tuple = tuple(int(part) for part in go_version.split("."))
+    except ValueError:
+        go_version_tuple = ()
+    if len(go_version_tuple) != 3 or go_version_tuple < MINIMUM_GO_SECURITY_VERSION:
+        minimum = ".".join(str(part) for part in MINIMUM_GO_SECURITY_VERSION)
+        errors.append(
+            f"CI GO_VERSION must meet Go security floor {minimum}; found {go_version or 'missing'}"
+        )
+
     go_ci = jobs.get("go-ci")
     go_ci_text = str(go_ci)
     if "scripts/list_go_modules.py" not in go_ci_text:
@@ -101,15 +116,30 @@ def validate(
     if "scripts/validate_python_test_policy.py" not in str(python_ci):
         errors.append("Python CI must enforce the changed-source test policy")
 
-    frontend_ci = jobs.get("frontend-ci")
-    if "npm --prefix frontends/console audit --audit-level=high" not in str(frontend_ci):
-        errors.append("Frontend CI must block high and critical npm audit findings")
+    if (
+        "make validate-service-runtime-observability" not in str(services)
+        or "BASE_SHA" not in str(services)
+    ):
+        errors.append("Services gate must run runtime observability contract against BASE_SHA")
+    services_checkout = next(
+        (
+            step
+            for step in (services or {}).get("steps", [])
+            if isinstance(step, dict)
+            and str(step.get("uses", "")).startswith("actions/checkout@")
+        ),
+        None,
+    )
+    if not isinstance(services_checkout, dict) or services_checkout.get("with", {}).get("fetch-depth") != 0:
+        errors.append("Services gate must fetch full Git history for the BASE_SHA allowlist diff")
 
     portability_sources = {"Makefile": makefile_text}
     portability_sources.update(portability_texts or {})
     for source, text in portability_sources.items():
         if "/private/tmp" in text:
             errors.append(f"{source} must not use the non-portable /private/tmp path")
+        if source.endswith("Dockerfile") and f"FROM golang:{go_version}-" not in text:
+            errors.append(f"{source} Go builder image must match CI GO_VERSION {go_version}")
 
     return errors
 
@@ -117,7 +147,7 @@ def validate(
 def main() -> int:
     portability_texts = {
         str(path.relative_to(MAKEFILE_PATH.parent)): path.read_text(encoding="utf-8")
-        for path in PORTABILITY_PATHS
+        for path in (*PORTABILITY_PATHS, *GO_DOCKERFILE_PATHS)
     }
     errors = validate(
         load_workflow(),

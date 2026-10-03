@@ -21,15 +21,61 @@ class Settings(BaseSettings):
     ani_gateway_internal_url: str = "http://ani-gateway.ani-system.svc.cluster.local:8080"
     core_api_base_path: str = "/api/v1"
 
-    # rag-engine gRPC (Query)
-    rag_engine_addr: str = "localhost:50054"
+    # rag-engine gRPC (Parse/Embed/Generate). Plan §3.4: the stateless
+    # RPCs are accessed via gRPC (default localhost:50052).
+    rag_engine_grpc_addr: str = "localhost:50052"
+
+    # inference-service gRPC (internal control API). Used to resolve a
+    # published served_model_name to its cluster runtime endpoint via
+    # ResolveInferenceServiceEndpoint; the endpoint is then passed through
+    # to rag-engine so Embed/Generate connect directly to the tenant's
+    # own inference service (no Gateway routing by API key).
+    inference_service_grpc_addr: str = (
+        "inference-service.ani-system.svc.cluster.local:9104"
+    )
 
     # NATS (outbox dispatch) — maps to env NATS_URL
     nats_url: str = "nats://localhost:4222"
     nats_parse_subject: str = "ani.tasks.kb.parse"
+    # Plan §0.3 / step 6: new v2 subject consumed by the kb-service
+    # NATS consumer (app/consumers/parse_consumer.py). The legacy subject
+    # ``nats_parse_subject`` is kept unchanged for the rag-engine parse_worker
+    # path; the Outbox Dispatcher switches between the two via
+    # ``kb_parse_consumer_enabled``.
+    nats_parse_subject_v2: str = "ani.tasks.kb.parse.v2"
+
+    # Plan step 6: kb-service NATS consumer flag (default OFF).
+    # When False, the consumer does not start and the Outbox Dispatcher
+    # publishes to the legacy subject (rag-engine parse_worker path).
+    # When True, the consumer starts and the Outbox Dispatcher publishes
+    # to ``nats_parse_subject_v2`` (kb-service consumer path).
+    kb_parse_consumer_enabled: bool = False
+
+    # P1 #24 full-KB rebuild: dedicated subject for kb.rebuild outbox
+    # events (OutboxDispatcher routes event_type 'kb.rebuild' here via
+    # subject_overrides), consumed by app/consumers/rebuild_consumer.py.
+    # Distinct from the parse subjects: rebuild is a long serial job and
+    # must not interleave with per-document parse traffic.
+    nats_rebuild_subject: str = "ani.tasks.kb.rebuild.v1"
+
+    # P1 #24: kb-service rebuild consumer flag (default OFF, mirrors
+    # kb_parse_consumer_enabled rollout). When False the consumer does
+    # not start; rebuild outbox events stay queued until the flag is
+    # enabled (at-least-once via the outbox, no loss).
+    kb_rebuild_consumer_enabled: bool = False
 
     # Redis (session cache) — maps to env REDIS_URL
     redis_url: str = "redis://localhost:6379/0"
+
+    # Embedding model defaults — maps to the shared env EMBEDDING_MODEL /
+    # EMBEDDING_DIM (same keys rag-engine reads; pydantic-settings is
+    # case-insensitive). Used by CreateKB as the fallback when the request
+    # omits embedding_model, and as the Core vector-store dimension. The
+    # default value mirrors the shared .env EMBEDDING_MODEL (SiliconFlow
+    # requires the full prefixed name "BAAI/bge-m3"; the bare alias is NOT
+    # recognised by the remote endpoint).
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dim: int = 1024
 
     model_config = SettingsConfigDict(
         env_file=".env",

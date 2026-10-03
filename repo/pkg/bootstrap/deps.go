@@ -6,6 +6,7 @@ package bootstrap
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,6 +35,10 @@ type Capabilities struct {
 	VectorStoreResources  ports.VectorStoreService
 	ImageRegistry         ports.ImageRegistry
 	GPUInventory          ports.GPUInventory
+	GPUSpecs              ports.GPUSpecService
+	QuotaService          ports.QuotaService
+	QuotaStore            ports.QuotaStoreService
+	GPUSpecStore          ports.GPUSpecStore
 	WorkloadRuntime       ports.WorkloadRuntime
 	WorkloadRenderer      ports.WorkloadRenderer
 	WorkloadAdmission     ports.WorkloadAdmission
@@ -47,6 +52,10 @@ type Capabilities struct {
 	WorkloadStore         ports.WorkloadInstanceStore
 	WorkloadOperations    ports.WorkloadOperationStore
 	WorkloadIdentity      ports.WorkloadIdentityService
+	SandboxRuntime        ports.SandboxRuntime
+	SandboxExpiration     ports.SandboxExpirationController
+	AsyncTasks            ports.AsyncTaskStore
+	SecretService         ports.SecretService
 	InstanceService       ports.WorkloadInstanceService
 	InstanceOps           ports.WorkloadInstanceOps
 	InstanceObservability ports.InstanceObservability
@@ -102,11 +111,8 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	if err != nil {
 		return Capabilities{}, err
 	}
+	localGPUSpecs := runtimeadapter.NewLocalGPUSpecService(gpuInventory)
 	planner := runtimeadapter.NewPlanningRuntime(runtimeadapter.WithGPUInventory(gpuInventory))
-	lifecycle, err := workloadLifecycleExecutor(cfg, kubeClient)
-	if err != nil {
-		return Capabilities{}, err
-	}
 	instanceOps, err := workloadOpsExecutor(cfg, kubeClient)
 	if err != nil {
 		return Capabilities{}, err
@@ -117,7 +123,61 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	}
 	reconciler := runtimeadapter.NewLocalStatusReconciler()
 	instanceStore := runtimeadapter.NewMetadataInstanceStore(metadata)
-	reconcileController := ports.WorkloadReconcileController(runtimeadapter.NewLocalWorkloadReconcileController(instanceStore, instanceStore, statusReader, reconciler, reconcileControllerConfig(cfg)))
+
+	// GPU quota wiring (SPEC §5.1). PostgresQuota implements both
+	// QuotaService (Try/TryMany/TryTx/TryManyTx/Confirm/Cancel/Release)
+	// and QuotaStoreService (GetMy/Put/List). CRDGPUSpecStore backs the
+	// VolcanoResourceTranslator. All are nil-safe: when GPUQuotaEnabled
+	// is false the orchestrator and reconciler bypass quota entirely.
+	quotaService := runtimeadapter.NewPostgresQuota(metadata)
+
+	// Inject quota admin into the GPU inventory so ListSpecAvailability
+	// uses allocated_gpu_count (reservation) per plan.md §4.4.1.
+	if kgi, ok := gpuInventory.(*runtimeadapter.KubernetesGPUInventory); ok {
+		kgi.WithQuotaAdmin(quotaService)
+	}
+
+	var gpuSpecStore ports.GPUSpecStore
+	var volcanoTranslator *runtimeadapter.VolcanoResourceTranslator
+	if kubeClient != nil {
+		gpuSpecStore = runtimeadapter.NewCRDGPUSpecStore(runtimeadapter.CRDGPUSpecStoreConfig{
+			Doer:    kubeClient,
+			BaseURL: kubernetesAPIBaseURL(cfg),
+		})
+		volcanoTranslator = runtimeadapter.NewVolcanoResourceTranslator(gpuSpecStore)
+	}
+	gpuSpecs := runtimeadapter.NewCompositeGPUSpecService(gpuSpecStore, localGPUSpecs)
+
+	// Lifecycle executor needs the Volcano translator for spec_id resize.
+	// Constructed here (after translator/gpuSpecs resolution) and passed via
+	// WorkloadCapabilities.Lifecycle below.
+	lifecycle, err := workloadLifecycleExecutor(cfg, kubeClient, volcanoTranslator)
+	if err != nil {
+		return Capabilities{}, err
+	}
+
+	// Lifecycle outbox events are independent of GPU_QUOTA_ENABLED:
+	// metering-service is event-driven and needs provisioning->running (and
+	// every other lifecycle) transition written to outbox_events even when
+	// quota is disabled. Only the TCC quota service stays gated by the flag;
+	// without it the transitions run through the same tenant tx but skip
+	// quota calls (QuotaTxIDs empty).
+	reconcileControllerOptions := []runtimeadapter.ReconcileControllerOption{
+		runtimeadapter.WithMetadataStore(metadata),
+		runtimeadapter.WithWorkloadInstanceStoreTx(instanceStore),
+		runtimeadapter.WithOutboxWriter(runtimeadapter.NewMetadataOutboxWriter()),
+	}
+	if cfg.GPUQuotaEnabled {
+		reconcileControllerOptions = append(reconcileControllerOptions,
+			runtimeadapter.WithQuotaService(quotaService))
+		if cfg.ProvisioningTimeoutMin > 0 {
+			reconcileControllerOptions = append(reconcileControllerOptions,
+				runtimeadapter.WithProvisioningTimeoutMin(cfg.ProvisioningTimeoutMin))
+		}
+	}
+	reconcileController := ports.WorkloadReconcileController(
+		runtimeadapter.NewLocalWorkloadReconcileController(instanceStore, instanceStore, statusReader, reconciler, reconcileControllerConfig(cfg), reconcileControllerOptions...),
+	)
 	if cfg.WorkloadReconcileLeaderElectionEnabled {
 		elector, err := runtimeadapter.NewMetadataReconcileLeaderElector(metadata, runtimeadapter.MetadataReconcileLeaderElectorConfig{
 			LeaseName:            cfg.WorkloadReconcileLeaderLeaseName,
@@ -132,6 +192,14 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	}
 	operationStore := runtimeadapter.NewMetadataOperationStore(metadata)
 	workloadIdentity := runtimeadapter.NewMetadataWorkloadIdentityService(metadata)
+	imageRegistry, err := imageRegistryAdapter(cfg, instanceStore, kubeClient)
+	if err != nil {
+		return Capabilities{}, err
+	}
+	resourceRegistry := imageRegistry
+	if _, notConfigured := imageRegistry.(registry.NotConfigured); notConfigured {
+		resourceRegistry = nil
+	}
 	networkStore := runtimeadapter.NewMetadataNetworkStore(metadata)
 	networkRenderer := runtimeadapter.NewKubeOVNNetworkRenderer()
 	networkProvider, err := networkProviderAdapter(cfg, kubeClient)
@@ -196,7 +264,62 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	if strings.TrimSpace(cfg.VectorStoreProvider) == "milvus" {
 		vectorStoreServiceOptions = append(vectorStoreServiceOptions, runtimeadapter.WithVectorStoreBackend(vectorStore))
 	}
-	orchestrator := runtimeadapter.NewLocalInstanceOrchestrator(
+	networkResources := runtimeadapter.NewLocalNetworkService(networkServiceOptions...)
+	storageResources := runtimeadapter.NewLocalStorageService(storageServiceOptions...)
+	resolverNetwork := ports.NetworkService(networkResources)
+	resolverStorage := ports.StorageService(storageResources)
+	if cfg.SharedNetworkService != nil {
+		resolverNetwork = cfg.SharedNetworkService
+	}
+	if cfg.SharedStorageService != nil {
+		resolverStorage = cfg.SharedStorageService
+	}
+	if cfg.SharedImageRegistry != nil {
+		imageRegistry = cfg.SharedImageRegistry
+		resourceRegistry = cfg.SharedImageRegistry
+		if _, notConfigured := imageRegistry.(registry.NotConfigured); notConfigured {
+			resourceRegistry = nil
+		}
+	}
+	secretService := cfg.SecretService
+	if secretService == nil {
+		secretService = runtimeadapter.NewLocalSecretService()
+	}
+	var sandboxRuntime ports.SandboxRuntime = runtimeadapter.NewLocalSandboxRuntime()
+	if cfg.WorkloadProviderApplyEnabled && kubeClient != nil {
+		sandboxRuntime = runtimeadapter.NewKubernetesSandboxRuntime(
+			kubeClient,
+			runtimeadapter.WithKubernetesSandboxApplyEnabled(true),
+		)
+	}
+	// Sandbox expiration background scanner (Bug-7). The MetadataInstanceStore
+	// implements the cross-tenant ExpirableSandboxLister, and doubles as the
+	// persistence store for the controller.
+	sandboxExpirationController := runtimeadapter.NewSandboxExpirationController(instanceStore, instanceStore, sandboxRuntime)
+	// Lifecycle outbox events are independent of GPU_QUOTA_ENABLED (see the
+	// reconcile controller block above). The inner orchestrator and instance
+	// service get metadataStore/storeTx/outboxWriter unconditionally so their
+	// lifecycle persist paths run in a tenant tx and emit events; only the
+	// TCC quota service stays gated by the flag.
+	orchestratorOptions := []runtimeadapter.InstanceOrchestratorOption{
+		runtimeadapter.WithInstanceStore(instanceStore),
+		runtimeadapter.WithInstanceOrchestratorWorkloadIdentityService(workloadIdentity),
+		runtimeadapter.WithInstanceOrchestratorMetadataStore(metadata),
+		runtimeadapter.WithInstanceOrchestratorStoreTx(instanceStore),
+		runtimeadapter.WithInstanceOrchestratorOutboxWriter(runtimeadapter.NewMetadataOutboxWriter()),
+	}
+	if cfg.GPUQuotaEnabled {
+		orchestratorOptions = append(orchestratorOptions,
+			runtimeadapter.WithInstanceOrchestratorQuotaService(quotaService))
+	}
+	// Volcano resource translation is a Core capability independent of
+	// GPU_QUOTA_ENABLED (plan.md §4.7). Inject into the inner orchestrator
+	// so it works even when quota is disabled.
+	if volcanoTranslator != nil {
+		orchestratorOptions = append(orchestratorOptions,
+			runtimeadapter.WithInstanceOrchestratorTranslator(volcanoTranslator))
+	}
+	innerOrchestrator := runtimeadapter.NewLocalInstanceOrchestrator(
 		planner,
 		runtimeadapter.NewKubernetesDryRunRenderer(planner),
 		admission,
@@ -205,19 +328,41 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		apply,
 		statusReader,
 		reconciler,
-		runtimeadapter.WithInstanceStore(instanceStore),
-		runtimeadapter.WithInstanceOrchestratorWorkloadIdentityService(workloadIdentity),
+		orchestratorOptions...,
 	)
+	orchestrator := ports.WorkloadInstanceOrchestrator(innerOrchestrator)
+	if cfg.GPUQuotaEnabled {
+		outboxWriter := runtimeadapter.NewMetadataOutboxWriter()
+		quotaAwareOptions := []runtimeadapter.QuotaAwareInstanceOrchestratorOption{
+			runtimeadapter.WithQuotaAwareQuotaEnabled(true),
+			runtimeadapter.WithQuotaAwareQuotaService(quotaService),
+			runtimeadapter.WithQuotaAwareQuotaStore(quotaService),
+			runtimeadapter.WithQuotaAwareQuotaAdmin(quotaService),
+			runtimeadapter.WithQuotaAwareMetadataStore(metadata),
+			runtimeadapter.WithQuotaAwareStoreTx(instanceStore),
+			runtimeadapter.WithQuotaAwareStore(instanceStore),
+			runtimeadapter.WithQuotaAwareOutboxWriter(outboxWriter),
+		}
+		if volcanoTranslator != nil {
+			quotaAwareOptions = append(quotaAwareOptions,
+				runtimeadapter.WithQuotaAwareTranslator(volcanoTranslator))
+		}
+		orchestrator = runtimeadapter.NewQuotaAwareInstanceOrchestrator(innerOrchestrator, quotaAwareOptions...)
+	}
 	return Capabilities{
 		Metadata:             metadata,
-		MessageBus:           natsadapter.NewMessageBus(js),
+		MessageBus:           natsadapter.NewMessageBus(js, slog.Default()),
 		Cache:                redisadapter.NewCacheStore(redisClient),
 		KubernetesAPI:        kubeClient,
 		ObjectStore:          objectStore,
 		VectorStore:          vectorStore,
 		VectorStoreResources: runtimeadapter.NewLocalVectorStoreService(vectorStoreServiceOptions...),
-		ImageRegistry:        registry.NotConfigured{},
+		ImageRegistry:        imageRegistry,
 		GPUInventory:         gpuInventory,
+		GPUSpecs:             gpuSpecs,
+		QuotaService:         quotaService,
+		QuotaStore:           quotaService,
+		GPUSpecStore:         gpuSpecStore,
 		WorkloadRuntime:      planner,
 		WorkloadRenderer:     runtimeadapter.NewKubernetesDryRunRenderer(planner),
 		WorkloadAdmission:    admission,
@@ -230,14 +375,25 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		WorkloadStore:        instanceStore,
 		WorkloadOperations:   operationStore,
 		WorkloadIdentity:     workloadIdentity,
+		SandboxRuntime:       sandboxRuntime,
+		SandboxExpiration:    sandboxExpirationController,
+		AsyncTasks:           runtimeadapter.NewMetadataAsyncTaskStore(metadata),
+		SecretService:        secretService,
 		WorkloadInstances:    orchestrator,
 		InstanceService: runtimeadapter.NewLocalInstanceServiceWithOptions(
 			orchestrator,
 			instanceStore,
 			instanceOps,
-			runtimeadapter.WithOperationStore(operationStore),
-			runtimeadapter.WithInstanceLifecycleExecutor(lifecycle),
-			runtimeadapter.WithWorkloadIdentityService(workloadIdentity),
+			append([]runtimeadapter.InstanceServiceOption{
+				runtimeadapter.WithOperationStore(operationStore),
+				runtimeadapter.WithInstanceLifecycleExecutor(lifecycle),
+				runtimeadapter.WithInstanceGPUSpecService(gpuSpecs),
+				runtimeadapter.WithInstanceGPUInventory(gpuInventory),
+				runtimeadapter.WithWorkloadIdentityService(workloadIdentity),
+				runtimeadapter.WithSandboxRuntime(sandboxRuntime),
+				runtimeadapter.WithInstanceStorageService(resolverStorage),
+				runtimeadapter.WithInstanceResourceResolver(runtimeadapter.NewLocalInstanceResourceResolverWithDependencies(resolverNetwork, resolverStorage, gpuSpecs, resourceRegistry, secretService).WithWorkloadStore(instanceStore)),
+			}, instanceServiceQuotaOptions(cfg, quotaService, metadata, instanceStore)...)...,
 		),
 		InstanceOps:           instanceOps,
 		InstanceObservability: instanceObservability,
@@ -247,15 +403,34 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		NetworkApply:          networkProvider,
 		NetworkStatus:         networkProvider,
 		NetworkReconcile:      runtimeadapter.NewLocalNetworkStatusReconciler(networkStore),
-		NetworkResources:      runtimeadapter.NewLocalNetworkService(networkServiceOptions...),
+		NetworkResources:      resolverNetwork,
 		StorageStore:          storageStore,
 		StorageRenderer:       runtimeadapter.NewKubernetesStorageRenderer(),
 		StorageDryRun:         storageProvider,
 		StorageApply:          storageProvider,
 		StorageStatus:         storageProvider,
 		StorageReconcile:      runtimeadapter.NewLocalStorageStatusReconciler(storageStore),
-		StorageResources:      runtimeadapter.NewLocalStorageService(storageServiceOptions...),
+		StorageResources:      resolverStorage,
 	}, nil
+}
+
+// instanceServiceQuotaOptions returns the tx/outbox wiring for the
+// InstanceService. metadataStore/storeTx/outboxWriter are injected
+// unconditionally so persistLifecycleWithQuota runs lifecycle writes in a
+// tenant tx and emits events regardless of GPU_QUOTA_ENABLED (see the
+// orchestrator options comment). The quota service stays gated by the flag:
+// when GPU_QUOTA_ENABLED=false persistLifecycleWithQuota still opens the tx
+// and writes outbox events but skips Try/Cancel/Release.
+func instanceServiceQuotaOptions(cfg Config, quotaService ports.QuotaService, metadata ports.MetadataStore, instanceStore ports.WorkloadInstanceStoreTx) []runtimeadapter.InstanceServiceOption {
+	options := []runtimeadapter.InstanceServiceOption{
+		runtimeadapter.WithInstanceMetadataStore(metadata),
+		runtimeadapter.WithInstanceStoreTx(instanceStore),
+		runtimeadapter.WithInstanceOutboxWriter(runtimeadapter.NewMetadataOutboxWriter()),
+	}
+	if cfg.GPUQuotaEnabled {
+		options = append(options, runtimeadapter.WithInstanceQuotaService(quotaService))
+	}
+	return options
 }
 
 func gpuInventoryAdapter(cfg Config, kubeClient *runtimeadapter.KubernetesRESTClient) (ports.GPUInventory, error) {
@@ -274,6 +449,33 @@ func gpuInventoryAdapter(cfg Config, kubeClient *runtimeadapter.KubernetesRESTCl
 		return runtimeadapter.NewKubernetesGPUInventory(client), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported GPU inventory provider %q", ports.ErrUnsupported, cfg.GPUInventoryProvider)
+	}
+}
+
+func imageRegistryAdapter(cfg Config, instanceStore ports.WorkloadInstanceStore, kubeClient *runtimeadapter.KubernetesRESTClient) (ports.ImageRegistry, error) {
+	switch strings.TrimSpace(cfg.RegistryProviderMode) {
+	case "", "local", "not_configured":
+		return registry.NotConfigured{}, nil
+	case "harbor":
+		client := kubeClient
+		if client == nil {
+			var err error
+			client, err = runtimeadapter.NewKubernetesRESTClient(kubernetesRESTClientConfig(cfg))
+			if err != nil {
+				return nil, err
+			}
+		}
+		return registry.NewHarborImageRegistry(registry.HarborImageRegistryConfig{
+			Endpoint:           cfg.HarborEndpoint,
+			Username:           cfg.HarborUsername,
+			Password:           cfg.HarborPassword,
+			RequestTimeout:     cfg.HarborRequestTimeout,
+			InsecureSkipVerify: cfg.RegistryTLSInsecure,
+			PullSecretWriter:   registry.NewKubernetesPullSecretWriter(client),
+			ReferenceReader:    registry.NewWorkloadImageReferenceReader(instanceStore),
+		})
+	default:
+		return nil, fmt.Errorf("%w: unsupported REGISTRY_PROVIDER_MODE %q", ports.ErrUnsupported, cfg.RegistryProviderMode)
 	}
 }
 
@@ -354,7 +556,6 @@ func instanceObservabilityAdapter(cfg Config) (ports.InstanceObservability, erro
 			KubernetesServiceAccountTokenFile: cfg.KubernetesServiceAccountTokenFile,
 			KubernetesServiceAccountCAFile:    cfg.KubernetesServiceAccountCAFile,
 			KubernetesFieldManager:            cfg.KubernetesProviderFieldManager,
-			ExecBaseURL:                       cfg.InstanceObservabilityExecBaseURL,
 		})
 	default:
 		return nil, fmt.Errorf("%w: unsupported instance observability provider %q", ports.ErrUnsupported, cfg.InstanceObservabilityProvider)
@@ -394,7 +595,7 @@ func workloadProviderAdapters(cfg Config) (ports.WorkloadProviderDryRun, ports.W
 	}
 }
 
-func workloadLifecycleExecutor(cfg Config, kubeClient *runtimeadapter.KubernetesRESTClient) (ports.WorkloadInstanceLifecycleExecutor, error) {
+func workloadLifecycleExecutor(cfg Config, kubeClient *runtimeadapter.KubernetesRESTClient, translator *runtimeadapter.VolcanoResourceTranslator) (ports.WorkloadInstanceLifecycleExecutor, error) {
 	switch strings.TrimSpace(cfg.WorkloadLifecycleProvider) {
 	case "", "local":
 		return nil, nil
@@ -407,10 +608,13 @@ func workloadLifecycleExecutor(cfg Config, kubeClient *runtimeadapter.Kubernetes
 				return nil, err
 			}
 		}
-		return runtimeadapter.NewKubernetesLifecycleExecutor(
-			client,
+		options := []runtimeadapter.KubernetesLifecycleOption{
 			runtimeadapter.WithKubernetesLifecycleEnabled(cfg.WorkloadLifecycleApplyEnabled),
-		), nil
+		}
+		if translator != nil {
+			options = append(options, runtimeadapter.WithKubernetesLifecycleTranslator(translator))
+		}
+		return runtimeadapter.NewKubernetesLifecycleExecutor(client, options...), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported workload lifecycle provider %q", ports.ErrUnsupported, cfg.WorkloadLifecycleProvider)
 	}
@@ -445,6 +649,26 @@ func kubernetesRESTClientConfig(cfg Config) runtimeadapter.KubernetesRESTClientC
 		CAFile:          cfg.KubernetesServiceAccountCAFile,
 		FieldManager:    cfg.KubernetesProviderFieldManager,
 	}
+}
+
+// kubernetesAPIBaseURL derives the K8s API base URL from the bootstrap
+// config, mirroring kubernetesRESTHost in the runtime adapter. Used to
+// construct the CRDGPUSpecStore base URL without reaching into the
+// private host field of KubernetesRESTClient.
+func kubernetesAPIBaseURL(cfg Config) string {
+	host := strings.TrimRight(strings.TrimSpace(cfg.KubernetesAPIHost), "/")
+	if host != "" {
+		return host
+	}
+	serviceHost := strings.TrimSpace(cfg.KubernetesServiceHost)
+	servicePort := strings.TrimSpace(cfg.KubernetesServicePort)
+	if serviceHost == "" {
+		return ""
+	}
+	if servicePort == "" {
+		servicePort = "443"
+	}
+	return "https://" + net.JoinHostPort(serviceHost, servicePort)
 }
 
 // Close releases all connections. Call with defer after MustConnect.

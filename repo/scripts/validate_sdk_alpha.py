@@ -120,6 +120,9 @@ def collect_error_codes(spec: dict[str, Any]) -> list[str]:
             match = re.search(r"code=([A-Z0-9_]+)", response.get("description", ""))
             if match:
                 codes.add(match.group(1))
+            for code in response.get("x-ani-error-codes", []):
+                if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", code):
+                    codes.add(code)
     return sorted(codes)
 
 
@@ -134,7 +137,10 @@ def run(cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
 
 
 def command_available(cmd: list[str], cwd: Path) -> bool:
-    result = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        result = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    except (FileNotFoundError, OSError):
+        return False
     return result.returncode == 0
 
 

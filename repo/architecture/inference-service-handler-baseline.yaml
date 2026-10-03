@@ -1,0 +1,8 @@
+version: 1
+status: accepted_baseline
+owner: ANI Services
+purpose: >-
+  登记 Gateway 推理 handler 成功响应码与已批准 OpenAPI 契约之间的已知差异。
+  create/scale/delete 已收敛到 202，本文件不得再保留对应 stub 例外；新增差异或
+  stale 条目会阻断 Services 门禁。
+exceptions: []

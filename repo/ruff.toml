@@ -1,0 +1,13 @@
+# ruff configuration — exclude protoc-generated stubs from lint
+exclude = [
+  "ai/rag-engine/app/grpc/*_pb2.py",
+  "ai/rag-engine/app/grpc/*_pb2.pyi",
+  "ai/rag-engine/app/grpc/*_pb2_grpc.py",
+  "services/kb-service/app/generated/**/*.py",
+  "services/kb-service/app/generated/**/*.pyi",
+]
+
+[lint.per-file-ignores]
+# rag-engine tests install optional dependency stubs before importing app.*
+# modules so pure-logic tests can run without Docling/LlamaIndex/Milvus/etc.
+"ai/rag-engine/tests/test_*.py" = ["E402"]

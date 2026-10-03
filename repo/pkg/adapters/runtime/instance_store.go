@@ -40,22 +40,54 @@ func (s *MetadataInstanceStore) UpsertStatus(ctx context.Context, record ports.W
 	if s.store == nil {
 		return ports.ErrNotConfigured
 	}
-	if strings.TrimSpace(record.TenantID) == "" {
-		return fmt.Errorf("%w: tenantID is required", ports.ErrInvalid)
+	if err := validateInstanceRecord(record); err != nil {
+		return err
 	}
-	if strings.TrimSpace(record.InstanceID) == "" {
-		return fmt.Errorf("%w: instanceID is required", ports.ErrInvalid)
-	}
-	if strings.TrimSpace(record.Name) == "" {
-		return fmt.Errorf("%w: name is required", ports.ErrInvalid)
-	}
-	if record.Kind == "" {
-		return fmt.Errorf("%w: workload kind is required", ports.ErrInvalid)
-	}
-	if record.Status.State == "" {
-		return fmt.Errorf("%w: workload state is required", ports.ErrInvalid)
-	}
+	return s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		return s.upsertStatusInTx(ctx, tx, record)
+	})
+}
 
+// UpsertStatusAsPlatform persists instance status through the platform bypass,
+// intended for the background cross-tenant SandboxExpirationController (Bug-7).
+// Unlike UpsertStatus it does not require a tenant scoped to the context; it reuses
+// the same single-row upsert SQL inside a platform transaction (WithPlatformTx),
+// mirroring how ListRunningSandboxes reads across tenants.
+func (s *MetadataInstanceStore) UpsertStatusAsPlatform(ctx context.Context, record ports.WorkloadInstanceRecord) error {
+	if s.store == nil {
+		return ports.ErrNotConfigured
+	}
+	if err := validateInstanceRecord(record); err != nil {
+		return err
+	}
+	return s.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		return s.upsertStatusInTx(ctx, tx, record)
+	})
+}
+
+// UpsertStatusTx implements ports.WorkloadInstanceStoreTx (SPEC §3.2). It
+// writes the instance status inside an externally-owned MetadataTx so the
+// caller can commit it atomically with a quota Confirm/Cancel/Release in the
+// same transaction. The caller is responsible for opening the tenant-
+// scoped transaction (WithTenantTx) and injecting the TenantContext.
+func (s *MetadataInstanceStore) UpsertStatusTx(ctx context.Context, tx ports.MetadataTx, record ports.WorkloadInstanceRecord) error {
+	if s.store == nil {
+		return ports.ErrNotConfigured
+	}
+	if err := validateInstanceRecord(record); err != nil {
+		return err
+	}
+	if tx == nil {
+		return fmt.Errorf("%w: metadata tx is required for UpsertStatusTx", ports.ErrInvalid)
+	}
+	return s.upsertStatusInTx(ctx, tx, record)
+}
+
+// upsertStatusInTx runs the upsert SQL within the provided MetadataTx. It is
+// shared by UpsertStatus (which opens its own tenant tx) and UpsertStatusTx
+// (which runs in the caller's tx). The quota_tx_ids JSONB column is written
+// alongside the status so TCC tx_ids persist with the instance row.
+func (s *MetadataInstanceStore) upsertStatusInTx(ctx context.Context, tx ports.MetadataTx, record ports.WorkloadInstanceRecord) error {
 	resourceRefs, err := json.Marshal(record.ResourceRefs)
 	if err != nil {
 		return fmt.Errorf("marshal resource refs: %w", err)
@@ -88,50 +120,122 @@ func (s *MetadataInstanceStore) UpsertStatus(ctx context.Context, record ports.W
 	if err != nil {
 		return fmt.Errorf("marshal gpu status: %w", err)
 	}
+	labels, err := json.Marshal(firstNonNilStringMap(record.Labels))
+	if err != nil {
+		return fmt.Errorf("marshal labels: %w", err)
+	}
+	imageSummary, err := json.Marshal(record.Image)
+	if err != nil {
+		return fmt.Errorf("marshal image summary: %w", err)
+	}
+	computeSummary, err := json.Marshal(record.Compute)
+	if err != nil {
+		return fmt.Errorf("marshal compute summary: %w", err)
+	}
+	networkSummary, err := json.Marshal(record.Network)
+	if err != nil {
+		return fmt.Errorf("marshal network summary: %w", err)
+	}
+	accessSummary, err := json.Marshal(record.Access)
+	if err != nil {
+		return fmt.Errorf("marshal access summary: %w", err)
+	}
+	storageAttachments, err := json.Marshal(record.StorageAttachments)
+	if err != nil {
+		return fmt.Errorf("marshal storage attachments: %w", err)
+	}
+	sandboxStatus, err := json.Marshal(firstNonNilSandbox(record.Sandbox))
+	if err != nil {
+		return fmt.Errorf("marshal sandbox status: %w", err)
+	}
+	quotaTxIDs, err := json.Marshal(firstNonNilStringSlice(record.QuotaTxIDs))
+	if err != nil {
+		return fmt.Errorf("marshal quota tx ids: %w", err)
+	}
 	now := s.now().UTC()
 	createdAt := firstNonZeroTime(record.CreatedAt, now)
 	updatedAt := firstNonZeroTime(record.UpdatedAt, record.Status.UpdatedAt, now)
 
-	return s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
-		_, err := tx.Exec(ctx, `
-			INSERT INTO workload_instances (
-				tenant_id, instance_id, name, workload_kind, provider, audit_id,
-				provider_id, resource_refs, state, endpoint, node_name, reason,
-				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status, created_at, updated_at
-			)
-			VALUES (
-				$1::uuid, $2, $3, $4, NULLIF($5, ''), NULLIF($6, '')::uuid,
-				NULLIF($7, ''), $8::jsonb, $9, NULLIF($10, ''), NULLIF($11, ''),
-				NULLIF($12, ''), $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb, $20, $21
-			)
-			ON CONFLICT (tenant_id, instance_id) DO UPDATE SET
-				name = EXCLUDED.name,
-				workload_kind = EXCLUDED.workload_kind,
-				provider = EXCLUDED.provider,
-				audit_id = EXCLUDED.audit_id,
-				provider_id = EXCLUDED.provider_id,
-				resource_refs = EXCLUDED.resource_refs,
-				state = EXCLUDED.state,
-				endpoint = EXCLUDED.endpoint,
-				node_name = EXCLUDED.node_name,
-				reason = EXCLUDED.reason,
-				networks = EXCLUDED.networks,
-				storage = EXCLUDED.storage,
-				lifecycle_policy = EXCLUDED.lifecycle_policy,
-				ssh_connection = EXCLUDED.ssh_connection,
-				snapshots = EXCLUDED.snapshots,
-				container_status = EXCLUDED.container_status,
-				gpu_status = EXCLUDED.gpu_status,
-				updated_at = EXCLUDED.updated_at
-		`, record.TenantID, record.InstanceID, record.Name, string(record.Kind), record.Provider,
-			record.AuditID, record.Status.Ref.ProviderID, string(resourceRefs), string(record.Status.State),
-			record.Status.Endpoint, record.Status.NodeName, record.Status.Reason, string(networks), string(storage),
-			string(lifecyclePolicy), string(sshConnection), string(snapshots), string(containerStatus), string(gpuStatus), createdAt, updatedAt)
-		if err != nil {
-			return fmt.Errorf("upsert workload instance: %w", err)
-		}
-		return nil
-	})
+	_, err = tx.Exec(ctx, `
+		INSERT INTO workload_instances (
+			tenant_id, instance_id, name, workload_kind, provider, audit_id,
+			provider_id, resource_refs, state, endpoint, node_name, reason,
+			networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status,
+			description, labels, image_summary, compute_summary, network_summary, access_summary,
+			storage_attachments, sandbox_status, quota_tx_ids, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2, $3, $4, NULLIF($5, ''), NULLIF($6, '')::uuid,
+			NULLIF($7, ''), $8::jsonb, $9, NULLIF($10, ''), NULLIF($11, ''),
+			NULLIF($12, ''), $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb,
+			NULLIF($20, ''), $21::jsonb, $22::jsonb, $23::jsonb, $24::jsonb, $25::jsonb,
+			$26::jsonb, $27::jsonb, $28::jsonb, $29, $30
+		)
+		ON CONFLICT (tenant_id, instance_id) DO UPDATE SET
+			name = EXCLUDED.name,
+			workload_kind = EXCLUDED.workload_kind,
+			provider = EXCLUDED.provider,
+			audit_id = EXCLUDED.audit_id,
+			provider_id = EXCLUDED.provider_id,
+			resource_refs = EXCLUDED.resource_refs,
+			state = EXCLUDED.state,
+			endpoint = EXCLUDED.endpoint,
+			node_name = EXCLUDED.node_name,
+			reason = EXCLUDED.reason,
+			networks = EXCLUDED.networks,
+			storage = EXCLUDED.storage,
+			lifecycle_policy = EXCLUDED.lifecycle_policy,
+			ssh_connection = EXCLUDED.ssh_connection,
+			snapshots = EXCLUDED.snapshots,
+			container_status = EXCLUDED.container_status,
+			gpu_status = EXCLUDED.gpu_status,
+			description = EXCLUDED.description,
+			labels = EXCLUDED.labels,
+			image_summary = EXCLUDED.image_summary,
+			compute_summary = EXCLUDED.compute_summary,
+			network_summary = EXCLUDED.network_summary,
+			access_summary = EXCLUDED.access_summary,
+			storage_attachments = EXCLUDED.storage_attachments,
+			sandbox_status = EXCLUDED.sandbox_status,
+			quota_tx_ids = EXCLUDED.quota_tx_ids,
+			updated_at = EXCLUDED.updated_at
+	`, record.TenantID, record.InstanceID, record.Name, string(record.Kind), record.Provider,
+		record.AuditID, record.Status.Ref.ProviderID, string(resourceRefs), string(record.Status.State),
+		record.Status.Endpoint, record.Status.NodeName, record.Status.Reason, string(networks), string(storage),
+		string(lifecyclePolicy), string(sshConnection), string(snapshots), string(containerStatus), string(gpuStatus),
+		record.Description, string(labels), string(imageSummary), string(computeSummary), string(networkSummary),
+		string(accessSummary), string(storageAttachments), string(sandboxStatus), string(quotaTxIDs), createdAt, updatedAt)
+	if err != nil {
+		return fmt.Errorf("upsert workload instance: %w", err)
+	}
+	return nil
+}
+
+// validateInstanceRecord checks the required fields for an upsert.
+func validateInstanceRecord(record ports.WorkloadInstanceRecord) error {
+	if strings.TrimSpace(record.TenantID) == "" {
+		return fmt.Errorf("%w: tenantID is required", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(record.InstanceID) == "" {
+		return fmt.Errorf("%w: instanceID is required", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(record.Name) == "" {
+		return fmt.Errorf("%w: name is required", ports.ErrInvalid)
+	}
+	if record.Kind == "" {
+		return fmt.Errorf("%w: workload kind is required", ports.ErrInvalid)
+	}
+	if record.Status.State == "" {
+		return fmt.Errorf("%w: workload state is required", ports.ErrInvalid)
+	}
+	return nil
+}
+
+func firstNonNilStringSlice(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func (s *MetadataInstanceStore) Get(ctx context.Context, tenantID string, instanceID string) (ports.WorkloadInstanceRecord, error) {
@@ -148,7 +252,9 @@ func (s *MetadataInstanceStore) Get(ctx context.Context, tenantID string, instan
 			SELECT tenant_id::text, instance_id, name, workload_kind, COALESCE(provider, ''),
 				COALESCE(audit_id::text, ''), COALESCE(provider_id, ''), resource_refs,
 				state, COALESCE(endpoint, ''), COALESCE(node_name, ''), COALESCE(reason, ''),
-				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status, created_at, updated_at
+				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status,
+				COALESCE(description, ''), labels, image_summary, compute_summary, network_summary,
+				access_summary, storage_attachments, sandbox_status, quota_tx_ids, created_at, updated_at
 			FROM workload_instances
 			WHERE tenant_id = $1::uuid AND instance_id = $2
 		`, tenantID, instanceID)
@@ -174,11 +280,62 @@ func (s *MetadataInstanceStore) List(ctx context.Context, tenantID string, kind 
 			SELECT tenant_id::text, instance_id, name, workload_kind, COALESCE(provider, ''),
 				COALESCE(audit_id::text, ''), COALESCE(provider_id, ''), resource_refs,
 				state, COALESCE(endpoint, ''), COALESCE(node_name, ''), COALESCE(reason, ''),
-				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status, created_at, updated_at
+				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status,
+				COALESCE(description, ''), labels, image_summary, compute_summary, network_summary,
+				access_summary, storage_attachments, sandbox_status, quota_tx_ids, created_at, updated_at
 			FROM workload_instances
 			WHERE tenant_id = $1::uuid AND ($2 = '' OR workload_kind = $2)
 			ORDER BY updated_at DESC
 		`, tenantID, string(kind))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var record ports.WorkloadInstanceRecord
+			if err := scanWorkloadInstance(rows, &record); err != nil {
+				return err
+			}
+			records = append(records, record)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+// ListRunningSandboxes cross-tenant enumerates currently non-terminal sandbox
+// records (running/pending/paused) for the expiration background controller.
+// It reads across all tenants via a platform transaction. The caller reads
+// config.ExpiresAt / config.LastActivityAt from each record to decide whether
+// an OnTimeout action should fire (Bug-7).
+func (s *MetadataInstanceStore) ListRunningSandboxes(ctx context.Context, limit int) ([]ports.WorkloadInstanceRecord, error) {
+	if s.store == nil {
+		return nil, ports.ErrNotConfigured
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	var records []ports.WorkloadInstanceRecord
+	err := s.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT tenant_id::text, instance_id, name, workload_kind, COALESCE(provider, ''),
+				COALESCE(audit_id::text, ''), COALESCE(provider_id, ''), resource_refs,
+				state, COALESCE(endpoint, ''), COALESCE(node_name, ''), COALESCE(reason, ''),
+				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status,
+				COALESCE(description, ''), labels, image_summary, compute_summary, network_summary,
+				access_summary, storage_attachments, sandbox_status, quota_tx_ids, created_at, updated_at
+			FROM workload_instances
+			WHERE workload_kind = 'sandbox' AND state NOT IN ('deleted', 'stopped', 'failed')
+			ORDER BY updated_at ASC
+			LIMIT $1
+		`, limit)
 		if err != nil {
 			return err
 		}
@@ -216,7 +373,8 @@ func (s *MetadataInstanceStore) ListReconcileTargets(ctx context.Context, reques
 		rows, err := tx.Query(ctx, `
 			SELECT tenant_id::text, instance_id, workload_kind, state, COALESCE(provider, ''), updated_at
 			FROM workload_instances
-			WHERE state NOT IN ('stopped', 'failed', 'deleted') OR updated_at < $1
+			WHERE state NOT IN ('deleting', 'deleted')
+				AND (state NOT IN ('stopped', 'failed') OR updated_at < $1)
 			ORDER BY updated_at ASC
 			LIMIT $2
 		`, staleBefore.UTC(), limit)
@@ -258,6 +416,14 @@ func scanWorkloadInstance(row scanner, record *ports.WorkloadInstanceRecord) err
 	var snapshotsJSON []byte
 	var containerStatusJSON []byte
 	var gpuStatusJSON []byte
+	var labelsJSON []byte
+	var imageSummaryJSON []byte
+	var computeSummaryJSON []byte
+	var networkSummaryJSON []byte
+	var accessSummaryJSON []byte
+	var storageAttachmentsJSON []byte
+	var sandboxStatusJSON []byte
+	var quotaTxIDsJSON []byte
 	if err := row.Scan(
 		&record.TenantID,
 		&record.InstanceID,
@@ -278,6 +444,15 @@ func scanWorkloadInstance(row scanner, record *ports.WorkloadInstanceRecord) err
 		&snapshotsJSON,
 		&containerStatusJSON,
 		&gpuStatusJSON,
+		&record.Description,
+		&labelsJSON,
+		&imageSummaryJSON,
+		&computeSummaryJSON,
+		&networkSummaryJSON,
+		&accessSummaryJSON,
+		&storageAttachmentsJSON,
+		&sandboxStatusJSON,
+		&quotaTxIDsJSON,
 		&record.CreatedAt,
 		&record.UpdatedAt,
 	); err != nil {
@@ -332,10 +507,41 @@ func scanWorkloadInstance(row scanner, record *ports.WorkloadInstanceRecord) err
 		}
 		record.GPU = &gpu
 	}
+	if err := json.Unmarshal(labelsJSON, &record.Labels); err != nil {
+		return fmt.Errorf("unmarshal labels: %w", err)
+	}
+	if err := json.Unmarshal(imageSummaryJSON, &record.Image); err != nil {
+		return fmt.Errorf("unmarshal image summary: %w", err)
+	}
+	if err := json.Unmarshal(computeSummaryJSON, &record.Compute); err != nil {
+		return fmt.Errorf("unmarshal compute summary: %w", err)
+	}
+	if err := json.Unmarshal(networkSummaryJSON, &record.Network); err != nil {
+		return fmt.Errorf("unmarshal network summary: %w", err)
+	}
+	if err := json.Unmarshal(accessSummaryJSON, &record.Access); err != nil {
+		return fmt.Errorf("unmarshal access summary: %w", err)
+	}
+	if err := json.Unmarshal(storageAttachmentsJSON, &record.StorageAttachments); err != nil {
+		return fmt.Errorf("unmarshal storage attachments: %w", err)
+	}
+	if len(sandboxStatusJSON) > 0 && string(sandboxStatusJSON) != "{}" {
+		var sandbox ports.SandboxInstanceStatus
+		if err := json.Unmarshal(sandboxStatusJSON, &sandbox); err != nil {
+			return fmt.Errorf("unmarshal sandbox status: %w", err)
+		}
+		record.Sandbox = &sandbox
+	}
+	if len(quotaTxIDsJSON) > 0 && string(quotaTxIDsJSON) != "null" {
+		if err := json.Unmarshal(quotaTxIDsJSON, &record.QuotaTxIDs); err != nil {
+			return fmt.Errorf("unmarshal quota tx ids: %w", err)
+		}
+	}
 	return nil
 }
 
 var _ ports.WorkloadInstanceStore = (*MetadataInstanceStore)(nil)
+var _ ports.WorkloadInstanceStoreTx = (*MetadataInstanceStore)(nil)
 var _ ports.ReconcileTargetLister = (*MetadataInstanceStore)(nil)
 
 func firstNonNilSSH(ssh *ports.VMSSHConnectionInfo) any {
@@ -357,4 +563,18 @@ func firstNonNilGPU(gpu *ports.GPUInstanceStatus) any {
 		return map[string]any{}
 	}
 	return gpu
+}
+
+func firstNonNilSandbox(sandbox *ports.SandboxInstanceStatus) any {
+	if sandbox == nil {
+		return map[string]any{}
+	}
+	return sandbox
+}
+
+func firstNonNilStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return map[string]string{}
+	}
+	return values
 }

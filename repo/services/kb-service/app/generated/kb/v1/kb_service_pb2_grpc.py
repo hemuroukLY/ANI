@@ -52,6 +52,11 @@ class KBServiceStub:
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.ListKBsRequest.SerializeToString,
                 response_deserializer=kb_dot_v1_dot_kb__service__pb2.ListKBsResponse.FromString,
                 _registered_method=True)
+        self.UpdateKB = channel.unary_unary(
+                '/kb.v1.KBService/UpdateKB',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.FromString,
+                _registered_method=True)
         self.DeleteKB = channel.unary_unary(
                 '/kb.v1.KBService/DeleteKB',
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.DeleteKBRequest.SerializeToString,
@@ -65,6 +70,11 @@ class KBServiceStub:
         self.NotifyDocumentUploaded = channel.unary_unary(
                 '/kb.v1.KBService/NotifyDocumentUploaded',
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.NotifyDocumentUploadedRequest.SerializeToString,
+                response_deserializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
+                _registered_method=True)
+        self.CompleteDocumentUpload = channel.unary_unary(
+                '/kb.v1.KBService/CompleteDocumentUpload',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.CompleteDocumentUploadRequest.SerializeToString,
                 response_deserializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
                 _registered_method=True)
         self.GetDocument = channel.unary_unary(
@@ -82,10 +92,20 @@ class KBServiceStub:
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.DeleteDocumentRequest.SerializeToString,
                 response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                 _registered_method=True)
+        self.GetObjectURL = channel.unary_unary(
+                '/kb.v1.KBService/GetObjectURL',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.GetObjectURLRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.GetObjectURLResponse.FromString,
+                _registered_method=True)
         self.Query = channel.unary_unary(
                 '/kb.v1.KBService/Query',
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.QueryRequest.SerializeToString,
                 response_deserializer=kb_dot_v1_dot_kb__service__pb2.QueryResponse.FromString,
+                _registered_method=True)
+        self.Retrieve = channel.unary_stream(
+                '/kb.v1.KBService/Retrieve',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.RetrieveRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.RetrieveEvent.FromString,
                 _registered_method=True)
         self.ListKBCitations = channel.unary_unary(
                 '/kb.v1.KBService/ListKBCitations',
@@ -101,6 +121,61 @@ class KBServiceStub:
                 '/kb.v1.KBService/UpdateKBPermissions',
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBPermissionsRequest.SerializeToString,
                 response_deserializer=kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.FromString,
+                _registered_method=True)
+        self.GetKBPermissions = channel.unary_unary(
+                '/kb.v1.KBService/GetKBPermissions',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.GetKBPermissionsRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.KBPermissions.FromString,
+                _registered_method=True)
+        self.GetKBConfig = channel.unary_unary(
+                '/kb.v1.KBService/GetKBConfig',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.GetKBConfigRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.KBConfig.FromString,
+                _registered_method=True)
+        self.UpdateKBConfig = channel.unary_unary(
+                '/kb.v1.KBService/UpdateKBConfig',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBConfigRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBConfigResponse.FromString,
+                _registered_method=True)
+        self.ListDocumentChunks = channel.unary_unary(
+                '/kb.v1.KBService/ListDocumentChunks',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksResponse.FromString,
+                _registered_method=True)
+        self.GetSessionMessages = channel.unary_unary(
+                '/kb.v1.KBService/GetSessionMessages',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.GetSessionMessagesRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.GetSessionMessagesResponse.FromString,
+                _registered_method=True)
+        self.DeleteSession = channel.unary_unary(
+                '/kb.v1.KBService/DeleteSession',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.DeleteSessionRequest.SerializeToString,
+                response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                _registered_method=True)
+        self.ReparseDocument = channel.unary_unary(
+                '/kb.v1.KBService/ReparseDocument',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.ReparseDocumentRequest.SerializeToString,
+                response_deserializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
+                _registered_method=True)
+        self.RebuildKB = channel.unary_unary(
+                '/kb.v1.KBService/RebuildKB',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.RebuildKBRequest.SerializeToString,
+                response_deserializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
+                _registered_method=True)
+        self.ListKBAuditLogs = channel.unary_unary(
+                '/kb.v1.KBService/ListKBAuditLogs',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsResponse.FromString,
+                _registered_method=True)
+        self.ListOperations = channel.unary_unary(
+                '/kb.v1.KBService/ListOperations',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.ListOperationsRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.ListOperationsResponse.FromString,
+                _registered_method=True)
+        self.GetOperation = channel.unary_unary(
+                '/kb.v1.KBService/GetOperation',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.GetOperationRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.KBOperation.FromString,
                 _registered_method=True)
 
 
@@ -126,6 +201,14 @@ class KBServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def UpdateKB(self, request, context):
+        """UpdateKB updates KB name/description; empty fields mean "no change".
+        Pure metadata update — does not trigger index rebuild (unlike config).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def DeleteKB(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -134,7 +217,10 @@ class KBServiceServicer:
 
     def GetDocumentUploadURL(self, request, context):
         """GetDocumentUploadURL returns a presigned MinIO PUT URL for direct upload.
-        Creates a kb_documents record (parse_status=pending) and returns the doc_id.
+        KB-SPLIT-P1I (#058, ADR §D1): kb signs against its own MinIO bucket
+        (key {kb_id}/{doc_id}); no kb_documents row is written here — the
+        registration moves to CompleteDocumentUpload after HeadObject verifies
+        the object exists.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -143,6 +229,18 @@ class KBServiceServicer:
     def NotifyDocumentUploaded(self, request, context):
         """NotifyDocumentUploaded is called after the client uploads directly to MinIO.
         Validates the checksum, then enqueues a parse task via Outbox pattern.
+        DEPRECATED by KB-SPLIT-P1I (#058): the upload flow is
+        GetDocumentUploadURL → CompleteDocumentUpload; removal is tracked in #065.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CompleteDocumentUpload(self, request, context):
+        """CompleteDocumentUpload finishes the direct upload (KB-SPLIT-P1I #058,
+        ADR §D1 three-step flow): kb HeadObject-verifies the uploaded object
+        exists (and its size), then registers kb_documents (parse_status=pending)
+        and enqueues the parse task via the Outbox pattern in one transaction.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -169,9 +267,35 @@ class KBServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetObjectURL(self, request, context):
+        """GetObjectURL returns a presigned public-view (NodePort) GET URL for a
+        kb-owned object (KB-SPLIT-P1J #059, ADR §D1-取用). object_id carries the
+        kb-owned object identity in `{bucket}/{key}` form — the same literal stored
+        in markdown image placeholders `[图片: caption](object_id)`. kb validates
+        the object belongs to the requested KB (prefix `{kb_id}/`) before signing;
+        the caller (end-user browser, outside the cluster) fetches the bytes
+        directly from MinIO — the gateway never proxies the payload (前端契约不变:
+        only the gateway is perceived). The public view matches the presign-PUT
+        endpoint: internal ClusterIP addresses do not resolve outside the cluster.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Query(self, request, context):
         """Query performs a synchronous RAG query and returns a JSON answer.
         For streaming answers use the SSE endpoint in the gateway directly.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Retrieve(self, request, context):
+        """Retrieve performs a streaming RAG query: yields token events, a sources
+        event, then a done event (or an error event). Server-streaming RPC.
+        Orchestration mirrors Query (session + persistence + no-result gates);
+        implemented in STEP-10 feature issue. This contract issue only declares
+        the proto surface.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -199,6 +323,102 @@ class KBServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetKBPermissions(self, request, context):
+        """GetKBPermissions returns the access permissions of a KB (P1).
+        No kb_permissions row → returns defaults (public_read=false, empty list).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetKBConfig(self, request, context):
+        """GetKBConfig returns the ingest/query configuration of a KB (P1 #22).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateKBConfig(self, request, context):
+        """UpdateKBConfig updates the ingest/query config of a KB (P1 #23).
+        embedding_model / chunk_size changes invalidate existing vectors and
+        trigger a full rebuild in the same transaction (active→rebuilding +
+        rebuild task + outbox event); the other four fields are query-time or
+        next-parse settings and never trigger a rebuild. Sync 200 semantics;
+        the implied rebuild task is attached as rebuild_task in the response.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListDocumentChunks(self, request, context):
+        """ListDocumentChunks returns the chunk details of a document (P1).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetSessionMessages(self, request, context):
+        """GetSessionMessages returns the message history of a chat session (P1).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteSession(self, request, context):
+        """DeleteSession removes a chat session and its messages (idempotent).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReparseDocument(self, request, context):
+        """ReparseDocument re-triggers parsing of an existing document.
+        Returns 202-style async task semantics: resets the doc row and enqueues
+        a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
+        the NotifyDocumentUploaded event pipeline).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RebuildKB(self, request, context):
+        """RebuildKB re-parses every ready/failed document in a KB (P1 #24).
+        Returns 202-style async task semantics: sets KB status='rebuilding'
+        (write ops on the KB fail with FAILED_PRECONDITION while rebuilding;
+        queries stay served from the existing index) and enqueues a rebuild
+        task via Outbox pattern onto NATS ani.tasks.kb.rebuild.v1.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListKBAuditLogs(self, request, context):
+        """ListKBAuditLogs returns the management-plane audit trail of a KB (P1 #21).
+        Keyset pagination: created_at DESC, id DESC (kb-p1-plan §6.4/§7.4).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListOperations(self, request, context):
+        """ListOperations lists kb operations (idempotency + progress records)
+        for a tenant (P1C #052, ADR 0001 §D4-2). Temporary progress query
+        surface until task-service subscribes to kb outbox events and takes
+        over task display (ADR §五-阶段6). Keyset pagination: created_at DESC,
+        id DESC; optional operation_type / resource_id / status filters.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetOperation(self, request, context):
+        """GetOperation returns a single kb operation by id (P1C #052).
+        Cross-tenant ids are invisible (tenant isolation) → NOT_FOUND.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_KBServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -217,6 +437,11 @@ def add_KBServiceServicer_to_server(servicer, server):
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.ListKBsRequest.FromString,
                     response_serializer=kb_dot_v1_dot_kb__service__pb2.ListKBsResponse.SerializeToString,
             ),
+            'UpdateKB': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateKB,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.SerializeToString,
+            ),
             'DeleteKB': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteKB,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.DeleteKBRequest.FromString,
@@ -230,6 +455,11 @@ def add_KBServiceServicer_to_server(servicer, server):
             'NotifyDocumentUploaded': grpc.unary_unary_rpc_method_handler(
                     servicer.NotifyDocumentUploaded,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.NotifyDocumentUploadedRequest.FromString,
+                    response_serializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.SerializeToString,
+            ),
+            'CompleteDocumentUpload': grpc.unary_unary_rpc_method_handler(
+                    servicer.CompleteDocumentUpload,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.CompleteDocumentUploadRequest.FromString,
                     response_serializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.SerializeToString,
             ),
             'GetDocument': grpc.unary_unary_rpc_method_handler(
@@ -247,10 +477,20 @@ def add_KBServiceServicer_to_server(servicer, server):
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.DeleteDocumentRequest.FromString,
                     response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             ),
+            'GetObjectURL': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetObjectURL,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.GetObjectURLRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.GetObjectURLResponse.SerializeToString,
+            ),
             'Query': grpc.unary_unary_rpc_method_handler(
                     servicer.Query,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.QueryRequest.FromString,
                     response_serializer=kb_dot_v1_dot_kb__service__pb2.QueryResponse.SerializeToString,
+            ),
+            'Retrieve': grpc.unary_stream_rpc_method_handler(
+                    servicer.Retrieve,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.RetrieveRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.RetrieveEvent.SerializeToString,
             ),
             'ListKBCitations': grpc.unary_unary_rpc_method_handler(
                     servicer.ListKBCitations,
@@ -266,6 +506,61 @@ def add_KBServiceServicer_to_server(servicer, server):
                     servicer.UpdateKBPermissions,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBPermissionsRequest.FromString,
                     response_serializer=kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.SerializeToString,
+            ),
+            'GetKBPermissions': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetKBPermissions,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.GetKBPermissionsRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.KBPermissions.SerializeToString,
+            ),
+            'GetKBConfig': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetKBConfig,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.GetKBConfigRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.KBConfig.SerializeToString,
+            ),
+            'UpdateKBConfig': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateKBConfig,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBConfigRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBConfigResponse.SerializeToString,
+            ),
+            'ListDocumentChunks': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListDocumentChunks,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksResponse.SerializeToString,
+            ),
+            'GetSessionMessages': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSessionMessages,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.GetSessionMessagesRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.GetSessionMessagesResponse.SerializeToString,
+            ),
+            'DeleteSession': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteSession,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.DeleteSessionRequest.FromString,
+                    response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            ),
+            'ReparseDocument': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReparseDocument,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.ReparseDocumentRequest.FromString,
+                    response_serializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.SerializeToString,
+            ),
+            'RebuildKB': grpc.unary_unary_rpc_method_handler(
+                    servicer.RebuildKB,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.RebuildKBRequest.FromString,
+                    response_serializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.SerializeToString,
+            ),
+            'ListKBAuditLogs': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListKBAuditLogs,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsResponse.SerializeToString,
+            ),
+            'ListOperations': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListOperations,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.ListOperationsRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.ListOperationsResponse.SerializeToString,
+            ),
+            'GetOperation': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetOperation,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.GetOperationRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.KBOperation.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -361,6 +656,33 @@ class KBService:
             _registered_method=True)
 
     @staticmethod
+    def UpdateKB(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/UpdateKB',
+            kb_dot_v1_dot_kb__service__pb2.UpdateKBRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def DeleteKB(request,
             target,
             options=(),
@@ -430,6 +752,33 @@ class KBService:
             target,
             '/kb.v1.KBService/NotifyDocumentUploaded',
             kb_dot_v1_dot_kb__service__pb2.NotifyDocumentUploadedRequest.SerializeToString,
+            common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CompleteDocumentUpload(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/CompleteDocumentUpload',
+            kb_dot_v1_dot_kb__service__pb2.CompleteDocumentUploadRequest.SerializeToString,
             common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
             options,
             channel_credentials,
@@ -523,6 +872,33 @@ class KBService:
             _registered_method=True)
 
     @staticmethod
+    def GetObjectURL(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/GetObjectURL',
+            kb_dot_v1_dot_kb__service__pb2.GetObjectURLRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.GetObjectURLResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def Query(request,
             target,
             options=(),
@@ -539,6 +915,33 @@ class KBService:
             '/kb.v1.KBService/Query',
             kb_dot_v1_dot_kb__service__pb2.QueryRequest.SerializeToString,
             kb_dot_v1_dot_kb__service__pb2.QueryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Retrieve(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/kb.v1.KBService/Retrieve',
+            kb_dot_v1_dot_kb__service__pb2.RetrieveRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.RetrieveEvent.FromString,
             options,
             channel_credentials,
             insecure,
@@ -620,6 +1023,303 @@ class KBService:
             '/kb.v1.KBService/UpdateKBPermissions',
             kb_dot_v1_dot_kb__service__pb2.UpdateKBPermissionsRequest.SerializeToString,
             kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetKBPermissions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/GetKBPermissions',
+            kb_dot_v1_dot_kb__service__pb2.GetKBPermissionsRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.KBPermissions.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetKBConfig(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/GetKBConfig',
+            kb_dot_v1_dot_kb__service__pb2.GetKBConfigRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.KBConfig.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateKBConfig(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/UpdateKBConfig',
+            kb_dot_v1_dot_kb__service__pb2.UpdateKBConfigRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.UpdateKBConfigResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListDocumentChunks(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/ListDocumentChunks',
+            kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSessionMessages(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/GetSessionMessages',
+            kb_dot_v1_dot_kb__service__pb2.GetSessionMessagesRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.GetSessionMessagesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteSession(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/DeleteSession',
+            kb_dot_v1_dot_kb__service__pb2.DeleteSessionRequest.SerializeToString,
+            google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReparseDocument(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/ReparseDocument',
+            kb_dot_v1_dot_kb__service__pb2.ReparseDocumentRequest.SerializeToString,
+            common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RebuildKB(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/RebuildKB',
+            kb_dot_v1_dot_kb__service__pb2.RebuildKBRequest.SerializeToString,
+            common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListKBAuditLogs(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/ListKBAuditLogs',
+            kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListOperations(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/ListOperations',
+            kb_dot_v1_dot_kb__service__pb2.ListOperationsRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.ListOperationsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetOperation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/GetOperation',
+            kb_dot_v1_dot_kb__service__pb2.GetOperationRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.KBOperation.FromString,
             options,
             channel_credentials,
             insecure,

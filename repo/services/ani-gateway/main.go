@@ -8,11 +8,13 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/bootstrap"
+	"github.com/kubercloud/ani/pkg/ports"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/router"
 )
@@ -22,7 +24,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	h := server.Default(
-		server.WithHostPorts(":8080"),
+		server.WithHostPorts(gatewayListenAddr()),
 		server.WithExitWaitTime(5),
 	)
 
@@ -43,15 +45,84 @@ func main() {
 		logger.Error("failed to configure secret provider runtime", "err", err)
 		os.Exit(1)
 	}
-	gpuInventory, err := newGatewayGPUInventory(gatewayGPUInventoryRuntimeConfigFromEnv())
-	if err != nil {
-		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
-		os.Exit(1)
-	}
 	kubernetesRESTClient, err := newGatewayKubernetesClient(gatewayGPUInventoryRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure kubernetes rest client for orphan discovery", "err", err)
 		os.Exit(1)
+	}
+	networkService, closeNetworkRuntime, err := newGatewayNetworkService(runtimeCtx, gatewayNetworkRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure network provider runtime", "err", err)
+		os.Exit(1)
+	}
+	if closeNetworkRuntime != nil {
+		defer closeNetworkRuntime()
+	}
+	storageRuntimeCfg := gatewayStorageRuntimeConfigFromEnv()
+	storageService, closeStorageRuntime, err := newGatewayStorageService(runtimeCtx, storageRuntimeCfg)
+	if err != nil {
+		logger.Error("failed to configure storage provider runtime", "err", err)
+		os.Exit(1)
+	}
+	logger.Info("storage provider runtime configured",
+		"provider", strings.TrimSpace(storageRuntimeCfg.ProviderMode),
+		"object_store", strings.TrimSpace(storageRuntimeCfg.ObjectStoreProvider),
+		"control_plane_store", storageNeedsControlPlaneStore(storageRuntimeCfg),
+		"router_default_in_memory_service", storageService == nil,
+	)
+	if closeStorageRuntime != nil {
+		defer closeStorageRuntime()
+	}
+	imageRegistry, closeRegistryRuntime, err := newGatewayImageRegistry(runtimeCtx, gatewayRegistryRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure image registry provider runtime", "err", err)
+		os.Exit(1)
+	}
+	if closeRegistryRuntime != nil {
+		defer closeRegistryRuntime()
+	}
+	instanceRuntimeConfig := gatewayInstanceRuntimeConfigFromEnv()
+	instanceRuntimeConfig.SharedNetworkService = networkService
+	instanceRuntimeConfig.SharedStorageService = storageService
+	instanceRuntimeConfig.SharedImageRegistry = imageRegistry
+	instanceRuntime, closeInstanceRuntime, err := newGatewayInstanceRuntime(runtimeCtx, instanceRuntimeConfig, secretService)
+	if err != nil {
+		logger.Error("failed to configure instance provider runtime", "err", err)
+		os.Exit(1)
+	}
+	defer closeInstanceRuntime()
+	if instanceRuntime.KubernetesRESTClient != nil {
+		kubernetesRESTClient = instanceRuntime.KubernetesRESTClient
+		logger.Info("instance provider runtime configured",
+			"provider", strings.TrimSpace(instanceRuntimeConfig.WorkloadProvider),
+			"persistent_store", true,
+			"shared_network_storage_registry", true,
+		)
+	}
+	if instanceRuntime.ReconcileController != nil {
+		go func() {
+			logger.Info("workload reconcile controller starting")
+			if err := instanceRuntime.ReconcileController.Start(runtimeCtx); err != nil {
+				logger.Error("workload reconcile controller stopped with error", "err", err)
+			}
+		}()
+	}
+	if instanceRuntime.SandboxExpiration != nil {
+		go func() {
+			logger.Info("sandbox expiration controller starting")
+			if err := instanceRuntime.SandboxExpiration.Start(runtimeCtx); err != nil {
+				logger.Error("sandbox expiration controller stopped with error", "err", err)
+			}
+		}()
+	}
+	instanceSessionIssuer, closeInstanceSession, err := newGatewayInstanceSessionIssuer(gatewayInstanceSessionRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Warn("session gateway gRPC client unavailable; real-provider session routes will fail closed", "err", err)
+		instanceSessionIssuer = nil
+		closeInstanceSession = nil
+	}
+	if closeInstanceSession != nil {
+		defer closeInstanceSession()
 	}
 	gpuSchedulingQueueStore, err := newGatewayGPUSchedulingQueueStore(gatewayGPUSchedulingQueueRuntimeConfigFromEnv())
 	if err != nil {
@@ -63,35 +134,26 @@ func main() {
 		logger.Error("failed to configure gpu instance store runtime", "err", err)
 		os.Exit(1)
 	}
-	networkService, err := newGatewayNetworkService(gatewayNetworkRuntimeConfigFromEnv())
+	gpuSpecStore, err := newGatewayGPUSpecStore(gatewayGPUInventoryRuntimeConfigFromEnv())
 	if err != nil {
-		logger.Error("failed to configure network provider runtime", "err", err)
+		logger.Error("failed to configure gpu spec store runtime", "err", err)
 		os.Exit(1)
-	}
-	storageService, err := newGatewayStorageService(gatewayStorageRuntimeConfigFromEnv())
-	if err != nil {
-		logger.Error("failed to configure storage provider runtime", "err", err)
-		os.Exit(1)
-	}
-	imageRegistry, closeRegistryRuntime, err := newGatewayImageRegistry(runtimeCtx, gatewayRegistryRuntimeConfigFromEnv())
-	if err != nil {
-		logger.Error("failed to configure image registry provider runtime", "err", err)
-		os.Exit(1)
-	}
-	if closeRegistryRuntime != nil {
-		defer closeRegistryRuntime()
 	}
 	vectorStoreRuntimeConfig := gatewayVectorStoreRuntimeConfigFromEnv()
-	vectorStoreService, err := newGatewayVectorStoreService(vectorStoreRuntimeConfig)
+	vectorStoreService, closeVectorStoreRuntime, err := newGatewayVectorStoreService(runtimeCtx, vectorStoreRuntimeConfig)
 	if err != nil {
 		logger.Error("failed to configure vector store provider runtime", "err", err)
 		os.Exit(1)
+	}
+	if closeVectorStoreRuntime != nil {
+		defer closeVectorStoreRuntime()
 	}
 	if vectorStoreService != nil {
 		logger.Info("vector store provider runtime configured",
 			"provider", strings.TrimSpace(vectorStoreRuntimeConfig.VectorStoreProvider),
 			"database_configured", strings.TrimSpace(vectorStoreRuntimeConfig.VectorStoreDatabase) != "",
 			"collection_prefix_configured", strings.TrimSpace(vectorStoreRuntimeConfig.VectorStoreCollectionPrefix) != "",
+			"control_plane_store", true,
 		)
 	}
 	instanceObservabilityRuntimeConfig := gatewayInstanceObservabilityRuntimeConfigFromEnv()
@@ -126,8 +188,170 @@ func main() {
 			"provider", strings.TrimSpace(os.Getenv("INSTANCE_OBSERVABILITY_PROVIDER")),
 		)
 	}
+	platformServiceHealthConfig, err := gatewayPlatformServiceHealthRuntimeConfigFromEnv()
+	if err != nil {
+		logger.Error("failed to configure platform service health", "err", err)
+		os.Exit(1)
+	}
+	platformServiceHealthReader, err := newGatewayPlatformServiceHealthReader(platformServiceHealthConfig, logger)
+	if err != nil {
+		logger.Error("failed to configure platform service health reader", "err", err)
+		os.Exit(1)
+	}
+	inferenceServiceClient, closeInferenceGRPC, err := newGatewayInferenceServiceClient(runtimeCtx, gatewayInferenceServiceRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure inference-service gRPC client", "err", err)
+		os.Exit(1)
+	}
+	if closeInferenceGRPC != nil {
+		defer closeInferenceGRPC()
+	}
+	if inferenceServiceClient != nil {
+		logger.Info("inference-service gRPC client configured",
+			"addr", strings.TrimSpace(os.Getenv("INFERENCE_SERVICE_GRPC_ADDR")),
+		)
+	}
+	kbServiceClient, closeKBGRPC, err := newGatewayKBServiceClient(runtimeCtx, gatewayKBServiceRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure kb-service gRPC client", "err", err)
+		os.Exit(1)
+	}
+	if closeKBGRPC != nil {
+		defer closeKBGRPC()
+	}
+	if kbServiceClient != nil {
+		logger.Info("kb-service gRPC client configured",
+			"addr", strings.TrimSpace(os.Getenv("KB_SERVICE_GRPC_ADDR")),
+		)
+	}
+	modelServiceClient, closeModelGRPC, err := newGatewayModelServiceClient(runtimeCtx, gatewayModelServiceRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure model-service gRPC client", "err", err)
+		os.Exit(1)
+	}
+	if closeModelGRPC != nil {
+		defer closeModelGRPC()
+	}
+	if modelServiceClient != nil {
+		logger.Info("model-service gRPC client configured",
+			"addr", strings.TrimSpace(os.Getenv("MODEL_SERVICE_GRPC_ADDR")),
+		)
+	}
 	middleware.StartAuditWorker()
-	middleware.Register(h, gatewayStore)
+	if err := middleware.Register(h, gatewayStore); err != nil {
+		logger.Error("failed to configure gateway authz", "err", err)
+		os.Exit(1)
+	}
+	quotaAdminService, quotaStoreService, quotaMetadataStore, closeQuotaStore, err := newGatewayQuotaStore(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure quota admin store", "err", err)
+		os.Exit(1)
+	}
+	defer closeQuotaStore()
+	meteringService, closeMeteringRuntime, err := newGatewayMeteringService(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure metering service", "err", err)
+		os.Exit(1)
+	}
+	if closeMeteringRuntime != nil {
+		defer closeMeteringRuntime()
+	}
+	platformWorkloadRuntimeConfig := gatewayPlatformWorkloadRuntimeConfigFromEnv()
+	platformWorkloadRuntimeConfig.GPUSpecStore = gpuSpecStore
+	platformWorkloadService, closePlatformWorkload, err := newGatewayPlatformWorkloadService(runtimeCtx, platformWorkloadRuntimeConfig)
+	if err != nil {
+		logger.Error("failed to configure platform workload provider runtime", "err", err)
+		os.Exit(1)
+	}
+	defer closePlatformWorkload()
+	platformWorkloadProvider := strings.TrimSpace(platformWorkloadRuntimeConfig.ProviderMode)
+	if platformWorkloadProvider == "" {
+		platformWorkloadProvider = "local"
+	}
+	logger.Info("platform workload provider runtime configured", "provider", platformWorkloadProvider)
+	tenantService, closeTenantStore, err := newGatewayTenantService(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure tenant admin store", "err", err)
+		os.Exit(1)
+	}
+	defer closeTenantStore()
+	var platformUserAdminStore ports.PlatformUserAdminStore
+	if quotaMetadataStore != nil {
+		platformUserAdminStore = runtimeadapter.NewPostgresPlatformUserAdminStore(quotaMetadataStore)
+	}
+	tenantPlanService, closeTenantPlanStore, err := newGatewayTenantPlanService(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure tenant plan service", "err", err)
+		os.Exit(1)
+	}
+	defer closeTenantPlanStore()
+	tenantAdminService, closeTenantAdmin, err := newGatewayTenantAdminService(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure tenant admin service", "err", err)
+		os.Exit(1)
+	}
+	defer closeTenantAdmin()
+	gpuInventory, err := newGatewayGPUInventory(gatewayGPUInventoryRuntimeConfigFromEnv(), gpuSchedulingQueueStore, gpuSpecStore, quotaStoreService)
+	if err != nil {
+		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
+		os.Exit(1)
+	}
+	// The kubernetes_rest inventory adapter also implements the cluster GPU
+	// split planner (GPU-PARTITION-C); local/dev profiles keep it nil and
+	// the route degrades to 503.
+	var gpuPartitionPlanner ports.GPUPartitionPlanner
+	if planner, ok := gpuInventory.(ports.GPUPartitionPlanner); ok {
+		gpuPartitionPlanner = planner
+	}
+	platformCapacityService, err := newGatewayPlatformCapacityService(gatewayGPUInventoryRuntimeConfigFromEnv(), gpuInventory, kubernetesRESTClient, tenantService)
+	if err != nil {
+		logger.Error("failed to configure platform capacity provider runtime", "err", err)
+		os.Exit(1)
+	}
+	componentStatusService, err := newGatewayComponentStatusService(kubernetesRESTClient, platformServiceHealthReader)
+	if err != nil {
+		logger.Error("failed to configure component status provider runtime", "err", err)
+		os.Exit(1)
+	}
+	platformAuditService, err := newGatewayPlatformAuditService()
+	if err != nil {
+		logger.Error("failed to configure platform audit provider runtime", "err", err)
+		os.Exit(1)
+	}
+	componentMetricsReader, componentLogReader, err := newGatewayComponentDiagnosticsService()
+	if err != nil {
+		logger.Error("failed to configure component diagnostics provider runtime", "err", err)
+		os.Exit(1)
+	}
+	var routeInstanceRuntime *router.InstanceRuntime
+	if instanceRuntime.Service != nil {
+		routeInstanceRuntime = &router.InstanceRuntime{
+			Service:             instanceRuntime.Service,
+			Store:               instanceRuntime.Store,
+			Operations:          instanceRuntime.Operations,
+			SandboxRuntime:      instanceRuntime.SandboxRuntime,
+			TaskStore:           instanceRuntime.AsyncTasks,
+			RealProvider:        true,
+			ReconcileController: instanceRuntime.ReconcileController,
+			Provider:            strings.TrimSpace(instanceRuntimeConfig.WorkloadProvider),
+		}
+	}
+	// 开物复用实例运行时的 Kubernetes REST client；没有真实 Kubernetes
+	// client 时读取器保持 nil，处理函数会失败关闭。
+	kaiwuRuntimeReader := newGatewayKaiwuRuntimeReader(kubernetesRESTClient, gatewayKaiwuRuntimeConfigFromEnv())
+	kaiwuPublicEntry, err := gatewayKaiwuPublicEntryConfigFromEnv()
+	if err != nil {
+		logger.Error("failed to configure Kaiwu public origin entry", "err", err)
+		os.Exit(1)
+	}
+	if kaiwuPublicEntry.ConsoleURL != "" || kaiwuPublicEntry.BossURL != "" {
+		logger.Info("Kaiwu public origin entry configured",
+			"console", kaiwuPublicEntry.ConsoleURL,
+			"boss", kaiwuPublicEntry.BossURL,
+			"token_ttl", kaiwuPublicEntry.TokenTTL)
+	} else {
+		logger.Warn("Kaiwu public origins are not configured; Kaiwu entry APIs will fail closed")
+	}
 	router.RegisterWithOptions(h, router.RegisterOptions{
 		K8sClusterService:                     k8sClusterService,
 		EncryptionService:                     encryptionService,
@@ -140,23 +364,69 @@ func main() {
 		ImageRegistry:                         imageRegistry,
 		VectorStoreService:                    vectorStoreService,
 		InstanceObservability:                 instanceObservability,
+		InstanceSessionIssuer:                 instanceSessionIssuer,
 		InstanceObservabilityUsesInstanceName: instanceObservabilityUsesInstanceName,
+		InstanceRuntime:                       routeInstanceRuntime,
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
-		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
+		PlatformServiceHealthReader:           platformServiceHealthReader,
+		InferenceServiceClient:                inferenceServiceClient,
+		ModelServiceClient:                    modelServiceClient,
+		KBServiceClient:                       kbServiceClient,
+		KBSSEConfig:                           newGatewaySSEConfig(gatewaySSERuntimeConfigFromEnv(), kbServiceClient),
+		AsyncTaskStore:                        instanceRuntime.AsyncTasks,
+		QuotaAdminService:                     quotaAdminService,
+		PlatformWorkloadService:               platformWorkloadService,
+		TenantService:                         tenantService,
+		PlatformUserAdminStore:                platformUserAdminStore,
+		TenantPlanService:                     tenantPlanService,
+		TenantAdminService:                    tenantAdminService,
+		GPUSpecStore:                          gpuSpecStore,
+		GPUPartitionPlanner:                   gpuPartitionPlanner,
+		MetadataStore:                         quotaMetadataStore,
+		QuotaStoreService:                     quotaStoreService,
+		MeteringService:                       meteringService,
+		PlatformCapacityService:               platformCapacityService,
+		PlatformAuditService:                  platformAuditService,
+		ComponentStatusService:                componentStatusService,
+		ComponentMetricsReader:                componentMetricsReader,
+		ComponentLogReader:                    componentLogReader,
+		KaiwuRuntimeReader:                    kaiwuRuntimeReader,
+		KaiwuConsolePublicURL:                 kaiwuPublicEntry.ConsoleURL,
+		KaiwuBossPublicURL:                    kaiwuPublicEntry.BossURL,
+		KaiwuEntryTokenTTL:                    kaiwuPublicEntry.TokenTTL,
 	})
+	runtimeAdmin, err := startGatewayRuntimeAdmin(logger)
+	if err != nil {
+		logger.Error("failed to start runtime admin", "err", err)
+		os.Exit(1)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-
-	go func() {
-		<-ctx.Done()
-		if shutdownErr := h.Shutdown(context.Background()); shutdownErr != nil {
-			logger.Error("failed to shut down gateway", "err", shutdownErr)
+	h.SetCustomSignalWaiter(func(serverErrors chan error) error {
+		startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if waitErr := waitForGatewayPublicListener(startupCtx, gatewayListenAddr(), serverErrors); waitErr != nil {
+			return waitErr
 		}
-	}()
-
+		runtimeAdmin.SetServing(true)
+		select {
+		case <-ctx.Done():
+			runtimeAdmin.SetServing(false)
+			return nil
+		case serveErr := <-serverErrors:
+			runtimeAdmin.SetServing(false)
+			return serveErr
+		}
+	})
 	h.Spin()
+	runtimeAdmin.SetServing(false)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if shutdownErr := runtimeAdmin.Shutdown(shutdownCtx); shutdownErr != nil {
+		logger.Error("failed to shut down runtime admin", "err", shutdownErr)
+	}
 }
 
 func gatewayRedisURLFromEnv() string {
@@ -198,4 +468,13 @@ func firstGatewayEnv(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// gatewayListenAddr returns the gateway listen address, defaulting to :8080.
+// GATEWAY_LISTEN_ADDR overrides it for local smoke runs / multi-instance tests.
+func gatewayListenAddr() string {
+	if addr := strings.TrimSpace(os.Getenv("GATEWAY_LISTEN_ADDR")); addr != "" {
+		return addr
+	}
+	return ":8080"
 }

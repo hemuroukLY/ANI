@@ -10,6 +10,13 @@ import (
 
 type KubernetesStorageRenderer struct{}
 
+// defaultVolumeStorageClassName is the Kubernetes StorageClass used when a
+// volume request does not declare one. The legacy "standard" fallback has no
+// matching StorageClass in target clusters, which leaves volume PVCs Pending
+// forever and blocks VM/instance scheduling; ani-block matches the sandbox
+// workspace precedent.
+const defaultVolumeStorageClassName = "ani-block"
+
 func NewKubernetesStorageRenderer() *KubernetesStorageRenderer {
 	return &KubernetesStorageRenderer{}
 }
@@ -28,8 +35,8 @@ func (r *KubernetesStorageRenderer) RenderVolume(_ context.Context, record ports
 		"metadata":   storageProviderNamespacedMetadata(record.TenantID, name, "volume", record.VolumeID),
 		"spec": map[string]any{
 			"accessModes":      []any{"ReadWriteOnce"},
-			"storageClassName": firstNetworkNonEmpty(record.StorageClass, "standard"),
-			"volumeMode":       "Filesystem",
+			"storageClassName": firstNetworkNonEmpty(record.StorageClass, defaultVolumeStorageClassName),
+			"volumeMode":       renderVolumeMode(record),
 			"resources":        pvcStorageResources(record.SizeGiB),
 		},
 	})
@@ -212,6 +219,17 @@ func pvcStorageResources(sizeGiB int64) map[string]any {
 		"requests": map[string]any{
 			"storage": fmt.Sprintf("%dGi", sizeGiB),
 		},
+	}
+}
+
+// renderVolumeMode maps the stored volume_mode onto the Kubernetes volumeMode.
+// 空值回退为 Filesystem，保护存量卷（volumeMode 不可变，渲染错了会破坏 re-observe）。
+func renderVolumeMode(record ports.StorageVolumeRecord) string {
+	switch strings.ToLower(strings.TrimSpace(record.VolumeMode)) {
+	case ports.StorageVolumeModeBlock:
+		return "Block"
+	default:
+		return "Filesystem"
 	}
 }
 

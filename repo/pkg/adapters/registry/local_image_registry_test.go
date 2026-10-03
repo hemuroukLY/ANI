@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -189,5 +190,71 @@ func TestLocalImageRegistryListImagesFiltersByPurpose(t *testing.T) {
 	}
 	if images.Items[0].Repository != "gpu-runtime" {
 		t.Fatalf("repository = %q, want gpu-runtime", images.Items[0].Repository)
+	}
+}
+
+func TestLocalImageRegistryListImagesFiltersByKeyword(t *testing.T) {
+	service := NewLocalImageRegistry()
+
+	// keyword 只匹配仓库名（gpu-runtime），tag 不含 gpu。
+	images, err := service.ListImages(context.Background(), ports.RegistryImageListRequest{
+		TenantID: "tenant-a",
+		Project:  "tenant-a",
+		Keyword:  "gpu",
+	})
+	if err != nil {
+		t.Fatalf("ListImages() error = %v", err)
+	}
+	if len(images.Items) != 1 || images.Items[0].Repository != "gpu-runtime" {
+		t.Fatalf("images = %+v, want exactly one keyword-matched GPU image", images.Items)
+	}
+
+	// keyword 大小写不敏感："RUNTIME" 应命中 runtime / gpu-runtime / sandbox-runtime 三条。
+	upper, err := service.ListImages(context.Background(), ports.RegistryImageListRequest{
+		TenantID: "tenant-a",
+		Project:  "tenant-a",
+		Keyword:  "RUNTIME",
+	})
+	if err != nil {
+		t.Fatalf("ListImages() error = %v", err)
+	}
+	if len(upper.Items) != 3 {
+		t.Fatalf("keyword=RUNTIME images = %d, want 3 (case-insensitive match)", len(upper.Items))
+	}
+
+	// keyword 无命中返回空列表（非错误）。
+	none, err := service.ListImages(context.Background(), ports.RegistryImageListRequest{
+		TenantID: "tenant-a",
+		Project:  "tenant-a",
+		Keyword:  "no_such_image",
+	})
+	if err != nil {
+		t.Fatalf("ListImages() error = %v", err)
+	}
+	if len(none.Items) != 0 {
+		t.Fatalf("keyword=no_such_image images = %+v, want none", none.Items)
+	}
+}
+
+func TestLocalImageRegistryListImagesAppliesCombinedFiltersAndTenantIsolation(t *testing.T) {
+	service := NewLocalImageRegistry()
+	images, err := service.ListImages(context.Background(), ports.RegistryImageListRequest{
+		TenantID:   "tenant-a",
+		Project:    "tenant-a",
+		Repository: "gpu-runtime",
+		Tag:        "cuda-12.4",
+		Purpose:    "gpu",
+		ScanStatus: ports.RegistryScanComplete,
+	})
+	if err != nil {
+		t.Fatalf("ListImages() error = %v", err)
+	}
+	if len(images.Items) != 1 || images.Items[0].Repository != "gpu-runtime" {
+		t.Fatalf("images = %+v, want one matching GPU image", images.Items)
+	}
+
+	_, err = service.ListImages(context.Background(), ports.RegistryImageListRequest{TenantID: "tenant-a", Project: "tenant-b"})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("cross-tenant ListImages() error = %v, want ErrInvalid", err)
 	}
 }

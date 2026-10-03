@@ -210,23 +210,91 @@ func (c *KubernetesRESTClient) Health(ctx context.Context) error {
 	return err
 }
 
+func (c *KubernetesRESTClient) ListNodeInternalCIDRs(ctx context.Context) ([]string, error) {
+	if c == nil {
+		return nil, fmt.Errorf("%w: kubernetes client is not configured", ports.ErrUnavailable)
+	}
+	body, _, err := c.Do(ctx, http.MethodGet, strings.TrimRight(c.host, "/")+"/api/v1/nodes", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	return nodeInternalCIDRsFromList(body)
+}
+
+func nodeInternalCIDRsFromList(body []byte) ([]string, error) {
+	var document struct {
+		Items []struct {
+			Metadata struct {
+				Annotations map[string]string `json:"annotations"`
+			} `json:"metadata"`
+			Status struct {
+				Addresses []struct {
+					Type    string `json:"type"`
+					Address string `json:"address"`
+				} `json:"addresses"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		return nil, fmt.Errorf("%w: invalid Kubernetes node list: %v", ports.ErrInvalid, err)
+	}
+	cidrs := make([]string, 0, len(document.Items)*2)
+	for _, item := range document.Items {
+		for _, address := range item.Status.Addresses {
+			if address.Type != "InternalIP" {
+				continue
+			}
+			cidrs = append(cidrs, address.Address)
+		}
+		if ip := strings.TrimSpace(item.Metadata.Annotations["ovn.kubernetes.io/ip_address"]); ip != "" {
+			cidrs = append(cidrs, strings.Split(ip, "/")[0])
+		}
+	}
+	return platformWorkloadNodeCIDRs(cidrs), nil
+}
+
 func (c *KubernetesRESTClient) ApplyManifests(ctx context.Context, manifests []ports.WorkloadManifest) ([]string, error) {
 	if len(manifests) == 0 {
 		return nil, fmt.Errorf("%w: at least one manifest is required for Kubernetes apply", ports.ErrInvalid)
 	}
 	refs := make([]string, 0, len(manifests))
+	applied := make([]kubernetesResource, 0, len(manifests))
 	for _, manifest := range manifests {
 		resource, err := parseKubernetesResource(manifest)
 		if err != nil {
-			return nil, err
+			return nil, c.compensateAppliedManifests(ctx, applied, err)
 		}
 		query := "fieldManager=" + url.QueryEscape(c.fieldManager) + "&force=true"
 		if _, err := c.do(ctx, http.MethodPatch, c.resourceURL(resource, query), kubernetesApplyPatchContentType, []byte(manifest.Content)); err != nil {
-			return nil, err
+			return nil, c.compensateAppliedManifests(ctx, applied, err)
 		}
+		applied = append(applied, resource)
 		refs = append(refs, resource.ref())
 	}
 	return refs, nil
+}
+
+func (c *KubernetesRESTClient) compensateAppliedManifests(ctx context.Context, applied []kubernetesResource, applyErr error) error {
+	if len(applied) == 0 {
+		return applyErr
+	}
+	var compensateErr error
+	for i := len(applied) - 1; i >= 0; i-- {
+		resource := applied[i]
+		if resource.Kind == "Namespace" {
+			continue
+		}
+		_, err := c.do(ctx, http.MethodDelete, c.resourceURL(resource, ""), "", nil)
+		if err != nil && !isKubernetesNotFound(err) {
+			if compensateErr == nil {
+				compensateErr = err
+			}
+		}
+	}
+	if compensateErr != nil {
+		return fmt.Errorf("%w: compensate delete failed: %v", applyErr, compensateErr)
+	}
+	return applyErr
 }
 
 func (c *KubernetesRESTClient) ObserveNetworkResource(ctx context.Context, request ports.NetworkProviderStatusRequest) (ports.NetworkProviderStatusResult, error) {
@@ -312,17 +380,42 @@ func (c *KubernetesRESTClient) Observe(ctx context.Context, request ports.Worklo
 		return ports.WorkloadProviderObservation{}, fmt.Errorf("%w: resource refs are required for Kubernetes observation", ports.ErrInvalid)
 	}
 
-	resource, err := resourceFromRef(request.ApplyResult.Provider, tenantNamespace(request.TenantID), request.ApplyResult.ResourceRefs[0])
+	resourceProvider := request.ApplyResult.Provider
+	resourceRef := request.ApplyResult.ResourceRefs[0]
+	if request.Kind == ports.WorkloadKindSandbox && resourceProvider == "kubernetes_sandbox_runtime" {
+		resourceProvider = "kubernetes"
+		var err error
+		resourceRef, err = sandboxDeploymentRef(request.ApplyResult.ResourceRefs)
+		if err != nil {
+			return ports.WorkloadProviderObservation{}, err
+		}
+	}
+	resource, err := resourceFromRef(resourceProvider, tenantNamespace(request.TenantID), resourceRef)
 	if err != nil {
 		return ports.WorkloadProviderObservation{}, err
 	}
 	body, err := c.doIdempotent(ctx, http.MethodGet, c.resourceURL(resource, ""), "", nil)
 	if err != nil {
+		if isKubernetesNotFound(err) {
+			return ports.WorkloadProviderObservation{}, fmt.Errorf("%w: Kubernetes %s %s was not found", ports.ErrNotFound, resource.Kind, resource.Name)
+		}
 		return ports.WorkloadProviderObservation{}, err
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return ports.WorkloadProviderObservation{}, fmt.Errorf("%w: invalid Kubernetes observation response: %v", ports.ErrInvalid, err)
+	}
+
+	phase := phaseFromKubernetesObject(resource, doc)
+	nodeName := nodeNameFromKubernetesObject(doc)
+	reason := reasonFromKubernetesObject(doc)
+	var networks []ports.WorkloadNetworkAttachment
+	if request.Kind == ports.WorkloadKindVM && resource.Kind == "VirtualMachine" {
+		var err error
+		phase, nodeName, reason, networks, err = c.observeKubeVirtVMI(ctx, resource.Namespace, resource.Name, phase, nodeName, reason)
+		if err != nil {
+			return ports.WorkloadProviderObservation{}, err
+		}
 	}
 
 	return ports.WorkloadProviderObservation{
@@ -331,11 +424,94 @@ func (c *KubernetesRESTClient) Observe(ctx context.Context, request ports.Worklo
 		Kind:         request.Kind,
 		Provider:     request.ApplyResult.Provider,
 		ResourceRefs: request.ApplyResult.ResourceRefs,
-		Phase:        phaseFromKubernetesObject(resource, doc),
-		NodeName:     nodeNameFromKubernetesObject(doc),
-		Reason:       reasonFromKubernetesObject(doc),
+		Phase:        phase,
+		NodeName:     nodeName,
+		Reason:       reason,
+		Networks:     networks,
 		ObservedAt:   c.now().UTC(),
 	}, nil
+}
+
+func (c *KubernetesRESTClient) observeKubeVirtVMI(ctx context.Context, namespace string, name string, phase string, nodeName string, reason string) (string, string, string, []ports.WorkloadNetworkAttachment, error) {
+	resource := kubernetesResource{
+		Provider:   "kubevirt",
+		APIGroup:   "kubevirt.io",
+		APIVersion: "v1",
+		Resource:   "virtualmachineinstances",
+		Kind:       "VirtualMachineInstance",
+		Namespace:  namespace,
+		Name:       name,
+		Namespaced: true,
+	}
+	body, err := c.doIdempotent(ctx, http.MethodGet, c.resourceURL(resource, ""), "", nil)
+	if err != nil {
+		if isKubernetesNotFound(err) {
+			switch strings.ToLower(strings.TrimSpace(phase)) {
+			case "stopped", "halted":
+				return "Stopped", nodeName, reason, nil, nil
+			case "running", "starting":
+				return "Pending", nodeName, fmt.Sprintf("VirtualMachineInstance not found while VirtualMachine status is %s", phase), nil, nil
+			default:
+				return phase, nodeName, reason, nil, nil
+			}
+		}
+		return phase, nodeName, reason, nil, err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return phase, nodeName, reason, nil, fmt.Errorf("%w: invalid KubeVirt VMI observation response: %v", ports.ErrInvalid, err)
+	}
+	phase = phaseFromKubernetesObject(resource, doc)
+	if observed := nodeNameFromKubernetesObject(doc); observed != "" {
+		nodeName = observed
+	}
+	if observed := reasonFromKubernetesObject(doc); observed != "" {
+		reason = observed
+	}
+	return phase, nodeName, reason, kubevirtVMINetworks(doc), nil
+}
+
+// kubevirtVMINetworks extracts the private IP addresses reported by a
+// KubeVirt VirtualMachineInstance's status.interfaces so a VM instance can
+// surface its real private_ip instead of an empty value. The first non-empty
+// interface is marked primary so primaryIPAddress picks it up deterministically.
+func kubevirtVMINetworks(doc map[string]any) []ports.WorkloadNetworkAttachment {
+	status, _ := doc["status"].(map[string]any)
+	raw, _ := status["interfaces"].([]any)
+	if len(raw) == 0 {
+		return nil
+	}
+	networks := make([]ports.WorkloadNetworkAttachment, 0, len(raw))
+	for i, item := range raw {
+		iface, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		ip := firstNonEmpty(stringValue(iface["ipAddress"]), stringValue(iface["ip"]))
+		if strings.TrimSpace(ip) == "" {
+			continue
+		}
+		networks = append(networks, ports.WorkloadNetworkAttachment{
+			IPAddress: ip,
+			Primary:   i == 0,
+		})
+	}
+	return networks
+}
+
+func stringValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
+}
+
+func isKubernetesNotFound(err error) bool {
+	var statusErr *resilience.StatusError
+	return errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusNotFound
 }
 
 func (c *KubernetesRESTClient) do(ctx context.Context, method string, endpoint string, contentType string, body []byte) ([]byte, error) {
@@ -388,7 +564,9 @@ func (c *KubernetesRESTClient) doOnce(ctx context.Context, method string, endpoi
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	req.Header.Set("Accept", "application/json")
+	// Include */* so KubeVirt subresources (often empty-body 202 responses)
+	// pass go-restful content negotiation instead of returning HTTP 406.
+	req.Header.Set("Accept", "application/json, */*")
 	if c.bearerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+c.bearerToken)
 	}
@@ -409,7 +587,7 @@ func (c *KubernetesRESTClient) doOnce(ctx context.Context, method string, endpoi
 		if resilience.Retryable(statusErr) {
 			return nil, statusErr
 		}
-		return nil, fmt.Errorf("%w: %v", ports.ErrInvalid, statusErr)
+		return nil, fmt.Errorf("%w: %w", ports.ErrInvalid, statusErr)
 	}
 	return data, nil
 }
@@ -497,12 +675,28 @@ func resourceMapping(provider string, apiVersion string, kind string) (kubernete
 	switch provider + "/" + kind {
 	case "kubernetes/Deployment":
 		return kubernetesResource{Provider: provider, APIGroup: "apps", APIVersion: "v1", Resource: "deployments", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/StatefulSet":
+		return kubernetesResource{Provider: provider, APIGroup: "apps", APIVersion: "v1", Resource: "statefulsets", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/LeaderWorkerSet":
+		return kubernetesResource{Provider: provider, APIGroup: "leaderworkerset.x-k8s.io", APIVersion: "v1", Resource: "leaderworkersets", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/PodGroup":
+		return kubernetesResource{Provider: provider, APIGroup: "scheduling.volcano.sh", APIVersion: "v1beta1", Resource: "podgroups", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/Job":
 		return kubernetesResource{Provider: provider, APIGroup: "batch", APIVersion: "v1", Resource: "jobs", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/NetworkPolicy":
 		return kubernetesResource{Provider: provider, APIGroup: "networking.k8s.io", APIVersion: "v1", Resource: "networkpolicies", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/Service":
 		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "services", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/ServiceAccount":
+		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "serviceaccounts", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/Role":
+		return kubernetesResource{Provider: provider, APIGroup: "rbac.authorization.k8s.io", APIVersion: "v1", Resource: "roles", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/RoleBinding":
+		return kubernetesResource{Provider: provider, APIGroup: "rbac.authorization.k8s.io", APIVersion: "v1", Resource: "rolebindings", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/Certificate":
+		return kubernetesResource{Provider: provider, APIGroup: "cert-manager.io", APIVersion: "v1", Resource: "certificates", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/Namespace":
+		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "namespaces", Kind: kind}, nil
 	case "kubernetes/PersistentVolumeClaim":
 		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "persistentvolumeclaims", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/VolumeSnapshot":
@@ -511,6 +705,8 @@ func resourceMapping(provider string, apiVersion string, kind string) (kubernete
 		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "secrets", Kind: kind, Namespaced: true}, nil
 	case "kubevirt/VirtualMachine":
 		return kubernetesResource{Provider: provider, APIGroup: "kubevirt.io", APIVersion: "v1", Resource: "virtualmachines", Kind: kind, Namespaced: true}, nil
+	case "kubevirt/VirtualMachineInstance":
+		return kubernetesResource{Provider: provider, APIGroup: "kubevirt.io", APIVersion: "v1", Resource: "virtualmachineinstances", Kind: kind, Namespaced: true}, nil
 	case "clusterapi/MachineDeployment":
 		return kubernetesResource{Provider: provider, APIGroup: "cluster.x-k8s.io", APIVersion: "v1beta1", Resource: "machinedeployments", Kind: kind, Namespaced: true}, nil
 	case "kubeovn/Vpc":
@@ -556,6 +752,10 @@ func phaseFromKubernetesObject(resource kubernetesResource, doc map[string]any) 
 		if phase, _ := status["printableStatus"].(string); phase != "" {
 			return phase
 		}
+		if phase, _ := status["phase"].(string); phase != "" {
+			return phase
+		}
+	case "VirtualMachineInstance":
 		if phase, _ := status["phase"].(string); phase != "" {
 			return phase
 		}

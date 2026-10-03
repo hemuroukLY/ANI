@@ -15,81 +15,103 @@ const (
 	StorageResourceDeleted   StorageResourceState = "deleted"
 )
 
+// StorageVolumeMode 取值是块存储卷的 Kubernetes volumeMode：block 用于 VM 数据盘
+// 热插裸设备（无需卷内 disk.img）；filesystem 用于容器/沙箱按目录挂载。
+const (
+	StorageVolumeModeBlock      = "block"
+	StorageVolumeModeFilesystem = "filesystem"
+)
+
 type StorageVolumeRecord struct {
-	TenantID         string
-	VolumeID         string
-	Name             string
-	SizeGiB          int64
-	StorageClass     string
-	Zone             string
-	VolumeType       string
-	IOPS             int
-	Encrypted        bool
-	MountInstanceID  string
-	MountRoute       string
-	MountName        string
-	SnapshotsCount   int
-	AutoSnapshot     StorageVolumeAutoSnapshotPolicy
-	OSInitStatus     string
-	OSInitDevice     string
-	MountHistory     []StorageVolumeMountHistoryEntry
-	FromSnapshotID   string
-	FromSnapshotName string
-	State            StorageResourceState
-	Reason           string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	TenantID                 string
+	VolumeID                 string
+	Name                     string
+	SizeGiB                  int64
+	StorageClass             string
+	Zone                     string
+	VolumeType               string
+	VolumeMode               string
+	IOPS                     int
+	Encrypted                bool
+	MountInstanceID          string
+	MountRoute               string
+	MountName                string
+	SnapshotsCount           int
+	AutoSnapshot             StorageVolumeAutoSnapshotPolicy
+	OSInitStatus             string
+	OSInitDevice             string
+	MountHistory             []StorageVolumeMountHistoryEntry
+	FromSnapshotID           string
+	FromSnapshotName         string
+	State                    StorageResourceState
+	Reason                   string
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	DeletedAt                time.Time
+	CreateIdempotencyKey     string
+	CreateRequestFingerprint string
 }
 
 type StorageFilesystemRecord struct {
-	TenantID          string
-	FilesystemID      string
-	Name              string
-	Protocol          string
-	SizeGiB           int64
-	Endpoint          string
-	Zone              string
-	PerformanceMode   string
-	MountTargets      []FilesystemMountTargetRecord
-	Mounts            int
-	MountCommand      string
-	AttachedInstances []FilesystemAttachment
-	State             StorageResourceState
-	Reason            string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	TenantID                 string
+	FilesystemID             string
+	Name                     string
+	Protocol                 string
+	SizeGiB                  int64
+	Endpoint                 string
+	Zone                     string
+	PerformanceMode          string
+	MountTargets             []FilesystemMountTargetRecord
+	Mounts                   int
+	MountCommand             string
+	AttachedInstances        []FilesystemAttachment
+	State                    StorageResourceState
+	Reason                   string
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	DeletedAt                time.Time
+	CreateIdempotencyKey     string
+	CreateRequestFingerprint string
 }
 
 type StorageObjectRecord struct {
-	TenantID    string
-	ObjectID    string
-	Bucket      string
-	Key         string
-	SizeBytes   int64
-	ContentType string
-	State       StorageResourceState
-	Reason      string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	TenantID                 string
+	ObjectID                 string
+	Bucket                   string
+	Key                      string
+	SizeBytes                int64
+	ContentType              string
+	State                    StorageResourceState
+	Reason                   string
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	DeletedAt                time.Time
+	CreateIdempotencyKey     string
+	CreateRequestFingerprint string
 }
 
 type StorageBucketRecord struct {
-	TenantID       string
-	BucketID       string
-	Name           string
-	Region         string
-	Endpoint       string
-	AccessMode     string
-	ACL            string
-	ACLLabel       string
-	StorageClass   string
-	Versioning     string
-	ObjectCount    int
-	SizeBytes      int64
-	LifecycleRules []StorageBucketLifecycleRule
-	LifecycleNote  string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	TenantID                 string
+	BucketID                 string
+	Name                     string
+	Region                   string
+	Endpoint                 string
+	AccessMode               string
+	ACL                      string
+	ACLLabel                 string
+	StorageClass             string
+	Versioning               string
+	ObjectCount              int
+	SizeBytes                int64
+	LifecycleRules           []StorageBucketLifecycleRule
+	LifecycleNote            string
+	State                    StorageResourceState
+	Reason                   string
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	DeletedAt                time.Time
+	CreateIdempotencyKey     string
+	CreateRequestFingerprint string
 }
 
 type StorageBucketLifecycleRule struct {
@@ -219,14 +241,18 @@ const (
 )
 
 type VolumeSnapshotRecord struct {
-	TenantID    string
-	SnapshotID  string
-	VolumeID    string
-	Name        string
-	Description string
-	Status      VolumeSnapshotStatus
-	SizeBytes   int64
-	CreatedAt   time.Time
+	TenantID                 string
+	SnapshotID               string
+	VolumeID                 string
+	Name                     string
+	Description              string
+	Status                   VolumeSnapshotStatus
+	SizeBytes                int64
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	DeletedAt                time.Time
+	CreateIdempotencyKey     string
+	CreateRequestFingerprint string
 }
 
 type MountTargetStatus string
@@ -239,14 +265,18 @@ const (
 )
 
 type FilesystemMountTargetRecord struct {
-	TenantID      string
-	MountTargetID string
-	FilesystemID  string
-	SubnetID      string
-	VPCID         string
-	IPAddress     string
-	Status        MountTargetStatus
-	CreatedAt     time.Time
+	TenantID                 string
+	MountTargetID            string
+	FilesystemID             string
+	SubnetID                 string
+	VPCID                    string
+	IPAddress                string
+	Status                   MountTargetStatus
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	DeletedAt                time.Time
+	CreateIdempotencyKey     string
+	CreateRequestFingerprint string
 }
 
 type StorageVolumeAutoSnapshotPolicy struct {
@@ -300,6 +330,7 @@ type StorageVolumeCreateRequest struct {
 	StorageClass    string
 	Zone            string
 	VolumeType      string
+	VolumeMode      string
 	Encrypted       bool
 	MountInstanceID string
 	MountRoute      string
@@ -330,6 +361,7 @@ type StorageBucketCreateRequest struct {
 	Name           string
 	Region         string
 	AccessMode     string
+	StorageClass   string
 }
 
 type StorageObjectUploadRequest struct {
@@ -347,6 +379,12 @@ type StorageObjectDownloadRequest struct {
 	TenantID       string
 	ObjectID       string
 	ExpiresSeconds int
+}
+
+type StorageObjectCompleteRequest struct {
+	TenantID       string
+	ObjectID       string
+	IdempotencyKey string
 }
 
 type VolumeSnapshotCreateRequest struct {
@@ -446,6 +484,8 @@ type StorageResourceListRequest struct {
 	TenantID string
 	Limit    int
 	Cursor   string
+	Status   StorageResourceState
+	Keyword  string
 }
 
 type VolumeSnapshotListRequest struct {
@@ -489,10 +529,12 @@ type StorageService interface {
 	ListObjects(ctx context.Context, request StorageResourceListRequest) ([]StorageObjectRecord, error)
 	GetObject(ctx context.Context, request StorageResourceGetRequest) (StorageObjectRecord, error)
 	DeleteObject(ctx context.Context, request StorageResourceGetRequest) (StorageObjectRecord, error)
+	CompleteStorageObject(ctx context.Context, request StorageObjectCompleteRequest) (StorageObjectRecord, error)
 
 	CreateStorageBucket(ctx context.Context, request StorageBucketCreateRequest) (StorageBucketRecord, error)
 	ListStorageBuckets(ctx context.Context, request StorageResourceListRequest) ([]StorageBucketRecord, error)
 	GetStorageBucket(ctx context.Context, request StorageResourceGetRequest) (StorageBucketRecord, error)
+	DeleteStorageBucket(ctx context.Context, request StorageResourceGetRequest) (StorageBucketRecord, error)
 	ListBucketObjects(ctx context.Context, request StorageBucketObjectListRequest) (StorageBucketObjectListResult, error)
 	DeleteBucketObject(ctx context.Context, request StorageBucketObjectDeleteRequest) (StorageBucketObjectDeleteResult, error)
 	CreateBucketPrefix(ctx context.Context, request StorageBucketPrefixCreateRequest) (StorageBucketObjectEntry, error)
@@ -513,8 +555,26 @@ type StorageService interface {
 
 type StorageResourceStore interface {
 	UpsertVolume(ctx context.Context, record StorageVolumeRecord) error
+	GetVolume(ctx context.Context, tenantID string, volumeID string) (StorageVolumeRecord, error)
+	ListVolumes(ctx context.Context, tenantID string) ([]StorageVolumeRecord, error)
+	FindVolumeByCreateIdempotency(ctx context.Context, tenantID string, idempotencyKey string) (StorageVolumeRecord, error)
 	UpsertFilesystem(ctx context.Context, record StorageFilesystemRecord) error
+	GetFilesystem(ctx context.Context, tenantID string, filesystemID string) (StorageFilesystemRecord, error)
+	ListFilesystems(ctx context.Context, tenantID string) ([]StorageFilesystemRecord, error)
 	UpsertObject(ctx context.Context, record StorageObjectRecord) error
+	GetObject(ctx context.Context, tenantID string, objectID string) (StorageObjectRecord, error)
+	ListObjects(ctx context.Context, tenantID string) ([]StorageObjectRecord, error)
+	UpsertBucket(ctx context.Context, record StorageBucketRecord) error
+	GetBucket(ctx context.Context, tenantID string, bucketID string) (StorageBucketRecord, error)
+	ListBuckets(ctx context.Context, tenantID string) ([]StorageBucketRecord, error)
+	FindBucketByCreateIdempotency(ctx context.Context, tenantID string, idempotencyKey string) (StorageBucketRecord, error)
+	ReplaceBucketLifecycleRules(ctx context.Context, tenantID string, bucketID string, rules []StorageBucketLifecycleRule) error
+	UpsertVolumeSnapshot(ctx context.Context, record VolumeSnapshotRecord) error
+	ListVolumeSnapshots(ctx context.Context, tenantID string, volumeID string) ([]VolumeSnapshotRecord, error)
+	FindVolumeSnapshotByCreateIdempotency(ctx context.Context, tenantID string, idempotencyKey string) (VolumeSnapshotRecord, error)
+	UpsertFilesystemMountTarget(ctx context.Context, record FilesystemMountTargetRecord) error
+	ListFilesystemMountTargets(ctx context.Context, tenantID string, filesystemID string) ([]FilesystemMountTargetRecord, error)
+	FindFilesystemMountTargetByCreateIdempotency(ctx context.Context, tenantID string, idempotencyKey string) (FilesystemMountTargetRecord, error)
 	UpdateResourceState(ctx context.Context, request StorageResourceStateUpdateRequest) error
 }
 

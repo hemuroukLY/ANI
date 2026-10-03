@@ -114,6 +114,7 @@ type RegistryArtifactListRequest struct {
 type RegistryArtifact struct {
 	Project    string
 	Repository string
+	Purpose    string
 	Digest     string
 	Tags       []string
 	MediaType  string
@@ -267,6 +268,7 @@ type RegistryImageListRequest struct {
 	Repository string
 	Tag        string
 	Purpose    string
+	Keyword    string
 	ScanStatus RegistryScanState
 	Limit      int
 	Cursor     string

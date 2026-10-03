@@ -54,24 +54,35 @@ type Config struct {
 	VectorStoreDatabase         string
 	VectorStoreCollectionPrefix string
 
-	WorkloadProvider                   string
-	WorkloadProviderApplyEnabled       bool
-	GPUInventoryProvider               string
-	NetworkProvider                    string
-	NetworkProviderApplyEnabled        bool
-	NetworkProviderUserID              string
-	NetworkProviderPermissionProof     string
-	StorageProvider                    string
-	StorageProviderApplyEnabled        bool
-	StorageProviderUserID              string
-	StorageProviderPermissionProof     string
+	WorkloadProvider               string
+	WorkloadProviderApplyEnabled   bool
+	SecretService                  ports.SecretService
+	GPUInventoryProvider           string
+	NetworkProvider                string
+	NetworkProviderApplyEnabled    bool
+	NetworkProviderUserID          string
+	NetworkProviderPermissionProof string
+	StorageProvider                string
+	StorageProviderApplyEnabled    bool
+	StorageProviderUserID          string
+	StorageProviderPermissionProof string
+	RegistryProviderMode           string
+	HarborEndpoint                 string
+	HarborUsername                 string
+	HarborPassword                 string
+	HarborRequestTimeout           time.Duration
+	RegistryTLSInsecure            bool
+	// Optional shared Core services for Gateway so /networks,/volumes and
+	// /instances resolve against the same in-process adapters.
+	SharedNetworkService               ports.NetworkService
+	SharedStorageService               ports.StorageService
+	SharedImageRegistry                ports.ImageRegistry
 	WorkloadLifecycleProvider          string
 	WorkloadLifecycleApplyEnabled      bool
 	WorkloadOpsProvider                string
 	WorkloadOpsEnabled                 bool
 	InstanceObservabilityProvider      string
 	InstanceObservabilityPrometheusURL string
-	InstanceObservabilityExecBaseURL   string
 	KubernetesAPIHost                  string
 	KubernetesServiceHost              string
 	KubernetesServicePort              string
@@ -91,6 +102,15 @@ type Config struct {
 	WorkloadReconcileLeaderLeaseName       string
 	WorkloadReconcileLeaderLeaseTTL        int
 	WorkloadReconcileLeaderRenewInterval   int
+
+	// GPUQuotaEnabled toggles the GPU quota three-gate check (SPEC §5.1).
+	// When false, TryManyTx/Confirm/Cancel/Release are all skipped and
+	// quota is fully bypassed. Default false.
+	GPUQuotaEnabled bool
+	// ProvisioningTimeoutMin is the maximum minutes an instance may stay
+	// in the provisioning state before the reconciler marks it failed and
+	// Cancels the reserved quota (SPEC §5.1). Default 10.
+	ProvisioningTimeoutMin int
 }
 
 // MustConnect initializes all dependencies. Exits the process if any connection fails.
@@ -198,6 +218,26 @@ func (c Config) withEnvironmentOverrides() Config {
 	if value := os.Getenv("STORAGE_PROVIDER_PERMISSION_PROOF"); value != "" {
 		c.StorageProviderPermissionProof = value
 	}
+	if value := os.Getenv("REGISTRY_PROVIDER_MODE"); value != "" {
+		c.RegistryProviderMode = value
+	}
+	if value := os.Getenv("HARBOR_ENDPOINT"); value != "" {
+		c.HarborEndpoint = value
+	}
+	if value := os.Getenv("HARBOR_USERNAME"); value != "" {
+		c.HarborUsername = value
+	}
+	if value := os.Getenv("HARBOR_PASSWORD"); value != "" {
+		c.HarborPassword = value
+	}
+	if value := os.Getenv("HARBOR_REQUEST_TIMEOUT"); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil {
+			c.HarborRequestTimeout = parsed
+		}
+	}
+	if value := os.Getenv("REGISTRY_TLS_INSECURE"); value != "" {
+		c.RegistryTLSInsecure = parseBool(value)
+	}
 	if value := os.Getenv("WORKLOAD_LIFECYCLE_PROVIDER"); value != "" {
 		c.WorkloadLifecycleProvider = value
 	}
@@ -215,9 +255,6 @@ func (c Config) withEnvironmentOverrides() Config {
 	}
 	if value := os.Getenv("INSTANCE_OBSERVABILITY_PROMETHEUS_URL"); value != "" {
 		c.InstanceObservabilityPrometheusURL = value
-	}
-	if value := os.Getenv("INSTANCE_OBSERVABILITY_EXEC_BASE_URL"); value != "" {
-		c.InstanceObservabilityExecBaseURL = value
 	}
 	if value := os.Getenv("KUBERNETES_API_HOST"); value != "" {
 		c.KubernetesAPIHost = value
@@ -321,6 +358,12 @@ func (c Config) withEnvironmentOverrides() Config {
 	if value := os.Getenv("WORKLOAD_RECONCILE_LEADER_RENEW_INTERVAL_SECONDS"); value != "" {
 		c.WorkloadReconcileLeaderRenewInterval = parseInt(value, c.WorkloadReconcileLeaderRenewInterval)
 	}
+	if value := os.Getenv("GPU_QUOTA_ENABLED"); value != "" {
+		c.GPUQuotaEnabled = parseBool(value)
+	}
+	if value := os.Getenv("PROVISIONING_TIMEOUT_MIN"); value != "" {
+		c.ProvisioningTimeoutMin = parseInt(value, c.ProvisioningTimeoutMin)
+	}
 	return c
 }
 
@@ -373,16 +416,34 @@ func RunGRPC(port int, register func(*grpc.Server), deps *Deps) {
 	reflection.Register(srv) // enables grpcurl and grpc-gateway reflection
 
 	var probe *http.Server
+	var probeListener net.Listener
+	var runtimeAdminShutdown func(context.Context) error
+	var setServing func(bool)
 	if deps.HealthPort > 0 {
+		runtimeAdmin, runtimeErr := newRuntimeAdminForDeps(deps)
+		if runtimeErr != nil {
+			_ = lis.Close()
+			deps.Logger.Error("failed to initialize runtime admin", "err", runtimeErr)
+			os.Exit(1)
+		}
+		probeListener, err = net.Listen("tcp", fmt.Sprintf(":%d", deps.HealthPort))
+		if err != nil {
+			_ = runtimeAdmin.Shutdown(context.Background())
+			_ = lis.Close()
+			deps.Logger.Error("failed to listen for runtime admin", "port", deps.HealthPort, "err", err)
+			os.Exit(1)
+		}
 		probe = &http.Server{
 			Addr:              fmt.Sprintf(":%d", deps.HealthPort),
-			Handler:           newProbeHandler(deps.ServiceName, dependencyProbeChecks(deps), reconcileControllerMetricsReader(deps)),
+			Handler:           runtimeAdmin,
 			ReadHeaderTimeout: 5 * time.Second,
 		}
+		runtimeAdminShutdown = runtimeAdmin.Shutdown
+		setServing = runtimeAdmin.SetServing
 		go func() {
-			deps.Logger.Info("health probe server listening", "port", deps.HealthPort)
-			if err := probe.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				deps.Logger.Error("health probe serve error", "err", err)
+			deps.Logger.Info("runtime admin server listening", "port", deps.HealthPort)
+			if serveErr := probe.Serve(probeListener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				deps.Logger.Error("runtime admin serve error", "err", serveErr)
 				os.Exit(1)
 			}
 		}()
@@ -397,19 +458,89 @@ func RunGRPC(port int, register func(*grpc.Server), deps *Deps) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if setServing != nil {
+		setServing(true)
+	}
 	startWorkloadReconcileController(ctx, deps)
 	<-ctx.Done()
 
 	deps.Logger.Info("shutting down gRPC server gracefully")
+	if setServing != nil {
+		setServing(false)
+	}
 	if probe != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 		if err := probe.Shutdown(shutdownCtx); err != nil {
-			deps.Logger.Error("health probe shutdown error", "err", err)
+			deps.Logger.Error("runtime admin shutdown error", "err", err)
 		}
+		if runtimeAdminShutdown != nil {
+			if err := runtimeAdminShutdown(shutdownCtx); err != nil {
+				deps.Logger.Error("runtime telemetry shutdown error", "err", err)
+			}
+		}
+		cancel()
 	}
 	srv.GracefulStop()
 	deps.Logger.Info("gRPC server stopped")
+}
+
+// RunHealthProbe 仅启动 health probe HTTP 服务器，不启动 gRPC。
+// 用于不需要 gRPC 的服务（如 metering-service）。
+// 阻塞直到收到 SIGINT/SIGTERM，然后优雅关闭 probe 服务器。
+func RunHealthProbe(deps *Deps) {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	var probe *http.Server
+	var runtimeAdminShutdown func(context.Context) error
+	var setServing func(bool)
+	if deps.HealthPort > 0 {
+		runtimeAdmin, err := newRuntimeAdminForDeps(deps)
+		if err != nil {
+			deps.Logger.Error("failed to initialize runtime admin", "err", err)
+			os.Exit(1)
+		}
+		probeListener, err := net.Listen("tcp", fmt.Sprintf(":%d", deps.HealthPort))
+		if err != nil {
+			_ = runtimeAdmin.Shutdown(context.Background())
+			deps.Logger.Error("failed to listen for runtime admin", "port", deps.HealthPort, "err", err)
+			os.Exit(1)
+		}
+		probe = &http.Server{
+			Addr:              fmt.Sprintf(":%d", deps.HealthPort),
+			Handler:           runtimeAdmin,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		runtimeAdminShutdown = runtimeAdmin.Shutdown
+		setServing = runtimeAdmin.SetServing
+		go func() {
+			deps.Logger.Info("runtime admin server listening", "port", deps.HealthPort)
+			if serveErr := probe.Serve(probeListener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				deps.Logger.Error("runtime admin serve error", "err", serveErr)
+				os.Exit(1)
+			}
+		}()
+		setServing(true)
+	}
+
+	<-ctx.Done()
+	deps.Logger.Info("runtime admin shutting down")
+	if setServing != nil {
+		setServing(false)
+	}
+	if probe != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := probe.Shutdown(shutdownCtx); err != nil {
+			deps.Logger.Error("runtime admin shutdown error", "err", err)
+		}
+		if runtimeAdminShutdown != nil {
+			if err := runtimeAdminShutdown(shutdownCtx); err != nil {
+				deps.Logger.Error("runtime telemetry shutdown error", "err", err)
+			}
+		}
+		cancel()
+	}
+	deps.Logger.Info("runtime admin stopped")
 }
 
 func RunWorkloadReconcileWorker(deps *Deps) {

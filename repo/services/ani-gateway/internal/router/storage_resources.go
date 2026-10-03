@@ -3,7 +3,10 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -15,6 +18,10 @@ import (
 
 type storageAPI struct {
 	service ports.StorageService
+	tasks   ports.AsyncTaskStore
+	// instanceStore backs the storage occupancy tags (in_use/used_by).
+	// When nil the tags stay false/empty and the in_use filter is a no-op.
+	instanceStore ports.WorkloadInstanceStore
 }
 
 type storageCreateVolumeRequest struct {
@@ -24,6 +31,7 @@ type storageCreateVolumeRequest struct {
 	StorageClass    string `json:"storage_class"`
 	Zone            string `json:"zone,omitempty"`
 	VolumeType      string `json:"volume_type,omitempty"`
+	VolumeMode      string `json:"volume_mode,omitempty"`
 	Encrypted       bool   `json:"encrypted,omitempty"`
 	MountInstanceID string `json:"mount_instance_id,omitempty"`
 	MountRoute      string `json:"mount_route,omitempty"`
@@ -90,6 +98,10 @@ type storageVolumeOSInitCompleteRequest struct {
 type storageFilesystemExpandRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 	SizeGiB        int64  `json:"size_gib"`
+	// Capacity is a transitional alias kept for the Console, which still posts
+	// {"capacity": N} instead of the contract field size_gib. Remove once the
+	// Console migrates to size_gib.
+	Capacity int64 `json:"capacity"`
 }
 
 type storageFilesystemMountTargetCreateRequest struct {
@@ -116,6 +128,7 @@ type storageCreateBucketRequest struct {
 	Name           string `json:"name"`
 	Region         string `json:"region,omitempty"`
 	AccessMode     string `json:"access_mode,omitempty"`
+	StorageClass   string `json:"storage_class,omitempty"`
 }
 
 type storageObjectUploadRequest struct {
@@ -151,6 +164,10 @@ type storageBucketACLUpdateRequest struct {
 	ACL            string `json:"acl"`
 }
 
+type storageObjectCompleteRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
 type storageBucketClassUpdateRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 	StorageClass   string `json:"storage_class"`
@@ -179,6 +196,14 @@ type storageBucketLifecycleRuleCreateRequest struct {
 	Enabled          bool   `json:"enabled"`
 }
 
+type storageConsumerResponse struct {
+	InstanceID   string `json:"instance_id"`
+	InstanceName string `json:"instance_name"`
+	Kind         string `json:"kind"`
+	State        string `json:"state"`
+	MountPath    string `json:"mount_path"`
+}
+
 type storageVolumeResponse struct {
 	ID               string                              `json:"id"`
 	TenantID         string                              `json:"tenant_id"`
@@ -187,6 +212,7 @@ type storageVolumeResponse struct {
 	StorageClass     string                              `json:"storage_class"`
 	Zone             string                              `json:"zone,omitempty"`
 	VolumeType       string                              `json:"volume_type,omitempty"`
+	VolumeMode       string                              `json:"volume_mode,omitempty"`
 	IOPS             int                                 `json:"iops,omitempty"`
 	Encrypted        bool                                `json:"encrypted,omitempty"`
 	MountInstanceID  string                              `json:"mount_instance_id,omitempty"`
@@ -197,6 +223,8 @@ type storageVolumeResponse struct {
 	OSInitStatus     string                              `json:"os_init_status,omitempty"`
 	OSInitDevice     string                              `json:"os_init_device,omitempty"`
 	MountHistory     []storageVolumeMountHistoryJSON     `json:"mount_history,omitempty"`
+	InUse            bool                                `json:"in_use"`
+	UsedBy           []storageConsumerResponse           `json:"used_by"`
 	FromSnapshotID   string                              `json:"from_snapshot_id,omitempty"`
 	FromSnapshotName string                              `json:"from_snapshot_name,omitempty"`
 	State            string                              `json:"state"`
@@ -244,6 +272,8 @@ type storageFilesystemResponse struct {
 	Mounts            int                            `json:"mounts,omitempty"`
 	MountCommand      string                         `json:"mount_command,omitempty"`
 	AttachedInstances []filesystemAttachmentResponse `json:"attached_instances,omitempty"`
+	InUse             bool                           `json:"in_use"`
+	UsedBy            []storageConsumerResponse      `json:"used_by"`
 	State             string                         `json:"state"`
 	Reason            string                         `json:"reason,omitempty"`
 	DevProfile        coreDevProfileResponse         `json:"dev_profile"`
@@ -383,13 +413,16 @@ type storageSnapshotTaskResponse struct {
 	IdempotencyKey string         `json:"idempotency_key"`
 	TaskType       string         `json:"task_type"`
 	ResourceType   string         `json:"resource_type,omitempty"`
+	ResourceID     string         `json:"resource_id,omitempty"`
 	Status         string         `json:"status"`
 	AttemptCount   int            `json:"attempt_count"`
 	MaxAttempts    int            `json:"max_attempts"`
 	ProgressPct    int            `json:"progress_pct"`
 	Result         map[string]any `json:"result"`
+	ErrorMessage   string         `json:"error_message,omitempty"`
+	DeadLetterAt   string         `json:"dead_letter_at,omitempty"`
 	CreatedAt      string         `json:"created_at"`
-	CompletedAt    string         `json:"completed_at"`
+	CompletedAt    string         `json:"completed_at,omitempty"`
 }
 
 func newStorageAPI() *storageAPI {
@@ -397,14 +430,33 @@ func newStorageAPI() *storageAPI {
 }
 
 func newStorageAPIWithService(service ports.StorageService) *storageAPI {
+	return newStorageAPIWithServiceAndTasks(service, defaultTaskStore)
+}
+
+func newStorageAPIWithServiceAndTasks(service ports.StorageService, tasks ports.AsyncTaskStore) *storageAPI {
+	return newStorageAPIWithServiceAndTasksAndStore(service, tasks, nil)
+}
+
+func newStorageAPIWithServiceAndTasksAndStore(service ports.StorageService, tasks ports.AsyncTaskStore, instanceStore ports.WorkloadInstanceStore) *storageAPI {
 	if service == nil {
 		service = runtimeadapter.NewLocalStorageService()
 	}
-	return &storageAPI{service: service}
+	if tasks == nil {
+		tasks = defaultTaskStore
+	}
+	return &storageAPI{service: service, tasks: tasks, instanceStore: instanceStore}
 }
 
 func registerStorageResourcesWithService(v1 *route.RouterGroup, service ports.StorageService) {
-	api := newStorageAPIWithService(service)
+	registerStorageResourcesWithServiceAndTasks(v1, service, defaultTaskStore)
+}
+
+func registerStorageResourcesWithServiceAndTasks(v1 *route.RouterGroup, service ports.StorageService, tasks ports.AsyncTaskStore) {
+	registerStorageResourcesWithServiceAndTasksAndStore(v1, service, tasks, nil)
+}
+
+func registerStorageResourcesWithServiceAndTasksAndStore(v1 *route.RouterGroup, service ports.StorageService, tasks ports.AsyncTaskStore, instanceStore ports.WorkloadInstanceStore) {
+	api := newStorageAPIWithServiceAndTasksAndStore(service, tasks, instanceStore)
 	v1.GET("/volumes", api.listVolumes)
 	v1.POST("/volumes", api.createVolume)
 	v1.GET("/volumes/:volume_id", api.getVolume)
@@ -432,6 +484,7 @@ func registerStorageResourcesWithService(v1 *route.RouterGroup, service ports.St
 
 	v1.GET("/buckets", api.listStorageBuckets)
 	v1.POST("/buckets", api.createStorageBucket)
+	v1.DELETE("/buckets/:bucket_id", api.deleteStorageBucket)
 	v1.GET("/buckets/:bucket_id/objects", api.listBucketObjects)
 	v1.DELETE("/buckets/:bucket_id/objects", api.deleteBucketObject)
 	v1.POST("/buckets/:bucket_id/objects/upload", api.uploadBucketObject)
@@ -450,20 +503,182 @@ func registerStorageResourcesWithService(v1 *route.RouterGroup, service ports.St
 	v1.GET("/objects/:object_id", api.getObject)
 	v1.DELETE("/objects/:object_id", api.deleteObject)
 	v1.GET("/objects/:object_id/download", api.downloadStorageObject)
+	v1.POST("/objects/:object_id/complete", api.completeStorageObject)
+}
+
+// storageVolumeConsumerKey / storageFilesystemConsumerKey build the index
+// keys produced by runtimeadapter.ListAllStorageConsumers.
+func storageVolumeConsumerKey(volumeID string) string {
+	return "volume/" + volumeID
+}
+
+func storageFilesystemConsumerKey(filesystemID string) string {
+	return "filesystem/" + filesystemID
+}
+
+// storageConsumersToResponse maps adapter consumers to the wire shape used
+// by in_use/used_by. The result is never nil so responses carry
+// "used_by": [] instead of null.
+func storageConsumersToResponse(consumers []runtimeadapter.StorageConsumer) []storageConsumerResponse {
+	out := make([]storageConsumerResponse, 0, len(consumers))
+	for _, consumer := range consumers {
+		out = append(out, storageConsumerResponse{
+			InstanceID:   consumer.InstanceID,
+			InstanceName: consumer.InstanceName,
+			Kind:         string(consumer.Kind),
+			State:        string(consumer.State),
+			MountPath:    consumer.MountPath,
+		})
+	}
+	return out
+}
+
+// tagVolumeConsumers stamps occupancy info onto a volume response. An empty
+// consumer list marks the volume as unused.
+func tagVolumeConsumers(resp *storageVolumeResponse, consumers []runtimeadapter.StorageConsumer) {
+	resp.InUse = len(consumers) > 0
+	resp.UsedBy = storageConsumersToResponse(consumers)
+}
+
+// tagFilesystemConsumers is the filesystem counterpart of tagVolumeConsumers.
+// Filesystems are RWX shared resources, so occupancy is informational only.
+func tagFilesystemConsumers(resp *storageFilesystemResponse, consumers []runtimeadapter.StorageConsumer) {
+	resp.InUse = len(consumers) > 0
+	resp.UsedBy = storageConsumersToResponse(consumers)
+}
+
+// stringListFilterSpec is a normalized list-filter description shared by the
+// storage list handlers. searchField forces keyword to match a specific field
+// ("id" or "name"); an empty searchField keeps the legacy nameParts matching.
+type stringListFilterSpec struct {
+	statuses      []string
+	keyword       string
+	searchFieldID bool
+	// volumeMode filters the volume list by Kubernetes volumeMode (block /
+	// filesystem); empty means no filter. Only the volumes list consumes it.
+	volumeMode string
+}
+
+// storageListFilters parses the optional status + search_field + keyword query
+// parameters. state accepts a comma-separated list (any-of match); keyword is
+// lower-cased here so the per-record match in storageMatchesFilters can
+// compare against the same folded value.
+func storageListFilters(c *app.RequestContext) stringListFilterSpec {
+	var statuses []string
+	for _, raw := range strings.Split(c.Query("state"), ",") {
+		if state := strings.TrimSpace(raw); state != "" {
+			statuses = append(statuses, state)
+		}
+	}
+	spec := stringListFilterSpec{
+		statuses:   statuses,
+		keyword:    strings.ToLower(strings.TrimSpace(c.Query("keyword"))),
+		volumeMode: strings.ToLower(strings.TrimSpace(c.Query("volume_mode"))),
+	}
+	switch strings.TrimSpace(c.Query("search_field")) {
+	case "id":
+		spec.searchFieldID = true
+	case "name":
+		spec.searchFieldID = false
+	}
+	return spec
+}
+
+// storageMatchesFilters reports whether a storage record survives the status,
+// search_field and keyword list filters. The status list is an any-of match.
+// When spec.searchFieldID is true the supplied idPart must contain keyword;
+// otherwise keyword matches any supplied name segment (e.g. volume name, or
+// an object's bucket/key).
+func storageMatchesFilters(recordState ports.StorageResourceState, spec stringListFilterSpec, idPart string, nameParts ...string) bool {
+	if len(spec.statuses) > 0 {
+		matched := false
+		for _, status := range spec.statuses {
+			if string(recordState) == status {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	if spec.keyword == "" {
+		return true
+	}
+	if spec.searchFieldID {
+		return strings.Contains(strings.ToLower(idPart), spec.keyword)
+	}
+	for _, part := range nameParts {
+		if strings.Contains(strings.ToLower(part), spec.keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+// storageInUseFilter parses the optional in_use query parameter. The first
+// return reports whether filtering was requested; an invalid value returns
+// an error so handlers can reject with 400 instead of silently ignoring it.
+func storageInUseFilter(c *app.RequestContext) (bool, bool, error) {
+	raw := strings.TrimSpace(c.Query("in_use"))
+	if raw == "" {
+		return false, false, nil
+	}
+	parsed, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, false, fmt.Errorf("invalid in_use value %q", raw)
+	}
+	return true, parsed, nil
+}
+
+// storageAvailableForInstanceFilter parses the optional
+// available_for_instance_id query parameter and resolves the target instance
+// into the volume_mode it can mount: VM data disks hotplug as raw block
+// devices, every other workload kind mounts a filesystem directory. The
+// second return reports whether the filter was requested. Unknown instances
+// (or instances owned by another tenant) return an error so handlers can
+// reject with 400 instead of silently returning an empty list.
+func (api *storageAPI) storageAvailableForInstanceFilter(ctx context.Context, tenantID string, c *app.RequestContext) (string, bool, error) {
+	instanceID := strings.TrimSpace(c.Query("available_for_instance_id"))
+	if instanceID == "" {
+		return "", false, nil
+	}
+	if api.instanceStore == nil {
+		return "", true, fmt.Errorf("available_for_instance_id %q requires the instance store", instanceID)
+	}
+	record, err := api.instanceStore.Get(ctx, tenantID, instanceID)
+	if err != nil {
+		return "", true, fmt.Errorf("unknown available_for_instance_id %q", instanceID)
+	}
+	mode := ports.StorageVolumeModeFilesystem
+	if record.Kind == ports.WorkloadKindVM {
+		mode = ports.StorageVolumeModeBlock
+	}
+	return mode, true, nil
+}
+
+// storageLoadConsumerIndex builds the tenant-wide consumer index used by
+// list handlers. A nil store yields an empty index (tags stay unused).
+func (api *storageAPI) storageLoadConsumerIndex(ctx context.Context, tenantID string) (map[string][]runtimeadapter.StorageConsumer, error) {
+	if api.instanceStore == nil {
+		return map[string][]runtimeadapter.StorageConsumer{}, nil
+	}
+	return runtimeadapter.ListAllStorageConsumers(ctx, api.instanceStore, tenantID)
 }
 
 func (api *storageAPI) createVolume(ctx context.Context, c *app.RequestContext) {
 	var req storageCreateVolumeRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid volume request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid volume request")
 		return
 	}
 	record, err := api.service.CreateVolume(ctx, ports.StorageVolumeCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		SizeGiB:        req.SizeGiB,
 		StorageClass:   req.StorageClass,
+		VolumeMode:     req.VolumeMode,
 	})
 	if err != nil {
 		writeStorageError(c, err)
@@ -473,29 +688,71 @@ func (api *storageAPI) createVolume(ctx context.Context, c *app.RequestContext) 
 }
 
 func (api *storageAPI) listVolumes(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListVolumes(ctx, ports.StorageResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListVolumes(ctx, ports.StorageResourceListRequest{TenantID: instanceTenantID(c)})
 	if err != nil {
 		writeStorageError(c, err)
 		return
 	}
+	filterSet, wantInUse, err := storageInUseFilter(c)
+	if err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		return
+	}
+	requiredMode, forInstance, err := api.storageAvailableForInstanceFilter(ctx, instanceTenantID(c), c)
+	if err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		return
+	}
+	filterSpec := storageListFilters(c)
+	consumerIndex, err := api.storageLoadConsumerIndex(ctx, instanceTenantID(c))
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
+		return
+	}
 	items := make([]storageVolumeResponse, 0, len(records))
 	for _, record := range records {
-		items = append(items, storageVolumeFromRecord(record))
+		if !storageMatchesFilters(record.State, filterSpec, record.VolumeID, record.Name) {
+			continue
+		}
+		if filterSpec.volumeMode != "" && strings.ToLower(strings.TrimSpace(record.VolumeMode)) != filterSpec.volumeMode {
+			continue
+		}
+		if forInstance && strings.ToLower(strings.TrimSpace(record.VolumeMode)) != requiredMode {
+			continue
+		}
+		item := storageVolumeFromRecord(record)
+		tagVolumeConsumers(&item, consumerIndex[storageVolumeConsumerKey(record.VolumeID)])
+		if filterSet && item.InUse != wantInUse {
+			continue
+		}
+		// available_for_instance_id implies a mountable volume: an occupied
+		// volume can never be attached to the target instance.
+		if forInstance && item.InUse {
+			continue
+		}
+		items = append(items, item)
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
 }
 
 func (api *storageAPI) getVolume(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetVolume(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("volume_id")})
+	record, err := api.service.GetVolume(ctx, ports.StorageResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("volume_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, storageVolumeFromRecord(record))
+	item := storageVolumeFromRecord(record)
+	consumers, err := runtimeadapter.ListStorageConsumers(ctx, api.instanceStore, instanceTenantID(c), "volume", record.VolumeID)
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
+		return
+	}
+	tagVolumeConsumers(&item, consumers)
+	c.JSON(http.StatusOK, item)
 }
 
 func (api *storageAPI) deleteVolume(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteVolume(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("volume_id")})
+	record, err := api.service.DeleteVolume(ctx, ports.StorageResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("volume_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -506,11 +763,11 @@ func (api *storageAPI) deleteVolume(ctx context.Context, c *app.RequestContext) 
 func (api *storageAPI) expandVolume(ctx context.Context, c *app.RequestContext) {
 	var req storageVolumeExpandRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid volume expand request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid volume expand request")
 		return
 	}
 	record, err := api.service.ExpandVolume(ctx, ports.StorageVolumeExpandRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		VolumeID:       c.Param("volume_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		SizeGiB:        req.SizeGiB,
@@ -519,17 +776,17 @@ func (api *storageAPI) expandVolume(ctx context.Context, c *app.RequestContext) 
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("volume.expand", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("volume.expand", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) mountVolume(ctx context.Context, c *app.RequestContext) {
 	var req storageVolumeMountRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid volume mount request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid volume mount request")
 		return
 	}
 	record, err := api.service.MountVolume(ctx, ports.StorageVolumeMountRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		VolumeID:       c.Param("volume_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		InstanceID:     req.InstanceID,
@@ -540,17 +797,17 @@ func (api *storageAPI) mountVolume(ctx context.Context, c *app.RequestContext) {
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("volume.mount", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("volume.mount", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) unmountVolume(ctx context.Context, c *app.RequestContext) {
 	var req storageVolumeUnmountRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid volume unmount request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid volume unmount request")
 		return
 	}
 	record, err := api.service.UnmountVolume(ctx, ports.StorageVolumeUnmountRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		VolumeID:       c.Param("volume_id"),
 		IdempotencyKey: req.IdempotencyKey,
 	})
@@ -558,17 +815,17 @@ func (api *storageAPI) unmountVolume(ctx context.Context, c *app.RequestContext)
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("volume.unmount", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("volume.unmount", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) createVolumeFromSnapshot(ctx context.Context, c *app.RequestContext) {
 	var req storageVolumeFromSnapshotRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid snapshot create-volume request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid snapshot create-volume request")
 		return
 	}
 	record, err := api.service.CreateVolumeFromSnapshot(ctx, ports.StorageVolumeFromSnapshotRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		VolumeID:       c.Param("volume_id"),
 		SnapshotID:     c.Param("snapshot_id"),
 		IdempotencyKey: req.IdempotencyKey,
@@ -580,17 +837,17 @@ func (api *storageAPI) createVolumeFromSnapshot(ctx context.Context, c *app.Requ
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("volume.create_from_snapshot", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("volume.create_from_snapshot", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) setVolumeAutoSnapshotPolicy(ctx context.Context, c *app.RequestContext) {
 	var req storageVolumeAutoSnapshotPolicyUpdateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid auto snapshot policy request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid auto snapshot policy request")
 		return
 	}
 	record, err := api.service.SetVolumeAutoSnapshotPolicy(ctx, ports.StorageVolumeAutoSnapshotPolicyUpdateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		VolumeID:       c.Param("volume_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Enabled:        req.Enabled,
@@ -605,7 +862,7 @@ func (api *storageAPI) setVolumeAutoSnapshotPolicy(ctx context.Context, c *app.R
 }
 
 func (api *storageAPI) getVolumeOSInitGuide(ctx context.Context, c *app.RequestContext) {
-	guide, err := api.service.GetVolumeOSInitGuide(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("volume_id")})
+	guide, err := api.service.GetVolumeOSInitGuide(ctx, ports.StorageResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("volume_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -616,11 +873,11 @@ func (api *storageAPI) getVolumeOSInitGuide(ctx context.Context, c *app.RequestC
 func (api *storageAPI) completeVolumeOSInit(ctx context.Context, c *app.RequestContext) {
 	var req storageVolumeOSInitCompleteRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid os init complete request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid os init complete request")
 		return
 	}
 	record, err := api.service.CompleteVolumeOSInit(ctx, ports.VolumeOSInitCompleteRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		VolumeID:       c.Param("volume_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Mode:           req.Mode,
@@ -635,11 +892,11 @@ func (api *storageAPI) completeVolumeOSInit(ctx context.Context, c *app.RequestC
 func (api *storageAPI) createFilesystem(ctx context.Context, c *app.RequestContext) {
 	var req storageCreateFilesystemRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid filesystem request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid filesystem request")
 		return
 	}
 	record, err := api.service.CreateFilesystem(ctx, ports.StorageFilesystemCreateRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        instanceTenantID(c),
 		IdempotencyKey:  req.IdempotencyKey,
 		Name:            req.Name,
 		Protocol:        req.Protocol,
@@ -655,29 +912,55 @@ func (api *storageAPI) createFilesystem(ctx context.Context, c *app.RequestConte
 }
 
 func (api *storageAPI) listFilesystems(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListFilesystems(ctx, ports.StorageResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListFilesystems(ctx, ports.StorageResourceListRequest{TenantID: instanceTenantID(c)})
 	if err != nil {
 		writeStorageError(c, err)
 		return
 	}
+	filterSet, wantInUse, err := storageInUseFilter(c)
+	if err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		return
+	}
+	filterSpec := storageListFilters(c)
+	consumerIndex, err := api.storageLoadConsumerIndex(ctx, instanceTenantID(c))
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
+		return
+	}
 	items := make([]storageFilesystemResponse, 0, len(records))
 	for _, record := range records {
-		items = append(items, storageFilesystemFromRecord(record))
+		if !storageMatchesFilters(record.State, filterSpec, record.FilesystemID, record.Name) {
+			continue
+		}
+		item := storageFilesystemFromRecord(record)
+		tagFilesystemConsumers(&item, consumerIndex[storageFilesystemConsumerKey(record.FilesystemID)])
+		if filterSet && item.InUse != wantInUse {
+			continue
+		}
+		items = append(items, item)
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
 }
 
 func (api *storageAPI) getFilesystem(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetFilesystem(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("filesystem_id")})
+	record, err := api.service.GetFilesystem(ctx, ports.StorageResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("filesystem_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, storageFilesystemFromRecord(record))
+	item := storageFilesystemFromRecord(record)
+	consumers, err := runtimeadapter.ListStorageConsumers(ctx, api.instanceStore, instanceTenantID(c), "filesystem", record.FilesystemID)
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
+		return
+	}
+	tagFilesystemConsumers(&item, consumers)
+	c.JSON(http.StatusOK, item)
 }
 
 func (api *storageAPI) deleteFilesystem(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteFilesystem(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("filesystem_id")})
+	record, err := api.service.DeleteFilesystem(ctx, ports.StorageResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("filesystem_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -688,11 +971,14 @@ func (api *storageAPI) deleteFilesystem(ctx context.Context, c *app.RequestConte
 func (api *storageAPI) expandFilesystem(ctx context.Context, c *app.RequestContext) {
 	var req storageFilesystemExpandRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid filesystem expand request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid filesystem expand request")
 		return
 	}
+	if req.SizeGiB == 0 && req.Capacity > 0 {
+		req.SizeGiB = req.Capacity
+	}
 	record, err := api.service.ExpandFilesystem(ctx, ports.StorageFilesystemExpandRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		FilesystemID:   c.Param("filesystem_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		SizeGiB:        req.SizeGiB,
@@ -701,17 +987,17 @@ func (api *storageAPI) expandFilesystem(ctx context.Context, c *app.RequestConte
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("filesystem.expand", "filesystem", req.IdempotencyKey, map[string]any{"filesystem": storageFilesystemFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("filesystem.expand", "filesystem", req.IdempotencyKey, map[string]any{"filesystem": storageFilesystemFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) createFilesystemMountTarget(ctx context.Context, c *app.RequestContext) {
 	var req storageFilesystemMountTargetCreateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid filesystem mount target request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid filesystem mount target request")
 		return
 	}
 	record, err := api.service.CreateFilesystemMountTarget(ctx, ports.FilesystemMountTargetCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		FilesystemID:   c.Param("filesystem_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		SubnetID:       req.SubnetID,
@@ -721,17 +1007,17 @@ func (api *storageAPI) createFilesystemMountTarget(ctx context.Context, c *app.R
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("filesystem.mount_target.create", "filesystem_mount_target", req.IdempotencyKey, map[string]any{"mount_target": storageMountTargetFromRecord(record)}, record.CreatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("filesystem.mount_target.create", "filesystem_mount_target", req.IdempotencyKey, map[string]any{"mount_target": storageMountTargetFromRecord(record)}, record.CreatedAt))
 }
 
 func (api *storageAPI) mountFilesystem(ctx context.Context, c *app.RequestContext) {
 	var req storageFilesystemMountRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid filesystem mount request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid filesystem mount request")
 		return
 	}
 	record, err := api.service.MountFilesystem(ctx, ports.StorageFilesystemMountRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		FilesystemID:   c.Param("filesystem_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		InstanceID:     req.InstanceID,
@@ -743,17 +1029,17 @@ func (api *storageAPI) mountFilesystem(ctx context.Context, c *app.RequestContex
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("filesystem.mount", "filesystem", req.IdempotencyKey, map[string]any{"filesystem": storageFilesystemFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("filesystem.mount", "filesystem", req.IdempotencyKey, map[string]any{"filesystem": storageFilesystemFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) unmountFilesystem(ctx context.Context, c *app.RequestContext) {
 	var req storageFilesystemUnmountRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid filesystem unmount request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid filesystem unmount request")
 		return
 	}
 	record, err := api.service.UnmountFilesystem(ctx, ports.StorageFilesystemUnmountRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		FilesystemID:   c.Param("filesystem_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		InstanceID:     req.InstanceID,
@@ -762,11 +1048,11 @@ func (api *storageAPI) unmountFilesystem(ctx context.Context, c *app.RequestCont
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("filesystem.unmount", "filesystem", req.IdempotencyKey, map[string]any{"filesystem": storageFilesystemFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("filesystem.unmount", "filesystem", req.IdempotencyKey, map[string]any{"filesystem": storageFilesystemFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) getFilesystemMountCommand(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetFilesystemMountCommand(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("filesystem_id")})
+	record, err := api.service.GetFilesystemMountCommand(ctx, ports.StorageResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("filesystem_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -777,11 +1063,11 @@ func (api *storageAPI) getFilesystemMountCommand(ctx context.Context, c *app.Req
 func (api *storageAPI) createObject(ctx context.Context, c *app.RequestContext) {
 	var req storageCreateObjectRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid object request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid object request")
 		return
 	}
 	record, err := api.service.CreateObject(ctx, ports.StorageObjectCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Bucket:         req.Bucket,
 		Key:            req.Key,
@@ -797,7 +1083,7 @@ func (api *storageAPI) createObject(ctx context.Context, c *app.RequestContext) 
 
 func (api *storageAPI) listBucketObjects(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.ListBucketObjects(ctx, ports.StorageBucketObjectListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		BucketID: c.Param("bucket_id"),
 		Prefix:   c.Query("prefix"),
 		Limit:    queryInt(c, "limit", 0),
@@ -822,11 +1108,11 @@ func (api *storageAPI) listBucketObjects(ctx context.Context, c *app.RequestCont
 func (api *storageAPI) deleteBucketObject(ctx context.Context, c *app.RequestContext) {
 	key := c.Query("key")
 	if key == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "key is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "key is required")
 		return
 	}
 	result, err := api.service.DeleteBucketObject(ctx, ports.StorageBucketObjectDeleteRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		BucketID: c.Param("bucket_id"),
 		Key:      key,
 	})
@@ -844,11 +1130,11 @@ func (api *storageAPI) deleteBucketObject(ctx context.Context, c *app.RequestCon
 func (api *storageAPI) uploadBucketObject(ctx context.Context, c *app.RequestContext) {
 	var req storageBucketObjectUploadRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid bucket object upload request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid bucket object upload request")
 		return
 	}
 	record, err := api.service.CreateStorageObjectUpload(ctx, ports.StorageObjectUploadRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		BucketID:       c.Param("bucket_id"),
 		Key:            req.Key,
@@ -866,11 +1152,11 @@ func (api *storageAPI) uploadBucketObject(ctx context.Context, c *app.RequestCon
 func (api *storageAPI) createBucketPrefix(ctx context.Context, c *app.RequestContext) {
 	var req storageBucketPrefixCreateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid bucket prefix request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid bucket prefix request")
 		return
 	}
 	entry, err := api.service.CreateBucketPrefix(ctx, ports.StorageBucketPrefixCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		BucketID:       c.Param("bucket_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Prefix:         req.Prefix,
@@ -885,11 +1171,11 @@ func (api *storageAPI) createBucketPrefix(ctx context.Context, c *app.RequestCon
 func (api *storageAPI) generateBucketObjectPresignedURL(ctx context.Context, c *app.RequestContext) {
 	var req storageBucketPresignedURLRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid presigned url request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid presigned url request")
 		return
 	}
 	record, err := api.service.GenerateBucketObjectPresignedURL(ctx, ports.StorageBucketPresignedURLRequest{
-		TenantID:     demoTenantID(c),
+		TenantID:     instanceTenantID(c),
 		BucketID:     c.Param("bucket_id"),
 		Key:          req.Key,
 		Method:       req.Method,
@@ -905,11 +1191,11 @@ func (api *storageAPI) generateBucketObjectPresignedURL(ctx context.Context, c *
 func (api *storageAPI) setStorageBucketACL(ctx context.Context, c *app.RequestContext) {
 	var req storageBucketACLUpdateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid bucket acl request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid bucket acl request")
 		return
 	}
 	record, err := api.service.SetStorageBucketACL(ctx, ports.StorageBucketACLUpdateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		BucketID:       c.Param("bucket_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		ACL:            req.ACL,
@@ -924,11 +1210,11 @@ func (api *storageAPI) setStorageBucketACL(ctx context.Context, c *app.RequestCo
 func (api *storageAPI) setStorageBucketClass(ctx context.Context, c *app.RequestContext) {
 	var req storageBucketClassUpdateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid bucket storage class request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid bucket storage class request")
 		return
 	}
 	record, err := api.service.SetStorageBucketClass(ctx, ports.StorageBucketClassUpdateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		BucketID:       c.Param("bucket_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		StorageClass:   req.StorageClass,
@@ -942,7 +1228,7 @@ func (api *storageAPI) setStorageBucketClass(ctx context.Context, c *app.Request
 
 func (api *storageAPI) listStorageBucketLifecycleRules(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.ListStorageBucketLifecycleRules(ctx, ports.StorageResourceGetRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   instanceTenantID(c),
 		ResourceID: c.Param("bucket_id"),
 	})
 	if err != nil {
@@ -959,7 +1245,7 @@ func (api *storageAPI) listStorageBucketLifecycleRules(ctx context.Context, c *a
 func (api *storageAPI) setStorageBucketLifecycleRules(ctx context.Context, c *app.RequestContext) {
 	var req storageBucketLifecycleRulesUpdateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid lifecycle rules request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid lifecycle rules request")
 		return
 	}
 	rules := make([]ports.StorageBucketLifecycleRule, 0, len(req.Rules))
@@ -974,7 +1260,7 @@ func (api *storageAPI) setStorageBucketLifecycleRules(ctx context.Context, c *ap
 		})
 	}
 	result, err := api.service.SetStorageBucketLifecycleRules(ctx, ports.StorageBucketLifecycleRulesUpdateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		BucketID:       c.Param("bucket_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Rules:          rules,
@@ -993,11 +1279,11 @@ func (api *storageAPI) setStorageBucketLifecycleRules(ctx context.Context, c *ap
 func (api *storageAPI) createStorageBucketLifecycleRule(ctx context.Context, c *app.RequestContext) {
 	var req storageBucketLifecycleRuleCreateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid lifecycle rule request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid lifecycle rule request")
 		return
 	}
 	rule, err := api.service.CreateStorageBucketLifecycleRule(ctx, ports.StorageBucketLifecycleRuleCreateRequest{
-		TenantID:         demoTenantID(c),
+		TenantID:         instanceTenantID(c),
 		BucketID:         c.Param("bucket_id"),
 		IdempotencyKey:   req.IdempotencyKey,
 		Name:             req.Name,
@@ -1015,7 +1301,7 @@ func (api *storageAPI) createStorageBucketLifecycleRule(ctx context.Context, c *
 
 func (api *storageAPI) deleteStorageBucketLifecycleRule(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.DeleteStorageBucketLifecycleRule(ctx, ports.StorageBucketLifecycleRuleDeleteRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		BucketID: c.Param("bucket_id"),
 		RuleID:   c.Param("rule_id"),
 	})
@@ -1031,20 +1317,24 @@ func (api *storageAPI) deleteStorageBucketLifecycleRule(ctx context.Context, c *
 }
 
 func (api *storageAPI) listObjects(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListObjects(ctx, ports.StorageResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListObjects(ctx, ports.StorageResourceListRequest{TenantID: instanceTenantID(c)})
 	if err != nil {
 		writeStorageError(c, err)
 		return
 	}
+	filterSpec := storageListFilters(c)
 	items := make([]storageObjectResponse, 0, len(records))
 	for _, record := range records {
+		if !storageMatchesFilters(record.State, filterSpec, record.ObjectID, record.Bucket, record.Key) {
+			continue
+		}
 		items = append(items, storageObjectFromRecord(record))
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
 }
 
 func (api *storageAPI) getObject(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetObject(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("object_id")})
+	record, err := api.service.GetObject(ctx, ports.StorageResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("object_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -1053,7 +1343,7 @@ func (api *storageAPI) getObject(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *storageAPI) deleteObject(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteObject(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("object_id")})
+	record, err := api.service.DeleteObject(ctx, ports.StorageResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("object_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -1064,15 +1354,16 @@ func (api *storageAPI) deleteObject(ctx context.Context, c *app.RequestContext) 
 func (api *storageAPI) createStorageBucket(ctx context.Context, c *app.RequestContext) {
 	var req storageCreateBucketRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid bucket request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid bucket request")
 		return
 	}
 	record, err := api.service.CreateStorageBucket(ctx, ports.StorageBucketCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		Region:         req.Region,
 		AccessMode:     req.AccessMode,
+		StorageClass:   req.StorageClass,
 	})
 	if err != nil {
 		writeStorageError(c, err)
@@ -1082,26 +1373,39 @@ func (api *storageAPI) createStorageBucket(ctx context.Context, c *app.RequestCo
 }
 
 func (api *storageAPI) listStorageBuckets(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListStorageBuckets(ctx, ports.StorageResourceListRequest{
-		TenantID: demoTenantID(c),
-		Limit:    queryInt(c, "limit", 20),
-		Cursor:   c.Query("cursor"),
-	})
+	records, err := api.service.ListStorageBuckets(ctx, ports.StorageResourceListRequest{TenantID: instanceTenantID(c)})
 	if err != nil {
 		writeStorageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, storageBucketListFromRecords(records))
+	filterSpec := storageListFilters(c)
+	items := make([]storageBucketResponse, 0, len(records))
+	for _, record := range records {
+		if !storageMatchesFilters(record.State, filterSpec, record.BucketID, record.Name) {
+			continue
+		}
+		items = append(items, storageBucketFromRecord(record))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
+func (api *storageAPI) deleteStorageBucket(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.DeleteStorageBucket(ctx, ports.StorageResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("bucket_id")})
+	if err != nil {
+		writeStorageError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, storageBucketFromRecord(record))
 }
 
 func (api *storageAPI) uploadStorageObject(ctx context.Context, c *app.RequestContext) {
 	var req storageObjectUploadRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid object upload request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid object upload request")
 		return
 	}
 	record, err := api.service.CreateStorageObjectUpload(ctx, ports.StorageObjectUploadRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		BucketID:       req.BucketID,
 		Key:            req.Key,
@@ -1118,7 +1422,7 @@ func (api *storageAPI) uploadStorageObject(ctx context.Context, c *app.RequestCo
 
 func (api *storageAPI) downloadStorageObject(ctx context.Context, c *app.RequestContext) {
 	record, err := api.service.GetStorageObjectDownload(ctx, ports.StorageObjectDownloadRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		ObjectID:       c.Param("object_id"),
 		ExpiresSeconds: queryInt(c, "expires_seconds", 3600),
 	})
@@ -1129,14 +1433,32 @@ func (api *storageAPI) downloadStorageObject(ctx context.Context, c *app.Request
 	c.JSON(http.StatusOK, storageObjectDownloadFromRecord(record))
 }
 
+func (api *storageAPI) completeStorageObject(ctx context.Context, c *app.RequestContext) {
+	var req storageObjectCompleteRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid storage object complete request")
+		return
+	}
+	record, err := api.service.CompleteStorageObject(ctx, ports.StorageObjectCompleteRequest{
+		TenantID:       instanceTenantID(c),
+		ObjectID:       c.Param("object_id"),
+		IdempotencyKey: req.IdempotencyKey,
+	})
+	if err != nil {
+		writeStorageError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, storageObjectFromRecord(record))
+}
+
 func (api *storageAPI) createVolumeSnapshot(ctx context.Context, c *app.RequestContext) {
 	var req storageCreateSnapshotRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid snapshot request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid snapshot request")
 		return
 	}
 	record, err := api.service.CreateVolumeSnapshot(ctx, ports.VolumeSnapshotCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		VolumeID:       c.Param("volume_id"),
 		Name:           req.Name,
@@ -1153,7 +1475,7 @@ func (api *storageAPI) createVolumeSnapshot(ctx context.Context, c *app.RequestC
 
 func (api *storageAPI) listVolumeSnapshots(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListVolumeSnapshots(ctx, ports.VolumeSnapshotListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		VolumeID: c.Param("volume_id"),
 	})
 	if err != nil {
@@ -1169,7 +1491,7 @@ func (api *storageAPI) listVolumeSnapshots(ctx context.Context, c *app.RequestCo
 
 func (api *storageAPI) listFilesystemMountTargets(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListFilesystemMountTargets(ctx, ports.FilesystemMountTargetListRequest{
-		TenantID:     demoTenantID(c),
+		TenantID:     instanceTenantID(c),
 		FilesystemID: c.Param("filesystem_id"),
 	})
 	if err != nil {
@@ -1196,6 +1518,7 @@ func storageVolumeFromRecord(record ports.StorageVolumeRecord) storageVolumeResp
 		StorageClass:    record.StorageClass,
 		Zone:            record.Zone,
 		VolumeType:      record.VolumeType,
+		VolumeMode:      record.VolumeMode,
 		IOPS:            record.IOPS,
 		Encrypted:       record.Encrypted,
 		MountInstanceID: record.MountInstanceID,
@@ -1210,6 +1533,8 @@ func storageVolumeFromRecord(record ports.StorageVolumeRecord) storageVolumeResp
 		OSInitStatus:     record.OSInitStatus,
 		OSInitDevice:     record.OSInitDevice,
 		MountHistory:     history,
+		InUse:            false,
+		UsedBy:           []storageConsumerResponse{},
 		FromSnapshotID:   record.FromSnapshotID,
 		FromSnapshotName: record.FromSnapshotName,
 		State:            string(record.State),
@@ -1259,6 +1584,8 @@ func storageFilesystemFromRecord(record ports.StorageFilesystemRecord) storageFi
 		Mounts:            record.Mounts,
 		MountCommand:      record.MountCommand,
 		AttachedInstances: attachments,
+		InUse:             false,
+		UsedBy:            []storageConsumerResponse{},
 		State:             string(record.State),
 		Reason:            record.Reason,
 		DevProfile:        localCoreDevProfile("local-storage-service", "Core dev/local profile; provider execution is gated separately"),
@@ -1425,10 +1752,15 @@ func storageCompletedTask(taskType string, resourceType string, idempotencyKey s
 	}
 }
 
-func storageWriteAcceptedTask(c *app.RequestContext, task storageSnapshotTaskResponse) {
-	storeCompletedTask(demoTenantID(c), task)
-	c.Response.Header.Set("Location", "/api/v1/tasks/"+task.ID)
-	c.JSON(http.StatusAccepted, task)
+func storageWriteAcceptedTask(ctx context.Context, c *app.RequestContext, store ports.AsyncTaskStore, task storageSnapshotTaskResponse) {
+	created, _, err := store.Create(ctx, taskRecordFromResponse(instanceTenantID(c), task))
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "TASK_PERSIST_FAILED", err.Error())
+		return
+	}
+	response := taskResponseFromRecord(created)
+	c.Response.Header.Set("Location", "/api/v1/tasks/"+response.ID)
+	c.JSON(http.StatusAccepted, response)
 }
 
 func stringPtrOrNil(value string) *string {
@@ -1454,14 +1786,16 @@ func storageMountTargetFromRecord(record ports.FilesystemMountTargetRecord) stor
 func writeStorageError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrNotFound):
-		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrConflict):
-		writeDemoError(c, http.StatusConflict, "CONFLICT", err.Error())
+		writeInstanceError(c, http.StatusConflict, "CONFLICT", err.Error())
+	case errors.Is(err, ports.ErrFailedPrecondition):
+		writeInstanceError(c, http.StatusPreconditionFailed, "PRECONDITION_FAILED", err.Error())
 	case errors.Is(err, ports.ErrUnsupported):
-		writeDemoError(c, http.StatusBadRequest, "UNSUPPORTED", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "UNSUPPORTED", err.Error())
 	case errors.Is(err, ports.ErrInvalid):
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 }

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -61,8 +62,105 @@ func TestMetadataOperationStoreRecordOperationUsesAtomicIdempotencyInsert(t *tes
 	}
 }
 
+func TestMetadataOperationStorePersistsAndReadsStepTaskCorrelation(t *testing.T) {
+	started := time.Unix(200, 0)
+	completed := time.Unix(201, 0)
+	tx := &fakeOperationMetadataTx{stepRows: fakeRows{values: [][]any{{
+		"provision_volume", "succeeded", "done", "task-a", "volume", "volume-a",
+		started, completed, completed,
+	}}}}
+	store := NewMetadataOperationStore(fakeOperationMetadataStore{tx: tx})
+	step := ports.WorkloadOperationStep{
+		StepName: "provision_volume", TaskID: "task-a", ResourceType: "volume", ResourceID: "volume-a",
+	}
+	if _, err := store.AddOperationStep(context.Background(), "00000000-0000-4000-8000-000000000001", step); err != nil {
+		t.Fatalf("AddOperationStep() error = %v", err)
+	}
+	if len(tx.execSQL) != 1 ||
+		!strings.Contains(tx.execSQL[0], "task_id") ||
+		!strings.Contains(tx.execSQL[0], "resource_type") ||
+		!strings.Contains(tx.execSQL[0], "resource_id") {
+		t.Fatalf("step insert SQL = %q, want task correlation columns", tx.execSQL)
+	}
+	steps, err := store.listSteps(context.Background(), "00000000-0000-4000-8000-000000000001")
+	if err != nil {
+		t.Fatalf("listSteps() error = %v", err)
+	}
+	if len(steps) != 1 || steps[0].TaskID != "task-a" || steps[0].ResourceType != "volume" || steps[0].ResourceID != "volume-a" {
+		t.Fatalf("steps = %+v, want persisted task correlation", steps)
+	}
+}
+
+// Bug-3 回归：LocalOperationStore 分页 total 应为全量、next_cursor 非空，且可用 cursor 翻页。
+func TestLocalOperationStoreListOperationsPagination(t *testing.T) {
+	store := NewLocalOperationStore()
+	for i := 0; i < 25; i++ {
+		if _, _, err := store.RecordOperation(context.Background(), ports.WorkloadOperationRecord{
+			TenantID:       "tenant-a",
+			InstanceID:     "inst-abc",
+			Operation:      ports.WorkloadLifecycleStart,
+			RequestedBy:    "user-a",
+			IdempotencyKey: fmt.Sprintf("idem-%02d", i),
+			CreatedAt:      time.Unix(int64(100+i), 0),
+		}); err != nil {
+			t.Fatalf("RecordOperation(%d) error = %v", i, err)
+		}
+	}
+
+	first, err := store.ListOperations(context.Background(), ports.WorkloadOperationListRequest{
+		TenantID: "tenant-a", InstanceID: "inst-abc", Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperations() error = %v", err)
+	}
+	if len(first.Items) != 10 {
+		t.Fatalf("first page items = %d, want 10", len(first.Items))
+	}
+	// 全量 total，而非当页条数。
+	if first.Total != 25 {
+		t.Fatalf("first.Total = %d, want full 25", first.Total)
+	}
+	if first.NextCursor == "" {
+		t.Fatalf("first.NextCursor = %q, want non-empty when more records", first.NextCursor)
+	}
+
+	second, err := store.ListOperations(context.Background(), ports.WorkloadOperationListRequest{
+		TenantID: "tenant-a", InstanceID: "inst-abc", Limit: 10, Cursor: first.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("ListOperations(page2) error = %v", err)
+	}
+	if len(second.Items) != 10 {
+		t.Fatalf("second page items = %d, want 10", len(second.Items))
+	}
+	if second.Total != 25 {
+		t.Fatalf("second.Total = %d, want full 25", second.Total)
+	}
+	if second.NextCursor == "" {
+		t.Fatalf("second.NextCursor = %q, want non-empty", second.NextCursor)
+	}
+
+	last, err := store.ListOperations(context.Background(), ports.WorkloadOperationListRequest{
+		TenantID: "tenant-a", InstanceID: "inst-abc", Limit: 10, Cursor: second.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("ListOperations(page3) error = %v", err)
+	}
+	if len(last.Items) != 5 {
+		t.Fatalf("last page items = %d, want 5", len(last.Items))
+	}
+	if last.Total != 25 {
+		t.Fatalf("last.Total = %d, want full 25", last.Total)
+	}
+	if last.NextCursor != "" {
+		t.Fatalf("last.NextCursor = %q, want empty at end", last.NextCursor)
+	}
+}
+
 type fakeOperationMetadataTx struct {
 	queries    []string
+	execSQL    []string
+	execArgs   [][]any
 	insertRows fakeRows
 	stepRows   fakeRows
 }
@@ -83,7 +181,9 @@ func (s fakeOperationMetadataStore) WithPlatformTx(ctx context.Context, fn func(
 	return fn(ctx, s.tx)
 }
 
-func (tx *fakeOperationMetadataTx) Exec(context.Context, string, ...any) (ports.CommandTag, error) {
+func (tx *fakeOperationMetadataTx) Exec(_ context.Context, sql string, args ...any) (ports.CommandTag, error) {
+	tx.execSQL = append(tx.execSQL, sql)
+	tx.execArgs = append(tx.execArgs, args)
 	return ports.CommandTag{RowsAffected: 1}, nil
 }
 
@@ -133,12 +233,19 @@ func assignScanValues(dest []any, values []any) error {
 		switch ptr := target.(type) {
 		case *string:
 			*ptr = values[i].(string)
+		case *int:
+			*ptr = values[i].(int)
+		case *ports.NetworkResourceState:
+			*ptr = ports.NetworkResourceState(values[i].(string))
 		case *[]byte:
 			*ptr = values[i].([]byte)
 		case *bool:
 			*ptr = values[i].(bool)
 		case *time.Time:
 			*ptr = values[i].(time.Time)
+		case **time.Time:
+			value := values[i].(time.Time)
+			*ptr = &value
 		default:
 			return ports.ErrUnsupported
 		}

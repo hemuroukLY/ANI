@@ -40,8 +40,15 @@ allowed:
   - path: services/auth-service/internal/service/auth_service.go
     coupling_level: bounded_direct
     imports:
+      - github.com/jackc/pgx/v5
       - github.com/jackc/pgx/v5/pgxpool
     reason: auth service currently wires a bounded API key persistence module that owns PostgreSQL/RLS access
+  - path: services/auth-service/internal/service/permissions.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: V2 permission store is a bounded auth metadata module; direct pgx keeps authoritative permission reads and tenant RLS semantics explicit
   - path: services/auth-service/internal/service/token_blocklist.go
     coupling_level: bounded_direct
     imports:
@@ -60,6 +67,11 @@ allowed:
       - github.com/jackc/pgx/v5
       - github.com/jackc/pgx/v5/pgxpool
     reason: OIDC callback persists users, role mappings, and refresh tokens in a bounded auth metadata module
+  - path: services/metering-service/internal/service/metering_collection_service.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: Metering collection service is a bounded persistence module; direct pgxpool keeps BYPASSRLS writes and ON CONFLICT idempotency explicit for metering_usage_records
   - path: services/task-service/internal/service/task_service.go
     coupling_level: bounded_direct
     imports:
@@ -82,3 +94,115 @@ allowed:
     imports:
       - github.com/jackc/pgx/v5/pgxpool
     reason: model service currently wires a bounded model repository that owns PostgreSQL/RLS access
+  - path: services/model-service/internal/repo/import_repo.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+    reason: remote model-import task repository is a bounded PostgreSQL persistence adapter; direct pgx keeps tenant RLS and atomic task/model creation explicit
+  - path: services/model-service/internal/repo/import_worker_repo.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: remote model-import worker repository owns lease/fencing and finalization transactions; direct pgx keeps RLS and idempotent state transitions explicit
+  - path: services/model-service/internal/importer/worker.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: remote model-import worker transaction boundary is a bounded persistence orchestration adapter; pgxpool is retained only for explicit lease/finalization wiring
+  - path: services/inference-service/internal/repository/postgres.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgconn
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: inference-service PostgreSQL repository is a bounded persistence adapter; direct pgx keeps tenant RLS transactions, advisory idempotency locking, generation CAS, and SKIP LOCKED operation leases explicit
+  - path: services/inference-service/internal/adapter/redis/rate_limiter.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/redis/go-redis/v9
+    reason: inference-service Redis rate-limiter adapter implements the service-owned RateLimiter port; provider types remain inside the bounded adapter and do not leak into access-policy business code
+  - path: services/tenant-service/internal/repo/adapters/postgres/tenant_plan_store.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgconn
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: tenant plan repository is a bounded persistence module; direct pgx keeps PostgreSQL/RLS transactions explicit and maps unique/FK/not-found to domain errors
+  - path: services/tenant-service/internal/repo/adapters/postgres/audit_store.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: tenant plan audit repository is a bounded persistence module; direct pgx keeps audit-log writes and RLS rows explicit
+  - path: services/platform-settings-service/internal/repo/adapters/postgres/platform_admin_audit_store.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: platform admin audit repository is a bounded persistence module; direct pgxpool keeps audit-log writes explicit without Core SQL on users/roles
+  - path: services/tenant-service/internal/repo/adapters/postgres/tenant_store.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: tenant quota-change repository is a bounded persistence module; direct pgx keeps PostgreSQL/RLS transactions and row scanning explicit
+  - path: services/tenant-service/internal/repo/adapters/postgres/tenant_admin_store.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgconn
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: tenant admin invitation repository is a bounded persistence module; direct pgx keeps invitation/audit SQL and unique/FK mapping explicit
+  # ── kb-service: asyncpg direct PG (bounded_direct, RLS explicit) ──────────
+  - path: services/kb-service/main.py
+    coupling_level: bounded_direct
+    imports:
+      - asyncpg
+    reason: kb-service owns a bounded persistence module for 7 KB tables; direct asyncpg keeps RLS tenant context and multi-table atomic transactions (outbox/session+message) explicit
+  - path: services/kb-service/app/api/grpc_server.py
+    coupling_level: bounded_direct
+    imports:
+      - asyncpg
+    reason: kb-service gRPC servicer uses explicit PostgreSQL transactions for multi-table atomic writes (NotifyDocumentUploaded outbox fold, Query session+message fold)
+  - path: services/kb-service/app/repositories/knowledge_base.py
+    coupling_level: bounded_direct
+    imports:
+      - asyncpg
+    reason: knowledge_bases repository is a bounded persistence module; direct asyncpg keeps RLS-scoped CRUD explicit
+  - path: services/kb-service/app/repositories/document.py
+    coupling_level: bounded_direct
+    imports:
+      - asyncpg
+    reason: kb_documents repository is a bounded persistence module; direct asyncpg keeps parse_status lifecycle writes and RLS explicit
+  - path: services/kb-service/app/repositories/chunk.py
+    coupling_level: bounded_direct
+    imports:
+      - asyncpg
+    reason: kb_chunks repository is a bounded persistence module; direct asyncpg keeps pg_trgm keyword search and GIN index semantics explicit
+  - path: services/kb-service/app/repositories/message.py
+    coupling_level: bounded_direct
+    imports:
+      - asyncpg
+    reason: kb_messages/kb_sessions repository is a bounded persistence module; direct asyncpg keeps session+message atomic writes and RLS explicit
+  - path: services/kb-service/app/repositories/async_task.py
+    coupling_level: bounded_direct
+    imports:
+      - asyncpg
+    reason: async_tasks repository is a bounded persistence module; direct asyncpg keeps idempotency-key atomic UPSERT explicit
+  - path: services/kb-service/app/repositories/outbox.py
+    coupling_level: bounded_direct
+    imports:
+      - asyncpg
+    reason: outbox_events repository is a bounded persistence module; direct asyncpg keeps cross-tenant event scanning and RLS bypass explicit
+  - path: services/kb-service/app/outbox/dispatcher.py
+    coupling_level: bounded_direct
+    imports:
+      - asyncpg
+    reason: outbox dispatcher is a bounded platform worker that must read cross-tenant unpublished events transactionally
+  - path: services/kb-service/app/repositories/rls.py
+    coupling_level: bounded_direct
+    imports:
+      - asyncpg
+    reason: RLS tenant context helper is PostgreSQL-specific platform metadata plumbing and must remain explicit for stability
+  # rag-engine temporary_exception and bounded_direct entries removed in Issue #039
+  # (RAG refactor Step 11 — delete old path). rag-engine is now a stateless gRPC
+  # engine with zero infrastructure SDK dependencies (no pymilvus/asyncpg/nats-py/minio).

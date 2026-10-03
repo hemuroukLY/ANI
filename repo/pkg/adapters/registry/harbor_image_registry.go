@@ -3,6 +3,7 @@ package registry
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,14 +18,17 @@ import (
 
 const defaultHarborRequestTimeout = 10 * time.Second
 
+const harborPurposeLabelPrefix = "ani-purpose-"
+
 type HarborImageRegistryConfig struct {
-	Endpoint         string
-	Username         string
-	Password         string
-	HTTPClient       *http.Client
-	RequestTimeout   time.Duration
-	PullSecretWriter ports.RegistryPullSecretWriter
-	ReferenceReader  ports.RegistryImageReferenceReader
+	Endpoint           string
+	Username           string
+	Password           string
+	HTTPClient         *http.Client
+	RequestTimeout     time.Duration
+	InsecureSkipVerify bool
+	PullSecretWriter   ports.RegistryPullSecretWriter
+	ReferenceReader    ports.RegistryImageReferenceReader
 }
 
 type HarborImageRegistry struct {
@@ -53,6 +57,11 @@ func NewHarborImageRegistry(config HarborImageRegistryConfig) (*HarborImageRegis
 	client := config.HTTPClient
 	if client == nil {
 		client = &http.Client{}
+		if config.InsecureSkipVerify {
+			client.Transport = &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // intentional for lab/self-signed Harbor
+			}
+		}
 	}
 	clientCopy := *client
 	if config.RequestTimeout > 0 {
@@ -377,6 +386,7 @@ func (r *HarborImageRegistry) ListImages(ctx context.Context, request ports.Regi
 		repositories = result.Items
 	}
 	registryHost := harborRegistryHost(r.endpoint)
+	keyword := strings.ToLower(strings.TrimSpace(request.Keyword))
 	items := []ports.RegistryImage{}
 	for _, repository := range repositories {
 		artifacts, err := r.ListArtifacts(ctx, ports.RegistryArtifactListRequest{TenantID: request.TenantID, Project: project, Repository: repository.Name})
@@ -385,13 +395,19 @@ func (r *HarborImageRegistry) ListImages(ctx context.Context, request ports.Regi
 		}
 		for _, artifact := range artifacts.Items {
 			for _, tag := range artifact.Tags {
+				if keyword != "" && !registryMatchesImageKeyword(repository.Name, tag, keyword) {
+					continue
+				}
 				if requestedTag := strings.TrimSpace(request.Tag); requestedTag != "" && requestedTag != tag {
 					continue
 				}
 				if request.ScanStatus != "" && request.ScanStatus != artifact.ScanStatus.Status {
 					continue
 				}
-				purpose := registryImagePurpose(repository.Name, tag)
+				purpose := artifact.Purpose
+				if purpose == "" {
+					purpose = registryImagePurpose(repository.Name, tag)
+				}
 				if requestedPurpose := strings.TrimSpace(request.Purpose); requestedPurpose != "" && requestedPurpose != purpose {
 					continue
 				}
@@ -636,6 +652,19 @@ func registryImagePurpose(repository, tag string) string {
 	}
 }
 
+// registryMatchesImageKeyword 判断镜像行是否命中 keyword 过滤条件，
+// 匹配范围覆盖仓库名与 tag 名（loose、大小写不敏感）。
+func registryMatchesImageKeyword(repository, tag, keyword string) bool {
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	if keyword == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(repository), keyword) {
+		return true
+	}
+	return tag != "" && strings.Contains(strings.ToLower(tag), keyword)
+}
+
 func isRegistryHost(value string) bool {
 	value = strings.TrimSpace(value)
 	return value == "localhost" || strings.Contains(value, ".") || strings.Contains(value, ":")
@@ -670,21 +699,30 @@ func (r *HarborImageRegistry) ListArtifacts(ctx context.Context, request ports.R
 		return ports.RegistryArtifactListResult{}, fmt.Errorf("%w: repository is required", ports.ErrInvalid)
 	}
 	var artifacts []harborArtifact
-	path := "/api/v2.0/projects/" + url.PathEscape(strings.TrimSpace(request.Project)) + "/repositories/" + url.PathEscape(repository) + "/artifacts"
+	query := url.Values{}
+	query.Set("with_tag", "true")
+	query.Set("with_label", "true")
+	query.Set("with_scan_overview", "true")
+	path := "/api/v2.0/projects/" + url.PathEscape(strings.TrimSpace(request.Project)) + "/repositories/" + url.PathEscape(repository) + "/artifacts?" + query.Encode()
 	if err := r.getJSON(ctx, path, &artifacts); err != nil {
 		return ports.RegistryArtifactListResult{}, err
 	}
 	items := make([]ports.RegistryArtifact, 0, len(artifacts))
 	for _, artifact := range artifacts {
+		scanResult, err := artifact.scanResult(strings.TrimSpace(request.Project) + "/" + repository)
+		if err != nil {
+			return ports.RegistryArtifactListResult{}, err
+		}
 		item := ports.RegistryArtifact{
 			Project:    strings.TrimSpace(request.Project),
 			Repository: repository,
+			Purpose:    artifact.purpose(),
 			Digest:     artifact.Digest,
 			MediaType:  artifact.MediaType,
 			SizeBytes:  artifact.SizeBytes,
 			Tags:       artifact.tagNames(),
 			PushedAt:   artifact.pushedAt(),
-			ScanStatus: artifact.scanResult(strings.TrimSpace(request.Project) + "/" + repository),
+			ScanStatus: scanResult,
 			DevProfile: harborDevProfile(),
 		}
 		items = append(items, item)
@@ -697,7 +735,12 @@ type harborArtifact struct {
 	SizeBytes    int64                      `json:"size"`
 	MediaType    string                     `json:"manifest_media_type"`
 	Tags         []harborArtifactTag        `json:"tags"`
+	Labels       []harborArtifactLabel      `json:"labels"`
 	ScanOverview map[string]harborScanEntry `json:"scan_overview"`
+}
+
+type harborArtifactLabel struct {
+	Name string `json:"name"`
 }
 
 type harborArtifactTag struct {
@@ -706,8 +749,31 @@ type harborArtifactTag struct {
 }
 
 type harborScanEntry struct {
-	ScanStatus string         `json:"scan_status"`
-	Summary    map[string]int `json:"summary"`
+	ScanStatus string          `json:"scan_status"`
+	Summary    json.RawMessage `json:"summary"`
+}
+
+// parseHarborScanSummary accepts both Harbor shapes:
+// 1) flat {"Critical":1,"High":2,...}
+// 2) nested {"total":0,"fixable":0,"summary":{"Critical":1,...}}
+func parseHarborScanSummary(raw json.RawMessage) (critical, high, medium, low int, ok bool) {
+	if len(bytes.TrimSpace(raw)) == 0 || string(raw) == "null" {
+		return 0, 0, 0, 0, false
+	}
+	var envelope struct {
+		Summary  map[string]int `json:"summary"`
+		Critical int            `json:"Critical"`
+		High     int            `json:"High"`
+		Medium   int            `json:"Medium"`
+		Low      int            `json:"Low"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return 0, 0, 0, 0, false
+	}
+	if envelope.Summary != nil {
+		return envelope.Summary["Critical"], envelope.Summary["High"], envelope.Summary["Medium"], envelope.Summary["Low"], true
+	}
+	return envelope.Critical, envelope.High, envelope.Medium, envelope.Low, true
 }
 
 func (a harborArtifact) tagNames() []string {
@@ -729,12 +795,30 @@ func (a harborArtifact) pushedAt() time.Time {
 	return time.Time{}
 }
 
-func (a harborArtifact) scanResult(image string) ports.RegistryScanResult {
+func (a harborArtifact) purpose() string {
+	for _, label := range a.Labels {
+		purpose, ok := strings.CutPrefix(strings.ToLower(strings.TrimSpace(label.Name)), harborPurposeLabelPrefix)
+		if !ok {
+			continue
+		}
+		switch purpose {
+		case "container", "gpu", "sandbox", "system":
+			return purpose
+		}
+	}
+	return ""
+}
+
+func (a harborArtifact) scanResult(image string) (ports.RegistryScanResult, error) {
 	result := ports.RegistryScanResult{Image: image, Status: ports.RegistryScanNotScanned, ProviderID: "harbor-trivy", DevProfile: harborDevProfile()}
 	for _, scan := range a.ScanOverview {
+		critical, high, medium, low, summaryPresent := parseHarborScanSummary(scan.Summary)
 		switch strings.ToLower(strings.TrimSpace(scan.ScanStatus)) {
 		case "success", "complete", "finished":
 			result.Status = ports.RegistryScanComplete
+			if !summaryPresent {
+				return ports.RegistryScanResult{}, fmt.Errorf("%w: Harbor Trivy completed scan summary is unavailable", ports.ErrUnavailable)
+			}
 		case "pending":
 			result.Status = ports.RegistryScanPending
 		case "running":
@@ -742,13 +826,13 @@ func (a harborArtifact) scanResult(image string) ports.RegistryScanResult {
 		case "error", "failed":
 			result.Status = ports.RegistryScanFailed
 		}
-		result.Critical = scan.Summary["Critical"]
-		result.High = scan.Summary["High"]
-		result.Medium = scan.Summary["Medium"]
-		result.Low = scan.Summary["Low"]
+		result.Critical = critical
+		result.High = high
+		result.Medium = medium
+		result.Low = low
 		break
 	}
-	return result
+	return result, nil
 }
 
 func (r *HarborImageRegistry) getJSON(ctx context.Context, path string, target any) error {

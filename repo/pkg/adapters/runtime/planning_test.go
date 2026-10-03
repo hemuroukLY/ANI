@@ -30,6 +30,10 @@ func (fakeGPUInventory) PlanScheduling(context.Context, ports.GPUSchedulingReque
 	}, nil
 }
 
+func (fakeGPUInventory) ListSpecAvailability(context.Context, string) ([]ports.GPUSpecAvailability, error) {
+	return nil, ports.ErrUnsupported
+}
+
 func TestPlanningRuntimeCreatesVMWithDefaultPlanesAndRootDisk(t *testing.T) {
 	runtime := NewPlanningRuntime(WithClock(func() time.Time {
 		return time.Unix(100, 0)
@@ -67,6 +71,27 @@ func TestPlanningRuntimeCreatesVMWithDefaultPlanesAndRootDisk(t *testing.T) {
 	}
 	if len(status.Storage) != 1 || status.Storage[0].Kind != ports.StorageAttachmentRootDisk {
 		t.Fatalf("storage = %+v, want root disk", status.Storage)
+	}
+}
+
+func TestPlanningRuntimeInstanceIDsDoNotRepeatAcrossRuntimeRestarts(t *testing.T) {
+	spec := ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "app",
+		Kind:     ports.WorkloadKindContainer,
+		Image:    "harbor/app:1",
+	}
+
+	first, err := NewPlanningRuntime().Create(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("first Create() error = %v", err)
+	}
+	second, err := NewPlanningRuntime().Create(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("second Create() error = %v", err)
+	}
+	if first.InstanceID == second.InstanceID {
+		t.Fatalf("instance IDs repeated across runtime restarts: %q", first.InstanceID)
 	}
 }
 
@@ -118,6 +143,23 @@ func TestPlanningRuntimePlansGPUContainerWithInventory(t *testing.T) {
 	}
 	if status.State != ports.WorkloadStateRunning {
 		t.Fatalf("state = %s, want %s", status.State, ports.WorkloadStateRunning)
+	}
+}
+
+func TestPlanningRuntimeAllowsInferenceWithoutGPU(t *testing.T) {
+	runtime := NewPlanningRuntime()
+
+	ref, err := runtime.Create(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "inference-cpu",
+		Kind:     ports.WorkloadKindInference,
+		Image:    "harbor/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if ref.InstanceID == "" {
+		t.Fatal("expected inference workload id")
 	}
 }
 

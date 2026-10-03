@@ -2,45 +2,6 @@ version: 1
 status: accepted_baseline
 owner: ANI Services 团队
 exceptions:
-  - operation_id: listModels
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: createModel
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: importModel
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: getModel
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: deleteModel
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: createModelVersion
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: listInferenceServices
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: createInferenceService
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: getInferenceService
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: deleteInferenceService
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: getInferenceServiceLogs
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: testInferenceService
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: updateInferenceServicePolicies
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: listKnowledgeBases
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
@@ -51,6 +12,9 @@ exceptions:
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: deleteKnowledgeBase
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updateKnowledgeBase
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: listKnowledgeBaseDocuments
@@ -65,6 +29,9 @@ exceptions:
   - operation_id: deleteKnowledgeBaseDocument
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getKnowledgeBaseDocument
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: queryKnowledgeBase
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
@@ -77,13 +44,22 @@ exceptions:
   - operation_id: listKnowledgeBaseSessions
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listKnowledgeBaseDocumentChunks
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listKnowledgeBaseSessionMessages
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: deleteKnowledgeBaseSession
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: updateKnowledgeBasePermissions
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: reparseKnowledgeBaseDocument
+  - operation_id: getKnowledgeBasePermissions
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: getKnowledgeBaseConfig
+  - operation_id: reparseKnowledgeBaseDocument
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: updateKnowledgeBaseConfig
@@ -197,6 +173,33 @@ exceptions:
   - operation_id: createIntegrationBot
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listInferenceServices
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: createInferenceService
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: getInferenceService
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: updateInferenceService
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: deleteInferenceService
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: applyInferenceServiceLifecycle
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: getInferenceOperation
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: getInferenceServiceLogs
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: testInferenceService
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
   - operation_id: createInferenceService
     rule: async_202_requires_async_task
     reason: 当前异步部署响应仍返回 InferenceService；切换为任务响应需要 Services 团队同步实现。
@@ -224,3 +227,114 @@ exceptions:
   - operation_id: inviteTenantMember
     rule: async_202_requires_async_task
     reason: 当前遗留租户邀请接口的 202 响应仍返回 TenantMember。
+  - operation_id: listTenantPlans
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: createTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: deleteTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getTenantPlanQuotaLimits
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updateTenantPlanQuotaLimits
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: activateTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: disableTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listTenantPlanBoundTenants
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listTenantPlanAuditLogs
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: bindTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updateTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listQuotaMeta
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listBindableTenants
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listAllTenantAdmins
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: inviteTenantAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: resendTenantAdminInvitation
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getTenantAdminDetail
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: deleteTenantAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getTenantAdminRole
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updateTenantAdminRole
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: resetTenantAdminPassword
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: disableTenantAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: enableTenantAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listTenantAdminAuditLogs
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listAvailableTenantsForAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listTenantAssignableRoles
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: createPlatformAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listPlatformAdmins
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listPlatformAdminRoles
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getPlatformAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: deletePlatformAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updatePlatformAdminRole
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: resetPlatformAdminPassword
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: disablePlatformAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: enablePlatformAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listPlatformAdminAuditLogs
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。

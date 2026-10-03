@@ -60,6 +60,7 @@ type fakePasswordLoginStore struct {
 		tokenHash string
 		roles     []string
 		expiresAt time.Time
+		loginAt   time.Time
 	}
 }
 
@@ -86,7 +87,7 @@ func (s *fakePasswordLoginStore) LoadRoles(context.Context, uuid.UUID) ([]string
 
 // FinalizeLogin 模拟事务化的"插入 refresh token + 更新 last_login_at"。
 // 用 insertErr/touchErr 分别控制两步失败，保持与原测试语义一致。
-func (s *fakePasswordLoginStore) FinalizeLogin(_ context.Context, tenantID, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error {
+func (s *fakePasswordLoginStore) FinalizeLogin(_ context.Context, tenantID, userID uuid.UUID, tokenHash string, roles []string, loginAt, expiresAt time.Time) error {
 	if s.insertErr != nil {
 		return s.insertErr
 	}
@@ -95,6 +96,7 @@ func (s *fakePasswordLoginStore) FinalizeLogin(_ context.Context, tenantID, user
 	s.insertArgs.tokenHash = tokenHash
 	s.insertArgs.roles = roles
 	s.insertArgs.expiresAt = expiresAt
+	s.insertArgs.loginAt = loginAt
 	if s.touchErr != nil {
 		return s.touchErr
 	}
@@ -142,6 +144,12 @@ func TestPasswordLogin_Success(t *testing.T) {
 	}
 	if len(store.insertArgs.roles) != 1 || store.insertArgs.roles[0] != "tenant-admin" {
 		t.Fatalf("insert roles = %v", store.insertArgs.roles)
+	}
+	if !store.insertArgs.loginAt.Equal(now) {
+		t.Fatalf("loginAt = %v, want %v", store.insertArgs.loginAt, now)
+	}
+	if !store.insertArgs.expiresAt.Equal(now.Add(defaultRefreshTokenTTL)) {
+		t.Fatalf("expiresAt = %v, want %v", store.insertArgs.expiresAt, now.Add(defaultRefreshTokenTTL))
 	}
 }
 
@@ -327,6 +335,9 @@ func (b *brokenCache) SetNX(context.Context, string, []byte, time.Duration) (boo
 }
 func (b *brokenCache) Delete(context.Context, string) error { return errors.New("redis down") }
 func (b *brokenCache) Increment(context.Context, string, time.Duration) (int64, error) {
+	return 0, errors.New("redis down")
+}
+func (b *brokenCache) TTL(context.Context, string) (time.Duration, error) {
 	return 0, errors.New("redis down")
 }
 func (b *brokenCache) Exists(context.Context, string) (bool, error) {

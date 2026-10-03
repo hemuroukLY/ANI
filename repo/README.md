@@ -7,7 +7,7 @@
 ```text
 当前阶段：以 ../ANI-DOCS-INDEX.md、../ANI-06-开发计划.md Section 零和 CURRENT-SPRINT.md 为准
 当前执行：Phase 1 / Sprint 13 / Core real provider 与 live gate 收敛启动；Sprint 12 Core「Services 支撑 Handler」已完成 Tier1 local profile 收口
-并行功能流：账密登录模块已完成（Core Auth API + Console 账密 Tab + BOSS 平台登录）；PRD/SPEC 已按产品线拆分
+并行功能流：账密登录模块的 Core Auth API 已完成；Console/BOSS 前端源码由独立仓库维护
 当前执行入口：CURRENT-SPRINT.md
 全局计划入口：../ANI-06-开发计划.md
 文档导航：../ANI-DOCS-INDEX.md
@@ -23,7 +23,7 @@ repo/
 │   ├── ani-gateway/            # 统一 HTTP 入口（Core API / Services API 路由）
 │   ├── auth-service/           # Core 认证授权服务（JWT/RBAC/OIDC/API Key）
 │   ├── task-service/           # Core 异步任务/outbox/worker mutation
-│   ├── model-service/          # ANI Services 早期逻辑，不属于 Core；6.15-6.20 后按新定义删除或覆盖
+│   ├── model-service/          # ANI Services 模型仓库后端（租户隔离模型/版本与对象存储控制面）
 │   ├── kb-service/             # ANI Services 空骨架，不属于 Core；6.15-6.20 后按新定义建设
 │   └── metering-service/       # 平台计量服务骨架
 │
@@ -35,10 +35,6 @@ repo/
 ├── operators/                  # Go K8s Operator
 │   ├── inference-operator/     # InferenceService CRD Controller
 │   └── upgrade-operator/       # ANIPatch CRD Controller（在线升级）
-│
-├── frontends/                  # TypeScript 前端（需拆 Core client 与 Services client）
-│   ├── console/                # 用户控制台（React 18 + TDesign）
-│   └── boss/                   # 运营运维后台（React 18 + TDesign）
 │
 ├── cli/ani/                    # Go CLI 工具（cobra + viper）
 ├── installer/ani-installer/    # Go 安装程序（bubbletea TUI）
@@ -89,6 +85,12 @@ make validate-doc-entrypoints
 4. `../ANI-06-开发计划.md` Section 零和当前 Sprint
 5. `../ANI-05-系统架构设计.md`
 6. `api/openapi/v1.yaml` 和 `api/openapi/services/v1.yaml`
+
+运维与部署：
+
+- [七服务 Prometheus 状态对接与部署指南](docs/operations/service-runtime-observability.md)
+- [Kubernetes/Helm 部署说明](deploy/helm/ani-platform/README.md)
+- [本地 Docker 依赖环境](deploy/docker/README.md)
 
 版本管理：
 - 策略文档：`../ANI-12-版本管理策略.md`

@@ -127,6 +127,9 @@ def collect_error_codes(spec: dict[str, Any]) -> list[str]:
             match = re.search(r"code=([A-Z0-9_]+)", response.get("description", ""))
             if match:
                 codes.add(match.group(1))
+            for code in response.get("x-ani-error-codes", []):
+                if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", code):
+                    codes.add(code)
     return sorted(codes)
 
 
@@ -142,7 +145,7 @@ def write(path: Path, content: str) -> None:
             chr(9) + '"encoding/json"' + chr(10) + chr(9) + '"encoding/hex"',
             chr(9) + '"encoding/hex"' + chr(10) + chr(9) + '"encoding/json"',
         )
-    path.write_text(content, encoding="utf-8")
+    path.write_text(content, encoding="utf-8", newline="\n")
 
 
 def generated_header(comment: str) -> str:
@@ -175,6 +178,7 @@ def generate_go(root: Path, layer: str, config: dict[str, str], metadata: dict[s
 
 import (
 \t"bytes"
+\t"context"
 \t"crypto/rand"
 \t"encoding/json"
 \t"encoding/hex"
@@ -215,14 +219,16 @@ func (err APIError) Error() string {{
 }}
 
 type Client struct {{
-\tBaseURL string
-\tToken   string
+\tBaseURL    string
+\tToken      string
+\tHTTPClient *http.Client // optional; nil 时使用 http.DefaultClient（调用方应注入带 Timeout 的 client，避免改全局 DefaultClient）
 }}
 
 type RequestOptions struct {{
 \tBody    map[string]any
 \tParams  map[string]string
 \tHeaders map[string]string
+\tContext context.Context // optional; 用于取消/超时，nil 时等价 Background
 }}
 
 func NewClient(baseURL string, token string) Client {{
@@ -245,7 +251,11 @@ func (client Client) Request(method string, path string, options RequestOptions)
 \t\t}}
 \t\tbody = bytes.NewReader(payload)
 \t}}
-\treq, err := http.NewRequest(strings.ToUpper(method), requestURL, body)
+\tctx := options.Context
+\tif ctx == nil {{
+\t\tctx = context.Background()
+\t}}
+\treq, err := http.NewRequestWithContext(ctx, strings.ToUpper(method), requestURL, body)
 \tif err != nil {{
 \t\treturn nil, err
 \t}}
@@ -259,7 +269,11 @@ func (client Client) Request(method string, path string, options RequestOptions)
 \tfor key, value := range options.Headers {{
 \t\treq.Header.Set(key, value)
 \t}}
-\tresp, err := http.DefaultClient.Do(req)
+\thc := client.HTTPClient
+\tif hc == nil {{
+\t\thc = http.DefaultClient
+\t}}
+\tresp, err := hc.Do(req)
 \tif err != nil {{
 \t\treturn nil, err
 \t}}

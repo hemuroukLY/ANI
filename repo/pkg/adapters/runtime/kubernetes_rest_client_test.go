@@ -382,6 +382,79 @@ func TestKubernetesRESTClientApplyManifestsSupportsVolumeSnapshot(t *testing.T) 
 	}
 }
 
+func TestKubernetesRESTClientApplyManifestsDeletesPartialApply(t *testing.T) {
+	var methods []string
+	var paths []string
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		methods = append(methods, r.Method)
+		paths = append(paths, r.URL.Path)
+		switch {
+		case strings.Contains(r.URL.Path, "/secrets/sec-keep"):
+			return jsonResponse(http.StatusOK, `{"kind":"Secret"}`), nil
+		case strings.Contains(r.URL.Path, "/services/svc-fail"):
+			return jsonResponse(http.StatusConflict, `{"kind":"Status","reason":"AlreadyExists"}`), nil
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/namespaces/ani-tenant-tenant-a"):
+			return jsonResponse(http.StatusOK, `{"kind":"Namespace"}`), nil
+		default:
+			return jsonResponse(http.StatusInternalServerError, `{"kind":"Status","reason":"Unexpected"}`), nil
+		}
+	})
+
+	client := newTestKubernetesRESTClient(t, transport)
+	_, err := client.ApplyManifests(context.Background(), []ports.WorkloadManifest{
+		{
+			Provider: "kubernetes",
+			Kind:     "Namespace",
+			Name:     "ani-tenant-tenant-a",
+			Content: `{
+  "apiVersion": "v1",
+  "kind": "Namespace",
+  "metadata": {"name": "ani-tenant-tenant-a"}
+}`,
+		},
+		{
+			Provider: "kubernetes",
+			Kind:     "Secret",
+			Name:     "sec-keep",
+			Content: `{
+  "apiVersion": "v1",
+  "kind": "Secret",
+  "metadata": {"name": "sec-keep", "namespace": "ani-tenant-tenant-a"}
+}`,
+		},
+		{
+			Provider: "kubernetes",
+			Kind:     "Service",
+			Name:     "svc-fail",
+			Content: `{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {"name": "svc-fail", "namespace": "ani-tenant-tenant-a"},
+  "spec": {"type": "ClusterIP", "ports": [{"port": 80}]}
+}`,
+		},
+	})
+	if err == nil {
+		t.Fatal("ApplyManifests() error = nil, want partial apply failure")
+	}
+	deletedSecret := false
+	deletedNamespace := false
+	for i, method := range methods {
+		if method == http.MethodDelete && strings.Contains(paths[i], "/secrets/sec-keep") {
+			deletedSecret = true
+		}
+		if method == http.MethodDelete && strings.HasSuffix(paths[i], "/namespaces/ani-tenant-tenant-a") && !strings.Contains(paths[i], "/secrets/") && !strings.Contains(paths[i], "/services/") {
+			deletedNamespace = true
+		}
+	}
+	if !deletedSecret {
+		t.Fatalf("methods=%v paths=%v, want DELETE of applied Secret", methods, paths)
+	}
+	if deletedNamespace {
+		t.Fatalf("compensated Namespace delete: paths=%v", paths)
+	}
+}
+
 func TestKubernetesRESTClientSupportsClusterAPIMachineDeployment(t *testing.T) {
 	var gotPath string
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -461,6 +534,45 @@ func TestKubernetesRESTClientObserveDeploymentStatus(t *testing.T) {
 	}
 }
 
+func TestKubernetesRESTClientObserveClassifiesPrimaryResourceNotFound(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       int
+		wantNotFound bool
+	}{
+		{name: "not found", status: http.StatusNotFound, wantNotFound: true},
+		{name: "forbidden", status: http.StatusForbidden, wantNotFound: false},
+		{name: "too many requests", status: http.StatusTooManyRequests, wantNotFound: false},
+		{name: "server error", status: http.StatusInternalServerError, wantNotFound: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				return jsonResponse(tt.status, `{"message":"provider read failed"}`), nil
+			})
+			client := newTestKubernetesRESTClient(t, transport)
+
+			_, err := client.Observe(context.Background(), ports.WorkloadProviderStatusRequest{
+				TenantID:   "tenant-a",
+				InstanceID: "instance-a",
+				Kind:       ports.WorkloadKindContainer,
+				ApplyResult: ports.WorkloadProviderApplyResult{
+					Applied:      true,
+					Provider:     "kubernetes",
+					ResourceRefs: []string{"kubernetes/Deployment/app-01"},
+				},
+			})
+			if err == nil {
+				t.Fatal("Observe() error = nil, want provider read error")
+			}
+			if got := errors.Is(err, ports.ErrNotFound); got != tt.wantNotFound {
+				t.Fatalf("errors.Is(err, ErrNotFound) = %v, want %v for %v", got, tt.wantNotFound, err)
+			}
+		})
+	}
+}
+
 func TestKubernetesRESTClientSupportsKubeVirtVirtualMachine(t *testing.T) {
 	var paths []string
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -490,6 +602,156 @@ func TestKubernetesRESTClientSupportsKubeVirtVirtualMachine(t *testing.T) {
 	}
 	if len(paths) != 1 || !strings.Contains(paths[0], "/apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines") {
 		t.Fatalf("paths = %#v, want KubeVirt VirtualMachine collection", paths)
+	}
+}
+
+func TestKubernetesRESTClientObservesKubeVirtVMIForPhaseAndNode(t *testing.T) {
+	var paths []string
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		paths = append(paths, r.URL.Path)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/virtualmachines/vm-01"):
+			return jsonResponse(http.StatusOK, `{"kind":"VirtualMachine","status":{"printableStatus":"Running"}}`), nil
+		case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances/vm-01"):
+			return jsonResponse(http.StatusOK, `{"kind":"VirtualMachineInstance","status":{"phase":"Running","nodeName":"node-a","interfaces":[{"name":"eth0","ipAddress":"10.20.0.5","primary":true},{"name":"eth1","ip":"10.20.0.6"}]}}`), nil
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	client := newTestKubernetesRESTClient(t, transport)
+	observation, err := client.Observe(context.Background(), ports.WorkloadProviderStatusRequest{
+		TenantID:   "tenant-a",
+		InstanceID: "instance-a",
+		Kind:       ports.WorkloadKindVM,
+		ApplyResult: ports.WorkloadProviderApplyResult{
+			Applied:      true,
+			Provider:     "kubevirt",
+			ResourceRefs: []string{"kubevirt/VirtualMachine/vm-01"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Observe() error = %v", err)
+	}
+	if observation.Phase != "Running" || observation.NodeName != "node-a" {
+		t.Fatalf("observation = %#v, want VMI phase/node", observation)
+	}
+	if len(observation.Networks) != 2 || observation.Networks[0].IPAddress != "10.20.0.5" || !observation.Networks[0].Primary || observation.Networks[1].IPAddress != "10.20.0.6" {
+		t.Fatalf("observation.Networks = %#v, want interfaces parsed into networks", observation.Networks)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("paths = %#v, want VirtualMachine and VMI reads", paths)
+	}
+}
+
+func TestKubernetesRESTClientKubeVirtVMIPhaseIsAuthoritative(t *testing.T) {
+	tests := []struct {
+		name              string
+		vmPrintableStatus string
+		vmiStatus         int
+		vmiPhase          string
+		vmiReason         string
+		wantPhase         string
+		wantReason        string
+	}{
+		{
+			name:              "vm running vmi pending",
+			vmPrintableStatus: "Running",
+			vmiStatus:         http.StatusOK,
+			vmiPhase:          "Pending",
+			wantPhase:         "Pending",
+		},
+		{
+			name:              "vm running vmi running",
+			vmPrintableStatus: "Running",
+			vmiStatus:         http.StatusOK,
+			vmiPhase:          "Running",
+			wantPhase:         "Running",
+		},
+		{
+			name:              "vm running vmi failed",
+			vmPrintableStatus: "Running",
+			vmiStatus:         http.StatusOK,
+			vmiPhase:          "Failed",
+			vmiReason:         "GuestPanic",
+			wantPhase:         "Failed",
+			wantReason:        "GuestPanic",
+		},
+		{
+			name:              "vm stopped vmi missing",
+			vmPrintableStatus: "Stopped",
+			vmiStatus:         http.StatusNotFound,
+			wantPhase:         "Stopped",
+		},
+		{
+			name:              "vm halted vmi missing",
+			vmPrintableStatus: "Halted",
+			vmiStatus:         http.StatusNotFound,
+			wantPhase:         "Stopped",
+		},
+		{
+			name:              "vm running vmi missing",
+			vmPrintableStatus: "Running",
+			vmiStatus:         http.StatusNotFound,
+			wantPhase:         "Pending",
+			wantReason:        "VirtualMachineInstance not found while VirtualMachine status is Running",
+		},
+		{
+			name:              "vm starting vmi missing",
+			vmPrintableStatus: "Starting",
+			vmiStatus:         http.StatusNotFound,
+			wantPhase:         "Pending",
+			wantReason:        "VirtualMachineInstance not found while VirtualMachine status is Starting",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/virtualmachines/vm-01"):
+					return jsonResponse(http.StatusOK, `{"kind":"VirtualMachine","status":{"printableStatus":"`+tt.vmPrintableStatus+`"}}`), nil
+				case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances/vm-01"):
+					if tt.vmiStatus == http.StatusNotFound {
+						return jsonResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+					}
+					return jsonResponse(http.StatusOK, `{"kind":"VirtualMachineInstance","status":{"phase":"`+tt.vmiPhase+`","reason":"`+tt.vmiReason+`","nodeName":"node-a","interfaces":[{"name":"eth0","ipAddress":"10.20.0.5","primary":true}]}}`), nil
+				default:
+					t.Fatalf("unexpected path %q", r.URL.Path)
+					return nil, nil
+				}
+			})
+
+			client := newTestKubernetesRESTClient(t, transport)
+			observation, err := client.Observe(context.Background(), ports.WorkloadProviderStatusRequest{
+				TenantID:   "tenant-a",
+				InstanceID: "instance-a",
+				Kind:       ports.WorkloadKindVM,
+				ApplyResult: ports.WorkloadProviderApplyResult{
+					Applied:      true,
+					Provider:     "kubevirt",
+					ResourceRefs: []string{"kubevirt/VirtualMachine/vm-01"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("Observe() error = %v", err)
+			}
+			if observation.Phase != tt.wantPhase {
+				t.Fatalf("observation.Phase = %q, want %q", observation.Phase, tt.wantPhase)
+			}
+			if observation.Reason != tt.wantReason {
+				t.Fatalf("observation.Reason = %q, want %q", observation.Reason, tt.wantReason)
+			}
+			if tt.vmiStatus == http.StatusOK {
+				if observation.NodeName != "node-a" {
+					t.Fatalf("observation.NodeName = %q, want node-a", observation.NodeName)
+				}
+				if len(observation.Networks) != 1 || observation.Networks[0].IPAddress != "10.20.0.5" {
+					t.Fatalf("observation.Networks = %#v, want VMI private IP", observation.Networks)
+				}
+			}
+		})
 	}
 }
 

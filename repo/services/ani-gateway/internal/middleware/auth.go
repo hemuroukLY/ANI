@@ -2,113 +2,177 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/google/uuid"
+	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
+	"github.com/kubercloud/ani/pkg/security/sandboxtoken"
 	"github.com/kubercloud/ani/pkg/types"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/authz"
 )
 
-// Auth validates JWT Bearer tokens or API Keys.
-// On success it sets "tenant_id", "user_id", "roles", and "scope" in the request context.
-// This is fail-closed by default. Local development may set ANI_AUTH_MODE=dev
-// and pass X-Dev-Tenant-ID to exercise routes before auth-service exists.
-func Auth() app.HandlerFunc {
-	return AuthWithClient(NewAuthClientFromEnv())
+// legacyViewFromContext 从旧 TenantContext 构造 legacy view；
+// 严格规范化失败时降级为未规范化 view（identity key 仍按 scheme 规则校验）。
+func legacyViewFromContext(tc *commonv1.TenantContext, scheme authz.CredentialScheme, claims *sandboxtoken.Claims) authz.LegacyPrincipalView {
+	view, err := authz.LegacyViewFromTenantContext(tc, scheme)
+	if err != nil {
+		view = authz.LegacyPrincipalView{
+			CredentialScheme: scheme,
+			TenantID:         strings.TrimSpace(tc.GetTenantId()),
+			SubjectID:        tc.GetUserId(),
+			Scope:            tc.GetScope(),
+			Roles:            append([]string(nil), tc.GetRoles()...),
+		}
+	}
+	if claims != nil {
+		view.SandboxClaims = &authz.SandboxClaims{TenantID: claims.TenantID, InstanceID: claims.InstanceID}
+	}
+	return view
 }
 
-func AuthWithClient(authClient AuthClient) app.HandlerFunc {
-	return func(ctx context.Context, c *app.RequestContext) {
-		if isPublicPath(string(c.Path())) {
-			c.Next(ctx)
-			return
-		}
-
-		if os.Getenv("ANI_AUTH_MODE") == "dev" {
-			tenantID := string(c.GetHeader("X-Dev-Tenant-ID"))
-			if tenantID == "" {
-				tenantID = "00000000-0000-0000-0000-000000000001"
-			}
-			userID := string(c.GetHeader("X-Dev-User-ID"))
-			if userID == "" {
-				userID = "00000000-0000-0000-0000-000000000001"
-			}
-			setTenantContext(c, tenantID, userID, []string{"tenant-admin"}, "tenant")
-			// Inject TenantContext into Go context.Context so RLS-aware stores
-			// (MetadataInstanceStore via WithTenantTx -> SetDBTenant -> FromContext)
-			// do not panic when a real DB provider is wired.
-			ctx = withTenantContext(ctx, tenantID, userID, []string{"tenant-admin"})
-			c.Next(ctx)
-			return
-		}
-
-		// 1. Try Bearer token
-		authHeader := string(c.GetHeader("Authorization"))
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			token := strings.TrimPrefix(authHeader, "Bearer ")
-			if authClient == nil {
-				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "auth service unavailable")
-				return
-			}
-			tenantCtx, err := authClient.ValidateToken(ctx, token)
-			if err != nil {
-				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired token")
-				return
-			}
-			scope := tenantCtx.GetScope()
-			if scope == "" {
-				scope = "tenant"
-			}
-			if !scopeAllowedForPath(string(c.Path()), scope) {
-				respondError(c, http.StatusForbidden, "FORBIDDEN", "token scope not allowed for this path")
-				return
-			}
-			setTenantContext(c, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles(), scope)
-			ctx, err = withTenantContextStrict(ctx, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles())
-			if err != nil {
-				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
-				return
-			}
-			c.Next(ctx)
-			return
-		}
-
-		// 2. Try API Key
-		apiKey := string(c.GetHeader("X-API-Key"))
-		if apiKey != "" {
-			if authClient == nil {
-				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "auth service unavailable")
-				return
-			}
-			tenantCtx, err := authClient.ValidateToken(ctx, apiKey)
-			if err != nil {
-				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid api key")
-				return
-			}
-			scope := tenantCtx.GetScope()
-			if scope == "" {
-				scope = "tenant"
-			}
-			// API keys are tenant-scoped only; they cannot access platform endpoints.
-			if !scopeAllowedForPath(string(c.Path()), scope) {
-				respondError(c, http.StatusForbidden, "FORBIDDEN", "token scope not allowed for this path")
-				return
-			}
-			setTenantContext(c, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles(), scope)
-			ctx, err = withTenantContextStrict(ctx, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles())
-			if err != nil {
-				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
-				return
-			}
-			c.Next(ctx)
-			return
-		}
-
-		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+// authenticateLegacy 是从 AuthWithClient 提取的旧认证逻辑，行为不变；
+// 各认证成功分支额外写入 LegacyPrincipalView 供横切 identity key 使用。
+func authenticateLegacy(ctx context.Context, c *app.RequestContext, authClient AuthClient) {
+	if isPublicPath(string(c.Path())) {
+		c.Next(ctx)
+		return
 	}
+
+	if os.Getenv("ANI_AUTH_MODE") == "dev" {
+		tenantID := string(c.GetHeader("X-Dev-Tenant-ID"))
+		if tenantID == "" {
+			tenantID = "00000000-0000-0000-0000-000000000001"
+		}
+		userID := string(c.GetHeader("X-Dev-User-ID"))
+		if userID == "" {
+			userID = "00000000-0000-0000-0000-000000000001"
+		}
+		setTenantContext(c, tenantID, userID, []string{"tenant-admin"}, "tenant")
+		setPrincipalContext(c, string(c.GetHeader("X-Dev-Principal-Kind")), string(c.GetHeader("X-Dev-Service-Scope")))
+		SetLegacyPrincipalView(c, authz.LegacyPrincipalView{
+			CredentialScheme: authz.CredentialBearer,
+			TenantID:         tenantID,
+			SubjectID:        userID,
+			Scope:            "tenant",
+			Roles:            []string{"tenant-admin"},
+		})
+		// Inject TenantContext into Go context.Context so RLS-aware stores
+		// (MetadataInstanceStore via WithTenantTx -> SetDBTenant -> FromContext)
+		// do not panic when a real DB provider is wired.
+		ctx = withTenantContext(ctx, tenantID, userID, []string{"tenant-admin"})
+		c.Next(ctx)
+		return
+	}
+
+	// 1. Try Bearer token
+	authHeader := string(c.GetHeader("Authorization"))
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+
+		// Sandbox short-lived tokens are verified locally (HMAC), not via auth-service.
+		if sandboxtoken.LooksLike(token) {
+			claims, err := sandboxtoken.Parse(token, sandboxtoken.SigningKey(), time.Now().UTC())
+			if err != nil {
+				if errors.Is(err, sandboxtoken.ErrExpiredToken) {
+					respond401(c, "sandbox token expired")
+					return
+				}
+				respond401(c, "invalid sandbox token")
+				return
+			}
+			if !scopeAllowedForPath(string(c.Path()), sandboxtoken.ScopeSandbox) {
+				respond403(c, "sandbox token not allowed for this path")
+				return
+			}
+			setTenantContext(c, claims.TenantID, sandboxtoken.SandboxActorUID, []string{"sandbox-token"}, sandboxtoken.ScopeSandbox)
+			setSandboxContext(c, claims)
+			SetLegacyPrincipalView(c, legacyViewFromContext(&commonv1.TenantContext{
+				TenantId: claims.TenantID,
+				UserId:   sandboxtoken.SandboxActorUID,
+				Roles:    []string{"sandbox-token"},
+				Scope:    sandboxtoken.ScopeSandbox,
+			}, authz.CredentialSandboxToken, &claims))
+			ctx, err = withTenantContextStrict(ctx, claims.TenantID, sandboxtoken.SandboxActorUID, []string{"sandbox-token"})
+			if err != nil {
+				respond401(c, err.Error())
+				return
+			}
+			c.Next(ctx)
+			return
+		}
+
+		if authClient == nil {
+			respond401(c, "auth service unavailable")
+			return
+		}
+		tenantCtx, err := authClient.ValidateToken(ctx, token)
+		if err != nil {
+			respond401(c, "invalid or expired token")
+			return
+		}
+		scope := tenantCtx.GetScope()
+		if scope == "" {
+			scope = "tenant"
+		}
+		if !scopeAllowedForPath(string(c.Path()), scope) {
+			respond403(c, "token scope not allowed for this path")
+			return
+		}
+		setTenantContext(c, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles(), scope)
+		if isPlatformWorkloadScope(scope) {
+			setPrincipalContext(c, "service", scope)
+		} else {
+			setPrincipalContext(c, "user", "")
+		}
+		SetLegacyPrincipalView(c, legacyViewFromContext(tenantCtx, authz.CredentialBearer, nil))
+		ctx, err = withTenantContextStrict(ctx, tenantCtx.GetTenantId(), serviceActorOrUserID(tenantCtx.GetUserId(), scope), tenantCtx.GetRoles())
+		if err != nil {
+			respond401(c, err.Error())
+			return
+		}
+		c.Next(ctx)
+		return
+	}
+
+	// 2. Try API Key
+	apiKey := string(c.GetHeader("X-API-Key"))
+	if apiKey != "" {
+		if authClient == nil {
+			respond401(c, "auth service unavailable")
+			return
+		}
+		tenantCtx, err := authClient.ValidateToken(ctx, apiKey)
+		if err != nil {
+			respond401(c, "invalid api key")
+			return
+		}
+		scope := tenantCtx.GetScope()
+		if scope == "" {
+			scope = "tenant"
+		}
+		// API keys are tenant-scoped only; they cannot access platform endpoints.
+		if !scopeAllowedForPath(string(c.Path()), scope) {
+			respond403(c, "token scope not allowed for this path")
+			return
+		}
+		setTenantContext(c, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles(), scope)
+		setPrincipalContext(c, "api_key", "")
+		SetLegacyPrincipalView(c, legacyViewFromContext(tenantCtx, authz.CredentialAPIKey, nil))
+		ctx, err = withTenantContextStrict(ctx, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles())
+		if err != nil {
+			respond401(c, err.Error())
+			return
+		}
+		c.Next(ctx)
+		return
+	}
+
+	respond401(c, "authentication required")
 }
 
 func setTenantContext(c *app.RequestContext, tenantID, userID string, roles []string, scope string) {
@@ -116,6 +180,27 @@ func setTenantContext(c *app.RequestContext, tenantID, userID string, roles []st
 	c.Set("user_id", userID)
 	c.Set("roles", roles)
 	c.Set("scope", scope)
+}
+
+func setPrincipalContext(c *app.RequestContext, principalKind, serviceScope string) {
+	kind := strings.TrimSpace(principalKind)
+	if kind == "" {
+		kind = "user"
+	}
+	c.Set("principal_kind", kind)
+	c.Set("service_scope", strings.TrimSpace(serviceScope))
+}
+
+func GetPrincipalKind(c *app.RequestContext) string {
+	kind := strings.TrimSpace(c.GetString("principal_kind"))
+	if kind == "" {
+		return "user"
+	}
+	return kind
+}
+
+func GetServiceScope(c *app.RequestContext) string {
+	return strings.TrimSpace(c.GetString("service_scope"))
 }
 
 // GetScope returns the token scope set by Auth middleware. Empty when unset.
@@ -167,6 +252,9 @@ func withTenantContextStrict(ctx context.Context, tenantID, userID string, roles
 }
 
 func isPublicPath(path string) bool {
+	if IsKaiwuProxyPath(path) {
+		return true
+	}
 	switch path {
 	case "/health", "/ready", "/healthz", "/readyz",
 		"/api/v1/branding",
@@ -181,12 +269,110 @@ func isPublicPath(path string) bool {
 	}
 }
 
+// IsKaiwuProxyPath 判断路径是否属于开物浏览器代理入口。这里 public 仅表示
+// 跳过全局 Bearer/RBAC/幂等中间件；代理处理函数仍强制校验签名 Cookie。
+func IsKaiwuProxyPath(path string) bool {
+	return path == "/kaiwu/console" || strings.HasPrefix(path, "/kaiwu/console/") ||
+		path == "/kaiwu/boss" || strings.HasPrefix(path, "/kaiwu/boss/")
+}
+
 // scopeAllowedForPath 平台 token 与租户 token 路由白名单隔离
-// - 平台路由前缀 /auth/platform/* 仅 scope=platform 可访问
+// - 平台/管理路由前缀 /auth/platform/*、/platform/*、/admin/* 仅 scope=platform 可访问
+// - sandbox token 仅可访问 /api/v1/instances/{id}/sandbox/* 子资源
+// - /api/v1/svc/* Services 层路由允许 platform 和 tenant scope（角色级 RBAC 由 rbac.go 校验）
+// - /api/v1/gpu-specs*、/api/v1/gpu-inventory* 集群级资源目录允许 platform 和 tenant scope（角色级 RBAC 由 rbac.go 校验）
+// - GET /api/v1/quotas（跨租户配额总览，绕过 RLS）仅 scope=platform；租户自查走 /quotas/me
 // - 其他路由仅 scope=tenant 可访问（API key 默认 tenant scope）
 func scopeAllowedForPath(path, scope string) bool {
-	if strings.HasPrefix(path, "/api/v1/auth/platform/") {
+	if scope == sandboxtoken.ScopeSandbox {
+		return isSandboxSubresourcePath(path)
+	}
+	if isPlatformWorkloadPath(path) {
+		return isPlatformWorkloadScope(scope)
+	}
+	// 平台/管理路由前缀：/auth/platform/*、/platform/*、/admin/*（含 /admin/tenants/*、/admin/quota-meta）
+	if strings.HasPrefix(path, "/api/v1/auth/platform/") ||
+		strings.HasPrefix(path, "/api/v1/platform/") ||
+		strings.HasPrefix(path, "/api/v1/admin/") {
+		return scope == "platform"
+	}
+	// Services 层路由：platform（BOSS 管理端）和 tenant 均可访问，
+	// 具体角色准入（platform-admin/ops/readonly vs tenant-admin）由 rbac.go CheckPermission 校验。
+	if strings.HasPrefix(path, "/api/v1/svc/") {
+		return scope == "platform" || scope == "tenant"
+	}
+	// POST /api/v1/gpu-inventory/gpu-partitions 是 BOSS 专属集群切分操作：
+	// 直接改写 kube-system 设备插件配置与节点标签，影响所有租户的 GPU 池，
+	// 仅 platform scope 可访问。必须放在下方 gpu-inventory 前缀规则之前，
+	// 用精确匹配防止前缀规则把 tenant 放行。
+	if path == "/api/v1/gpu-inventory/gpu-partitions" {
+		return scope == "platform"
+	}
+	// GPU 设备台账操作（BOSS GPU 池管理专属）：状态翻转、事件流。
+	// 台账数据来自平台级 PG（WithPlatformTx RLS bypass），且携带跨租户信息
+	// （全池维护/不可用计数），仅 platform scope 可访问。
+	// 必须放在下方 gpu-inventory 前缀规则之前。{device_id} 按段结构 + UUID
+	// 形态识别，避免误伤 /gpu-inventory/occupancy 等静态双域路径。
+	if path == "/api/v1/gpu-inventory/events" ||
+		isGPUDeviceSurfaceDevicePath(path) {
+		return scope == "platform"
+	}
+	// 集群级 GPU 资源目录（规格目录与设备清单）：GPU spec 是集群级 CRD、
+	// 设备清单是集群级视图，platform（BOSS 管理端）和 tenant 均可访问，
+	// 写操作（POST/DELETE /gpu-specs）角色准入由 rbac.go CheckPermission 校验。
+	// gpu-scheduling/queues handler 自身按 tenant label 过滤（平台默认队列全员可见 +
+	// 本租户队列），platform token 只见平台默认队列，无跨租户泄露。
+	if strings.HasPrefix(path, "/api/v1/gpu-specs") ||
+		strings.HasPrefix(path, "/api/v1/gpu-inventory") ||
+		strings.HasPrefix(path, "/api/v1/gpu-scheduling") {
+		return scope == "platform" || scope == "tenant"
+	}
+	// 异步任务查询（GET /tasks、/tasks/{task_id}）：handler 按 token 上下文
+	// tenant_id 过滤（platform principal 只能读到本 principal 租户名下的任务，
+	// 不走 RLS-bypass、无跨租户泄露）。BOSS 提交 gpu_partition 等集群级异步
+	// 操作后需要用 platform token 轮询任务结果，因此双域放行。
+	if path == "/api/v1/tasks" || strings.HasPrefix(path, "/api/v1/tasks/") {
+		return scope == "platform" || scope == "tenant"
+	}
+	// GET /api/v1/quotas 是 BOSS 平台级跨租户配额总览：handler 不注入租户过滤，
+	// store 走 WithPlatformTx 绕过 RLS 返回全部租户行。因此仅 platform scope 可访问；
+	// 租户自查配额必须走 /quotas/me（受 RLS 约束），否则任意租户可跨租户读取全平台配额。
+	// 用精确匹配，避免误伤 /quotas/me（仍走末尾 tenant 默认）。
+	if path == "/api/v1/quotas" {
 		return scope == "platform"
 	}
 	return scope == "tenant"
+}
+
+// isGPUDeviceSurfaceDevicePath 识别 GPU 设备台账的设备级路径：
+// /api/v1/gpu-inventory/{device_id}（PATCH 翻转）。
+// device_id 是 UUID（节点 × 卡 index × 型号派生），静态子路径
+// （/occupancy、/gpu-partitions 等）不会命中 UUID 解析。
+func isGPUDeviceSurfaceDevicePath(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 4 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "gpu-inventory" {
+		return false
+	}
+	_, err := uuid.Parse(parts[3])
+	return err == nil
+}
+
+func isPlatformWorkloadPath(path string) bool {
+	return path == "/api/v1/platform-workload-capabilities" ||
+		strings.HasPrefix(path, "/api/v1/platform-workloads")
+}
+
+func isPlatformWorkloadScope(scope string) bool {
+	return strings.Contains(scope, "scope:platform-workloads:read") ||
+		strings.Contains(scope, "scope:platform-workloads:write")
+}
+
+func serviceActorOrUserID(userID, scope string) string {
+	if strings.TrimSpace(userID) != "" {
+		return userID
+	}
+	if isPlatformWorkloadScope(scope) {
+		return "00000000-0000-0000-0000-0000000000aa"
+	}
+	return userID
 }

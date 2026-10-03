@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -77,7 +79,7 @@ func (r *PlanningRuntime) Create(ctx context.Context, spec ports.WorkloadSpec) (
 	sequence := r.sequence.Add(1)
 	ref := ports.WorkloadRef{
 		TenantID:   spec.TenantID,
-		InstanceID: "inst_" + strconv.FormatUint(sequence, 10),
+		InstanceID: "inst_" + uuid.NewString(),
 		Kind:       spec.Kind,
 		ProviderID: providerID(spec, sequence),
 	}
@@ -191,7 +193,7 @@ func (r *PlanningRuntime) plan(ctx context.Context, spec ports.WorkloadSpec) (po
 		}
 	}
 
-	if requiresGPU(spec.Kind) {
+	if requiresGPU(spec.Kind, spec.Resources) {
 		if spec.Resources.GPU.RequiredCount <= 0 {
 			return ports.WorkloadSpec{}, fmt.Errorf("%w: gpu requiredCount must be positive", ports.ErrInvalid)
 		}
@@ -212,6 +214,26 @@ func (r *PlanningRuntime) plan(ctx context.Context, spec ports.WorkloadSpec) (po
 		planned.Annotations["ani.kubercloud.io/gpu-queue"] = decision.QueueName
 		if decision.SelectedNodeModel != "" {
 			planned.Annotations["ani.kubercloud.io/gpu-selected-model"] = decision.SelectedNodeModel
+		}
+		// Apply the Volcano queue annotation so the renderer can place it
+		// on the PodTemplate metadata (not the top-level object metadata).
+		if decision.QueueName != "" && planned.Annotations["scheduling.volcano.sh/queue-name"] == "" {
+			planned.Annotations["scheduling.volcano.sh/queue-name"] = decision.QueueName
+		}
+		// When using a Volcano spec_id (GPUSpec != nil), the translator already
+		// injected the correct nodeSelector (gpu-mode, gpu-sharing-spec, etc.).
+		// Do not override it with a hostname-pinned selector — let Volcano
+		// choose the node.
+		if spec.GPUSpec == nil && len(decision.NodeSelector) > 0 {
+			merged := map[string]string{}
+			if raw, ok := planned.Annotations[volcanoNodeSelectorAnnotation]; ok && strings.TrimSpace(raw) != "" {
+				_ = json.Unmarshal([]byte(raw), &merged)
+			}
+			for k, v := range decision.NodeSelector {
+				merged[k] = v
+			}
+			data, _ := json.Marshal(merged)
+			planned.Annotations[volcanoNodeSelectorAnnotation] = string(data)
 		}
 		if planned.Resources.GPU.Pool == "" {
 			planned.Resources.GPU.Pool = decision.QueueName
@@ -236,8 +258,11 @@ func supportedKind(kind ports.WorkloadKind) bool {
 	}
 }
 
-func requiresGPU(kind ports.WorkloadKind) bool {
-	return kind == ports.WorkloadKindGPUContainer || kind == ports.WorkloadKindInference
+func requiresGPU(kind ports.WorkloadKind, resources ports.WorkloadResourceRequest) bool {
+	if resources.GPU.RequiredCount > 0 {
+		return true
+	}
+	return kind == ports.WorkloadKindGPUContainer
 }
 
 func normalizeNetworkAttachments(kind ports.WorkloadKind, attachments []ports.WorkloadNetworkAttachment) []ports.WorkloadNetworkAttachment {
@@ -304,12 +329,40 @@ func validateNetworkAttachments(attachments []ports.WorkloadNetworkAttachment) e
 }
 
 func normalizeStorageAttachments(spec ports.WorkloadSpec) []ports.WorkloadStorageAttachment {
+	var storage []ports.WorkloadStorageAttachment
 	if len(spec.Storage) > 0 {
-		return spec.Storage
+		storage = append(storage, spec.Storage...)
 	}
 	if spec.VM != nil {
-		storage := []ports.WorkloadStorageAttachment{spec.VM.RootDisk}
-		storage = append(storage, spec.VM.DataDisks...)
+		if len(storage) == 0 {
+			storage = append(storage, spec.VM.RootDisk)
+			storage = append(storage, spec.VM.DataDisks...)
+		}
+		seen := make(map[string]struct{}, len(storage))
+		for _, attachment := range storage {
+			seen[storageAttachmentKey(attachment)] = struct{}{}
+		}
+		for index, disk := range spec.VM.DataDiskSpecs {
+			attachment := ports.WorkloadStorageAttachment{
+				Name:               firstNonEmpty(disk.Name, "data-"+strconv.Itoa(index+1)),
+				Kind:               ports.StorageAttachmentDataDisk,
+				ResourceID:         disk.VolumeID,
+				SizeGiB:            disk.SizeGiB,
+				StorageClass:       disk.StorageClass,
+				Required:           true,
+				Encrypted:          disk.Encrypted,
+				DeleteOnFailure:    disk.DeleteOnFailure,
+				DeleteWithInstance: disk.DeleteWithInstance,
+			}
+			if _, exists := seen[storageAttachmentKey(attachment)]; exists {
+				continue
+			}
+			storage = append(storage, attachment)
+			seen[storageAttachmentKey(attachment)] = struct{}{}
+		}
+		return storage
+	}
+	if len(storage) > 0 {
 		return storage
 	}
 	if spec.Container != nil && len(spec.Container.Volumes) > 0 {
@@ -326,6 +379,10 @@ func normalizeStorageAttachments(spec ports.WorkloadSpec) []ports.WorkloadStorag
 		}}
 	}
 	return nil
+}
+
+func storageAttachmentKey(attachment ports.WorkloadStorageAttachment) string {
+	return firstNonEmpty(attachment.ResourceID, attachment.SourceRef, attachment.Name)
 }
 
 func validateStorageAttachments(kind ports.WorkloadKind, attachments []ports.WorkloadStorageAttachment) error {
@@ -371,6 +428,9 @@ func transition(state ports.WorkloadState, action ports.WorkloadLifecycleAction)
 		if state == ports.WorkloadStateDeleted || state == ports.WorkloadStateDeleting {
 			return "", fmt.Errorf("%w: cannot resize deleted instance", ports.ErrConflict)
 		}
+		if state != ports.WorkloadStateStopped {
+			return "", fmt.Errorf("%w: resize requires a stopped instance, stop first", ports.ErrConflict)
+		}
 		return state, nil
 	case ports.WorkloadLifecycleRebuild:
 		if state == ports.WorkloadStateDeleted || state == ports.WorkloadStateDeleting {
@@ -379,11 +439,33 @@ func transition(state ports.WorkloadState, action ports.WorkloadLifecycleAction)
 		return ports.WorkloadStateProvisioning, nil
 	case ports.WorkloadLifecycleDelete:
 		return ports.WorkloadStateDeleted, nil
-	case ports.WorkloadLifecycleSnapshot, ports.WorkloadLifecycleAttachVolume, ports.WorkloadLifecycleDetachVolume:
+	case ports.WorkloadLifecycleSnapshot,
+		ports.WorkloadLifecycleAttachVolume,
+		ports.WorkloadLifecycleDetachVolume,
+		ports.WorkloadLifecycleAttachFilesystem,
+		ports.WorkloadLifecycleDetachFilesystem,
+		ports.WorkloadLifecycleScale,
+		ports.WorkloadLifecycleUpdateImage,
+		ports.WorkloadLifecycleBindSecret,
+		ports.WorkloadLifecycleUnbindSecret,
+		ports.WorkloadLifecycleChangeSecurityGroups,
+		ports.WorkloadLifecycleSetTerminationProtection,
+		ports.WorkloadLifecycleExtend,
+		ports.WorkloadLifecycleTouchIdle:
 		if state == ports.WorkloadStateDeleted || state == ports.WorkloadStateDeleting {
 			return "", fmt.Errorf("%w: cannot %s deleted instance", ports.ErrConflict, action)
 		}
 		return state, nil
+	case ports.WorkloadLifecyclePause:
+		if state != ports.WorkloadStateRunning {
+			return "", fmt.Errorf("%w: pause requires running instance", ports.ErrConflict)
+		}
+		return ports.WorkloadStateStopped, nil
+	case ports.WorkloadLifecycleResume:
+		if state != ports.WorkloadStateStopped {
+			return "", fmt.Errorf("%w: resume requires stopped instance", ports.ErrConflict)
+		}
+		return ports.WorkloadStateRunning, nil
 	case ports.WorkloadLifecycleRollback:
 		if state == ports.WorkloadStateDeleted || state == ports.WorkloadStateDeleting {
 			return "", fmt.Errorf("%w: cannot rollback deleted instance", ports.ErrConflict)

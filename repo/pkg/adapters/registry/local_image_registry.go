@@ -138,6 +138,7 @@ func (r *LocalImageRegistry) ListArtifacts(_ context.Context, request ports.Regi
 	artifact := ports.RegistryArtifact{
 		Project:    strings.TrimSpace(request.Project),
 		Repository: strings.TrimSpace(request.Repository),
+		Purpose:    registryImagePurpose(request.Repository, "latest"),
 		Digest:     "sha256:local-runtime",
 		Tags:       []string{"latest"},
 		MediaType:  "application/vnd.oci.image.manifest.v1+json",
@@ -313,8 +314,12 @@ func (r *LocalImageRegistry) ListImages(ctx context.Context, request ports.Regis
 	requestedRepository := strings.TrimSpace(request.Repository)
 	requestedTag := strings.TrimSpace(request.Tag)
 	requestedPurpose := strings.TrimSpace(request.Purpose)
+	keyword := strings.ToLower(strings.TrimSpace(request.Keyword))
 	items := make([]ports.RegistryImage, 0, len(localRegistryImageSeeds))
 	for _, seed := range localRegistryImageSeeds {
+		if keyword != "" && !registryMatchesImageKeyword(seed.repository, seed.tag, keyword) {
+			continue
+		}
 		if requestedRepository != "" && requestedRepository != seed.repository {
 			continue
 		}

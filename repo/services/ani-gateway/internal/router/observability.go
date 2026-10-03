@@ -96,6 +96,7 @@ func registerObservability(v1 *route.RouterGroup, service ports.ObservabilitySer
 	api := newObservabilityAPI(service)
 	v1.GET("/observability/query", api.query)
 	v1.GET("/observability/query_range", api.queryRange)
+	v1.GET("/observability/resource_trend", api.resourceTrend)
 	v1.GET("/observability/alert-rules", api.listAlertRules)
 	v1.POST("/observability/alert-rules", api.createAlertRule)
 	v1.GET("/observability/alert-rules/:rule_id", api.getAlertRule)
@@ -105,7 +106,7 @@ func registerObservability(v1 *route.RouterGroup, service ports.ObservabilitySer
 
 func (api *observabilityAPI) query(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.Query(ctx, ports.ObservabilityQueryRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		Query:    c.Query("query"),
 	})
 	if err != nil {
@@ -121,27 +122,74 @@ func (api *observabilityAPI) queryRange(ctx context.Context, c *app.RequestConte
 	endStr := strings.TrimSpace(c.Query("end"))
 	stepStr := strings.TrimSpace(c.Query("step"))
 	if startStr == "" || endStr == "" || stepStr == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "start, end and step are required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "start, end and step are required")
 		return
 	}
 	start, err := time.Parse(time.RFC3339, startStr)
 	if err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "start must be RFC3339 timestamp")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "start must be RFC3339 timestamp")
 		return
 	}
 	end, err := time.Parse(time.RFC3339, endStr)
 	if err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "end must be RFC3339 timestamp")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "end must be RFC3339 timestamp")
 		return
 	}
 	step, err := time.ParseDuration(stepStr)
 	if err != nil || step <= 0 {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "step must be a positive Go duration string")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "step must be a positive Go duration string")
 		return
 	}
 	result, err := api.service.QueryRange(ctx, ports.ObservabilityRangeQueryRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		Query:    c.Query("query"),
+		Start:    start,
+		End:      end,
+		Step:     step,
+	})
+	if err != nil {
+		writeObservabilityError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, observabilityRangeQueryFromResult(result))
+}
+
+// resourceTrend 处理 GET /observability/resource_trend，返回当前租户级资源使用率趋势。
+// tenant_id 从 JWT 提取并交由 QueryResourceTrend 强制锚定 namespace="ani-tenant-<id>"，
+// 不接收/不暴露 query PromQL，天然租户隔离。
+func (api *observabilityAPI) resourceTrend(ctx context.Context, c *app.RequestContext) {
+	metric := ports.ObservabilityResourceTrendMetric(strings.TrimSpace(c.Query("metric")))
+	if metric != ports.ObservabilityResourceTrendGPU &&
+		metric != ports.ObservabilityResourceTrendCPU &&
+		metric != ports.ObservabilityResourceTrendMemory {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "metric must be one of gpu, cpu, memory")
+		return
+	}
+	startStr := strings.TrimSpace(c.Query("start"))
+	endStr := strings.TrimSpace(c.Query("end"))
+	stepStr := strings.TrimSpace(c.Query("step"))
+	if startStr == "" || endStr == "" || stepStr == "" {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "start, end and step are required")
+		return
+	}
+	start, err := time.Parse(time.RFC3339, startStr)
+	if err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "start must be RFC3339 timestamp")
+		return
+	}
+	end, err := time.Parse(time.RFC3339, endStr)
+	if err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "end must be RFC3339 timestamp")
+		return
+	}
+	step, err := time.ParseDuration(stepStr)
+	if err != nil || step <= 0 {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "step must be a positive Go duration string")
+		return
+	}
+	result, err := api.service.QueryResourceTrend(ctx, ports.ObservabilityResourceTrendRequest{
+		TenantID: instanceTenantID(c),
+		Metric:   metric,
 		Start:    start,
 		End:      end,
 		Step:     step,
@@ -156,16 +204,16 @@ func (api *observabilityAPI) queryRange(ctx context.Context, c *app.RequestConte
 func (api *observabilityAPI) createAlertRule(ctx context.Context, c *app.RequestContext) {
 	var req createObservabilityAlertRuleRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid alert rule request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid alert rule request")
 		return
 	}
 	duration, err := observabilityDuration(req.Duration)
 	if err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
 	record, err := api.service.CreateAlertRule(ctx, ports.ObservabilityAlertRuleCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		PromQL:         req.PromQL,
@@ -184,7 +232,7 @@ func (api *observabilityAPI) createAlertRule(ctx context.Context, c *app.Request
 
 func (api *observabilityAPI) listAlertRules(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListAlertRules(ctx, ports.ObservabilityAlertRuleListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		Limit:    queryInt(c, "limit", 20),
 		Cursor:   c.Query("cursor"),
 	})
@@ -201,7 +249,7 @@ func (api *observabilityAPI) listAlertRules(ctx context.Context, c *app.RequestC
 
 func (api *observabilityAPI) getAlertRule(ctx context.Context, c *app.RequestContext) {
 	record, err := api.service.GetAlertRule(ctx, ports.ObservabilityAlertRuleGetRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		RuleID:   c.Param("rule_id"),
 	})
 	if err != nil {
@@ -214,16 +262,16 @@ func (api *observabilityAPI) getAlertRule(ctx context.Context, c *app.RequestCon
 func (api *observabilityAPI) updateAlertRule(ctx context.Context, c *app.RequestContext) {
 	var req updateObservabilityAlertRuleRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid alert rule request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid alert rule request")
 		return
 	}
 	duration, err := observabilityDuration(req.Duration)
 	if err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
 	record, err := api.service.UpdateAlertRule(ctx, ports.ObservabilityAlertRuleUpdateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		RuleID:         c.Param("rule_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
@@ -243,7 +291,7 @@ func (api *observabilityAPI) updateAlertRule(ctx context.Context, c *app.Request
 
 func (api *observabilityAPI) deleteAlertRule(ctx context.Context, c *app.RequestContext) {
 	record, err := api.service.DeleteAlertRule(ctx, ports.ObservabilityAlertRuleGetRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		RuleID:   c.Param("rule_id"),
 	})
 	if err != nil {
@@ -338,10 +386,10 @@ func boolValue(value *bool, fallback bool) bool {
 func writeObservabilityError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrNotFound):
-		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrInvalid):
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 }

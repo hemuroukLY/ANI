@@ -56,3 +56,6 @@ testdata/*/output/
 doc/
 ppt/
 .codex
+.planning
+.scratch
+.ani-tools

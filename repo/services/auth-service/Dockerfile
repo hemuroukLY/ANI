@@ -1,12 +1,17 @@
-FROM golang:1.25.12-alpine AS build
+FROM golang:1.25.13-alpine AS build
+
+ENV GOPROXY=https://goproxy.cn,direct
 
 WORKDIR /src
-COPY go.work go.work.sum ./
+COPY runtimeadmin ./runtimeadmin
 COPY pkg ./pkg
 COPY services/auth-service ./services/auth-service
 
+ENV GOWORK=off
+
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+	go work init ./runtimeadmin ./pkg ./services/auth-service && \
     cd services/auth-service && \
     CGO_ENABLED=0 go build -tags stdjson -ldflags "-s -w" -o /out/auth-service .
 
